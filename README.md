@@ -119,11 +119,23 @@ Very light: one small SNMP request per switch every 5 s (about 1–2 KB), a ping
 per minute. A speed test uses about 10 seconds of full-speed traffic each way, so it only runs when you ask for it
 or once a day if you set `speedtest_daily`.
 
-## Privacy
+## Security
 
-Everything stays on your Zabbix server. The data files behind the page (`spidermap*.json`) can be read by anyone
-who can reach the Zabbix web server, without logging in. That's fine on a home network, but don't expose Zabbix to
-the internet. Editing and starting speed tests require a Zabbix admin login.
+- **The map needs a Zabbix login.** The topology data is kept outside the web folder (`/var/lib/spidermap/www`) and is
+  only handed out by `spidermap_api.php` to users with a valid Zabbix session. The Zabbix *guest* account is refused.
+  Checking the map never keeps an expired Zabbix session alive.
+- **Changes need a Zabbix admin**: editing devices and starting speed tests. These requests are protected against
+  cross-site request forgery (a special request header plus an Origin check).
+- **Least privilege on disk**: the data files are readable by root and the web server only; the web server can write
+  to just one folder (`/var/lib/spidermap/inbox`) for edits and speed test requests. Your Zabbix API token stays in
+  `zabbix.env` (root only) and never reaches the browser.
+- **Only Zabbix admins should see the map?** Set `"view_min_user_type": 2` in `devices.json` settings
+  (1 = any Zabbix user, 2 = admins, 3 = super admins) and run `bash install.sh --update`.
+
+**Behind a reverse proxy:** keep forwarding the original host name (for nginx: `proxy_set_header Host $host;`),
+otherwise SpiderMap refuses edits as cross-site requests. Better still, don't publish Zabbix to the internet at all
+and reach it through a VPN. If you must publish it: HTTPS only, an IP allowlist or an extra login at the proxy, and
+multi-factor authentication for Zabbix users (*Users → Authentication → MFA settings*, Zabbix 7.0+).
 
 ## Troubleshooting
 
@@ -144,6 +156,7 @@ cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by ha
 | `spidermap_zabbix.py` | Zabbix API and SNMP helpers, plus the classic Zabbix map and dashboard |
 | `install.sh` | Installer and updater |
 | `assets/` | Logo, icons and screenshots |
-   ## License
 
-   SpiderMap is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+## License
+
+SpiderMap is licensed under the [GNU Affero General Public License v3.0](LICENSE).

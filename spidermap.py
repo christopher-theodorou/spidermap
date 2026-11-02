@@ -31,6 +31,7 @@ import spidermap_ports as zp
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEVICES_FILE = os.path.join(HERE, "devices.json")
 STATE_FILE = os.path.join(HERE, "spidermap_state.json")
+DATA_DIR = "/var/lib/spidermap/www"   # topology data: NOT in the web folder, served only to logged-in Zabbix users
 PAGE, DATA, LIVE, ASSETS = "spidermap.html", "spidermap.json", "spidermap_live.json", "spidermap-assets"
 DASHBOARD_NAME = "SpiderMap"
 OLD_DASHBOARDS = ["Network topology (live)"]   # earlier versions (zabbix-netmap)
@@ -128,11 +129,30 @@ def load_json(path, default):
         return default
 
 
+def _web_gid():
+    for u in ("www-data", "nginx", "apache", "http"):
+        try:
+            import pwd
+            return pwd.getpwnam(u).pw_gid
+        except (KeyError, ImportError):
+            continue
+    return None
+
+
 def save_json(path, data):
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1, ensure_ascii=False)
-    os.chmod(tmp, 0o644)
+    if path.startswith(DATA_DIR + "/"):
+        os.chmod(tmp, 0o640)                      # root + web server group only
+        gid = _web_gid()
+        if gid is not None:
+            try:
+                os.chown(tmp, -1, gid)
+            except OSError:
+                pass
+    else:
+        os.chmod(tmp, 0o644)
     os.replace(tmp, path)
 
 
@@ -159,14 +179,24 @@ def add_events(evs):
         cut = now() - 60 * 86400
         allv = [e for e in allv if e["t"] >= cut][-3000:]
         save_json(EVENTS_FILE, allv)
-        w = webdir()
-        if w:
-            save_json(os.path.join(w, "spidermap_events.json"), allv[-400:])
+        ensure_data_dir()
+        save_json(os.path.join(DATA_DIR, "spidermap_events.json"), allv[-400:])
 
 
 def mbps_txt(bps):
     m = (bps or 0) / 1e6
     return f"{m / 1000:.2f} Gbps" if m >= 1000 else f"{m:.0f} Mbps" if m >= 10 else f"{m:.2f} Mbps"
+
+
+def ensure_data_dir():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    os.chmod(DATA_DIR, 0o750)
+    gid = _web_gid()
+    if gid is not None:
+        try:
+            os.chown(DATA_DIR, 0, gid)
+        except OSError:
+            pass
 
 
 def webdir():
@@ -722,7 +752,7 @@ def full_scan(api, community=None, quiet=False):
             del pres[mac]
     save_json(PRESENCE_FILE, pres)
     if webd:
-        save_json(os.path.join(webd, "spidermap_presence.json"),
+        save_json(os.path.join(DATA_DIR, "spidermap_presence.json"),
                   {"t": t, "devices": {m: [x for x in iv if x[1] >= t - 8 * 86400] for m, iv in pres.items()}})
 
     state["baseline"] = state.get("baseline") or t
@@ -736,8 +766,9 @@ def full_scan(api, community=None, quiet=False):
             "public_ip_history": state.get("public_ip_history", []), "scan_seconds": now() - t0, "nodes": list(nodes.values()),
             "switches": switches_out, "zabbix_url": "zabbix.php"}
     if webd:
-        save_json(os.path.join(webd, DATA), data)
         install_page(webd)
+    ensure_data_dir()
+    save_json(os.path.join(DATA_DIR, DATA), data)
     say(f"{len(nodes)} nodes, {len(online)} devices online, {len(events['new'])} new, "
         f"{len(events['changed'])} changed, {len(down)} important down")
     if not baseline:
@@ -748,8 +779,9 @@ def full_scan(api, community=None, quiet=False):
 # --------------------------------------------------------------------------- #
 # Live refresh (every minute): port status + traffic from Zabbix, ping important devices
 # --------------------------------------------------------------------------- #
-EDITS_DIR = "/var/lib/spidermap"
-EDITS_FILE = os.path.join(EDITS_DIR, "edits.json")
+EDITS_DIR = "/var/lib/spidermap"                         # root only
+INBOX = os.path.join(EDITS_DIR, "inbox")                  # the only place the web server may write
+EDITS_FILE = os.path.join(INBOX, "edits.json")
 HIST_FILE = os.path.join(HERE, "spidermap_hist.json")
 HIST_LEN = 90                                     # minutes of history kept for the small graphs
 LAT_TARGETS = [("Cloudflare", "1.1.1.1"), ("Google", "8.8.8.8"), ("Quad9", "9.9.9.9")]
@@ -762,7 +794,7 @@ STAT_RULES = [("cpu", "CPU", r"(?i)\bcpu\b.*(util|usage)"),
 
 
 def apply_edits():
-    """Merge edits saved from the page (spidermap_edit.php) into devices.json."""
+    """Merge edits saved from the page (spidermap_api.php) into devices.json."""
     edits = load_json(EDITS_FILE, {})
     if not edits:
         return {}
@@ -853,7 +885,7 @@ def ping_stats(ip, count=4):
 
 def live_refresh(api):
     webd = webdir()
-    data = load_json(os.path.join(webd, DATA), None) if webd else None
+    data = load_json(os.path.join(DATA_DIR, DATA), None)
     if not data:
         raise SystemExit("No spidermap.json yet - run a full scan first.")
     t = now()
@@ -873,7 +905,7 @@ def live_refresh(api):
             n["url"] = web_url(n["name"], n.get("ip", ""), c.get("url", ""))
             n["flags"] = [f for f in n["flags"] if f not in ("important", "unknown")] + \
                          (["important"] if c.get("important") else [])
-        save_json(os.path.join(webd, DATA), data)
+        save_json(os.path.join(DATA_DIR, DATA), data)
 
     # switch ports from Zabbix (status, traffic, errors)
     names = {"Operational status": "st", "Bits received": "rx", "Bits sent": "tx",
@@ -887,7 +919,7 @@ def live_refresh(api):
             if m and m.group(2) in names and v is not None:
                 ports.setdefault(sid, {}).setdefault(str(port_num(m.group(1))), {})[names[m.group(2)]] = v
 
-    rt = load_json(os.path.join(webd, RT), {}) or {}
+    rt = load_json(os.path.join(DATA_DIR, RT), {}) or {}
     rt_fresh = bool(rt) and t - rt.get("t", 0) < 60
     hist = load_json(HIST_FILE, {})
 
@@ -1051,7 +1083,7 @@ def live_refresh(api):
     except Exception:  # noqa: BLE001
         pass
 
-    save_json(os.path.join(webd, LIVE), {
+    save_json(os.path.join(DATA_DIR, LIVE), {
         "generated": t, "ports": ports, "nodes": nstat, "stats": stats, "cable": cable, "unusual": unusual,
         "warnings": warn,
         "inet": dict(inet, latency=lat, wan=wan,
@@ -1063,7 +1095,7 @@ def live_refresh(api):
 # Real-time collector (service): port counters every 5 s, latency every 15 s, speed tests
 # --------------------------------------------------------------------------- #
 RT, RT_EVERY, RT_KEEP = "spidermap_rt.json", 5, 72          # 72 x 5 s = 6 minutes of live graph
-SPEED_REQ = os.path.join(EDITS_DIR, "speedtest.request")
+SPEED_REQ = os.path.join(INBOX, "speedtest.request")
 SPEED_FILE = os.path.join(EDITS_DIR, "speedtest.json")
 SPEED_ITEMS = [("autotopo.speed.down", "Speed test: download", "bps"),
                ("autotopo.speed.up", "Speed test: upload", "bps"),
@@ -1193,7 +1225,7 @@ def rt_loop(api):
         if t0 - last_cfg > 300 or data is None:
             try:
                 hosts = at.load_hosts(api)
-                data = load_json(os.path.join(webd, DATA), None)
+                data = load_json(os.path.join(DATA_DIR, DATA), None)
             except Exception as e:  # noqa: BLE001
                 print("config reload failed:", e, flush=True)
             last_cfg = t0
@@ -1337,7 +1369,7 @@ def rt_loop(api):
             last_save = t0
         sh = load_json(SPEED_FILE, [])
         upt, outs = month_uptime(inet, t)
-        save_json(os.path.join(webd, RT), {
+        save_json(os.path.join(DATA_DIR, RT), {
             "t": t, "every": RT_EVERY, "ports": ports, "flaps": flaps,
             "wan": {"down": wan["rx"], "up": wan["tx"]} if wan else None,
             "latency": {k: v["ms"] for k, v in targets.items() if k != "Gateway"}, "targets": targets,
@@ -1441,45 +1473,105 @@ def download(url, path):
     return False
 
 
-EDIT_PHP = r"""<?php
-// spidermap_edit.php - saves device edits from spidermap.html. Only logged-in Zabbix admins may edit.
+API_PHP = r"""<?php
+// SpiderMap API - the map data is only for logged-in Zabbix users, changes only for Zabbix admins.
+// Generated by spidermap.py: changes here are overwritten on update.
 header('Content-Type: application/json');
-function fail($c, $m) { http_response_code($c); echo json_encode(['ok' => false, 'error' => $m]); exit; }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail(405, 'POST only');
-$sess = json_decode(base64_decode($_COOKIE['zbx_session'] ?? ''), true);
-$sid = is_array($sess) ? ($sess['sessionid'] ?? '') : '';
-if (!$sid) fail(401, 'Log in to Zabbix in this browser first.');
-$https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-$api = ($https ? 'https' : 'http') . '://127.0.0.1:' . $_SERVER['SERVER_PORT']
-     . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/') . '/api_jsonrpc.php';
-$ctx = stream_context_create([
-  'http' => ['method' => 'POST', 'header' => "Content-Type: application/json-rpc\r\n", 'timeout' => 5,
-             'content' => json_encode(['jsonrpc' => '2.0', 'method' => 'user.checkAuthentication',
-                                       'params' => ['sessionid' => $sid, 'extend' => false], 'id' => 1])],
-  'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]);
-$r = json_decode(@file_get_contents($api, false, $ctx), true);
-if (empty($r['result']['userid'])) fail(401, 'Your Zabbix session expired. Log in again.');
-if (isset($r['result']['type']) && (int)$r['result']['type'] < 2) fail(403, 'Only Zabbix admins can edit.');
+header('Cache-Control: no-store');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: same-origin');
+const DATA_DIR = '/var/lib/spidermap/www';
+const STATE_DIR = '/var/lib/spidermap/inbox';   // the only folder the web server may write to
+const VIEW_MIN_TYPE = __VIEW_MIN_TYPE__;   // 1 = any Zabbix user, 2 = admins, 3 = super admins (devices.json: view_min_user_type)
+const FILES = ['map' => 'spidermap.json', 'live' => 'spidermap_live.json', 'rt' => 'spidermap_rt.json',
+               'events' => 'spidermap_events.json', 'presence' => 'spidermap_presence.json'];
+
+function fail($code, $msg) { http_response_code($code); echo json_encode(['ok' => false, 'error' => $msg]); exit; }
+
+function api_call($method, $params, $bearer = null) {
+  $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+  $url = ($https ? 'https' : 'http') . '://127.0.0.1:' . $_SERVER['SERVER_PORT']
+       . rtrim(dirname($_SERVER['SCRIPT_NAME']), '/') . '/api_jsonrpc.php';
+  $hdr = "Content-Type: application/json-rpc\r\n" . ($bearer ? "Authorization: Bearer $bearer\r\n" : '');
+  $ctx = stream_context_create([
+    'http' => ['method' => 'POST', 'header' => $hdr, 'timeout' => 5, 'ignore_errors' => true,
+               'content' => json_encode(['jsonrpc' => '2.0', 'method' => $method, 'params' => $params, 'id' => 1])],
+    'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]]);
+  return json_decode(@file_get_contents($url, false, $ctx), true);
+}
+
+// Who is logged in? Checked against the Zabbix API, cached for 60 s so the 5-second polling stays cheap.
+// extend=false: polling the map never keeps an expired Zabbix session alive.
+function zabbix_user() {
+  $raw = strtr((string)($_COOKIE['zbx_session'] ?? ''), ' ', '+');   // some proxies turn + into a space
+  $sess = json_decode(base64_decode($raw, true) ?: '', true);
+  $sid = is_array($sess) ? (string)($sess['sessionid'] ?? '') : '';
+  if (!preg_match('/^[A-Za-z0-9]{16,128}$/', $sid)) fail(401, 'login');
+  $cdir = STATE_DIR . '/sess';
+  $cache = $cdir . '/' . hash('sha256', $sid);
+  if (is_file($cache) && filemtime($cache) > time() - 60) {
+    $u = json_decode((string)@file_get_contents($cache), true);
+    if (is_array($u)) return $u;
+  }
+  $r = api_call('user.checkAuthentication', ['sessionid' => $sid, 'extend' => false]);
+  if (empty($r['result']['userid'])) { @unlink($cache); fail(401, 'login'); }
+  $type = isset($r['result']['type']) ? (int)$r['result']['type'] : 0;
+  if (!$type) {   // older answers have no type: ask for the user's role
+    $q = api_call('user.get', ['output' => ['userid'], 'userids' => [$r['result']['userid']], 'selectRole' => ['type']], $sid);
+    $type = (int)($q['result'][0]['role']['type'] ?? 1);
+  }
+  $u = ['id' => $r['result']['userid'], 'name' => (string)($r['result']['username'] ?? ''), 'type' => $type];
+  if (!is_dir($cdir)) @mkdir($cdir, 0700, true);
+  @file_put_contents($cache, json_encode($u), LOCK_EX);
+  if (mt_rand(1, 50) === 1) foreach (glob($cdir . '/*') ?: [] as $f) if (filemtime($f) < time() - 3600) @unlink($f);
+  return $u;
+}
+
+$user = zabbix_user();
+if (strtolower($user['name']) === 'guest') fail(403, 'The Zabbix guest account cannot open SpiderMap. Log in with your own user.');
+if ($user['type'] < VIEW_MIN_TYPE) fail(403, 'Your Zabbix user is not allowed to view SpiderMap.');
+
+// ---- read the map data
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+  $f = FILES[$_GET['data'] ?? ''] ?? null;
+  if (!$f) fail(400, 'Unknown data set');
+  $path = DATA_DIR . '/' . $f;
+  if (!is_file($path)) fail(404, 'No data yet');
+  readfile($path);
+  exit;
+}
+
+// ---- changes: same-origin only, Zabbix admins only
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail(405, 'GET or POST only');
+if (($_SERVER['HTTP_X_SPIDERMAP'] ?? '') !== '1') fail(403, 'Missing request header');   // blocks cross-site forms (CSRF)
+$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== parse_url('//' . ($_SERVER['HTTP_HOST'] ?? ''), PHP_URL_HOST))
+  fail(403, 'Cross-site request refused');
+if ($user['type'] < 2) fail(403, 'Only Zabbix admins can make changes.');
 $in = json_decode(file_get_contents('php://input'), true);
 if (!is_array($in)) fail(400, 'Bad request');
+
 if (($in['action'] ?? '') === 'speedtest') {
-  if (!@touch('/var/lib/spidermap/speedtest.request')) fail(500, 'Cannot write /var/lib/spidermap');
+  if (!@touch(STATE_DIR . '/speedtest.request')) fail(500, 'Cannot write ' . STATE_DIR);
   echo json_encode(['ok' => true]); exit;
 }
-$mac = strtolower($in['mac'] ?? '');
+
+$mac = strtolower((string)($in['mac'] ?? ''));
 if (!preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $mac)) fail(400, 'Bad MAC address');
 $e = [];
 foreach (['name', 'type', 'url', 'pin'] as $k)
-  if (array_key_exists($k, $in)) $e[$k] = mb_substr(trim((string)$in[$k]), 0, 200);
+  if (array_key_exists($k, $in)) $e[$k] = function_exists('mb_substr') ? mb_substr(trim((string)$in[$k]), 0, 200)
+                                                                      : substr(trim((string)$in[$k]), 0, 200);
+if (isset($e['url']) && $e['url'] !== '' && !preg_match('#^https?://#i', $e['url'])) fail(400, 'Web UI address must start with http:// or https://');
 if (array_key_exists('important', $in)) $e['important'] = (bool)$in['important'];
-$fh = @fopen('/var/lib/spidermap/edits.json', 'c+');
-if (!$fh) fail(500, 'Cannot write /var/lib/spidermap/edits.json');
+$fh = @fopen(STATE_DIR . '/edits.json', 'c+');
+if (!$fh) fail(500, 'Cannot write ' . STATE_DIR . '/edits.json');
 flock($fh, LOCK_EX);
 $cur = json_decode(stream_get_contents($fh), true) ?: [];
-$cur[$mac] = array_merge($cur[$mac] ?? [], $e, ['by' => $r['result']['username'] ?? '', 'at' => time()]);
+$cur[$mac] = array_merge($cur[$mac] ?? [], $e, ['by' => $user['name'], 'at' => time()]);
 ftruncate($fh, 0); rewind($fh); fwrite($fh, json_encode($cur, JSON_PRETTY_PRINT)); fflush($fh);
 flock($fh, LOCK_UN); fclose($fh);
-echo json_encode(['ok' => true, 'by' => $r['result']['username'] ?? '']);
+echo json_encode(['ok' => true, 'by' => $user['name']]);
 """
 
 
@@ -1505,22 +1597,39 @@ def install_page(webd):
         if os.path.isfile(os.path.join(HERE, "assets", f)):
             shutil.copyfile(os.path.join(HERE, "assets", f), os.path.join(adir, f))
             os.chmod(os.path.join(adir, f), 0o644)
-    php = os.path.join(webd, "spidermap_edit.php")
-    if not os.path.isfile(php) or open(php, encoding="utf-8").read() != EDIT_PHP:
+    vmin = int(load_json(DEVICES_FILE, {}).get("settings", {}).get("view_min_user_type", 1) or 1)
+    code = API_PHP.replace("__VIEW_MIN_TYPE__", str(max(1, min(3, vmin))))
+    php = os.path.join(webd, "spidermap_api.php")
+    if not os.path.isfile(php) or open(php, encoding="utf-8").read() != code:
         with open(php, "w", encoding="utf-8") as f:
-            f.write(EDIT_PHP)
+            f.write(code)
         os.chmod(php, 0o644)
+    # earlier versions served the data straight from the web folder: remove it there
+    for f in ("spidermap_edit.php", "spidermap.json", "spidermap_live.json", "spidermap_rt.json",
+              "spidermap_events.json", "spidermap_presence.json"):
+        try:
+            os.remove(os.path.join(webd, f))
+        except FileNotFoundError:
+            pass
+    ensure_data_dir()
     os.makedirs(EDITS_DIR, exist_ok=True)
+    os.chown(EDITS_DIR, 0, 0)
+    os.chmod(EDITS_DIR, 0o755)
+    os.makedirs(os.path.join(INBOX, "sess"), exist_ok=True)
+    old = os.path.join(EDITS_DIR, "edits.json")              # earlier versions kept edits one folder up
+    if os.path.isfile(old) and not os.path.isfile(EDITS_FILE):
+        shutil.move(old, EDITS_FILE)
     if not os.path.isfile(EDITS_FILE):
         with open(EDITS_FILE, "w", encoding="utf-8") as f:
             f.write("{}")
     wu = web_user()
-    if wu:
-        for path in (EDITS_DIR, EDITS_FILE):
-            try:
+    for path in (INBOX, EDITS_FILE, os.path.join(INBOX, "sess")):
+        try:
+            if wu:
                 os.chown(path, wu.pw_uid, wu.pw_gid)
-            except OSError:
-                pass
+            os.chmod(path, 0o700 if os.path.isdir(path) else 0o600)
+        except OSError:
+            pass
 
 
 def migrate_old_install(api, webd):
