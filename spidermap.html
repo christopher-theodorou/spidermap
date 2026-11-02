@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpiderMap</title>
+<link rel="icon" type="image/svg+xml" href="spidermap-assets/spidermap-favicon.svg">
+<link rel="stylesheet" href="spidermap-assets/tabler-icons.min.css"
+      onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css'">
+<style>
+:root{--pur:#8b5cf6;--pur-bg:#efe9fe;--bg:#f6f7f9;--card:#fff;--text:#1d2433;--muted:#6b7385;--faint:#a3a9b6;--border:#e3e6ec;--accent:#4f5bd5;--accent-bg:#eceefc;--ok:#22a55b;--ok-bg:#e3f6ec;--warn:#e8950f;--warn-bg:#fdf1dc;--bad:#e5484d;--bad-bg:#fde8e8;--off:#b8bec9;--line:#a9b0ec;--shadow:0 1px 2px rgba(16,24,40,.06),0 2px 8px rgba(16,24,40,.06)}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#14171c;--card:#1d2128;--text:#e7eaf0;--muted:#9aa3b2;--faint:#646d7c;--border:#2c323c;--accent:#7c86f0;--accent-bg:#22264a;--ok-bg:#16301f;--warn-bg:#382a10;--bad-bg:#3a1a1b;--off:#4b525e;--line:#3f4794;--pur-bg:#2a2045;--shadow:0 1px 2px rgba(0,0,0,.4)}}
+:root[data-theme=dark]{--pur-bg:#2a2045;--bg:#14171c;--card:#1d2128;--text:#e7eaf0;--muted:#9aa3b2;--faint:#646d7c;--border:#2c323c;--accent:#7c86f0;--accent-bg:#22264a;--ok-bg:#16301f;--warn-bg:#382a10;--bad-bg:#3a1a1b;--off:#4b525e;--line:#3f4794;--shadow:0 1px 2px rgba(0,0,0,.4)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card)}
+header h1{font-size:17px;font-weight:800;margin:0 6px 0 0;display:flex;align-items:center;gap:8px;letter-spacing:-.3px}
+header h1 b{font-weight:800}header h1 span{color:var(--accent)}
+header h1 img{width:30px;height:30px}
+.lg-d{display:none}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]) .lg-l{display:none}:root:not([data-theme=light]) .lg-d{display:inline}}
+:root[data-theme=dark] .lg-l{display:none}:root[data-theme=dark] .lg-d{display:inline}
+.stat{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.sp{flex:1}
+.search{height:30px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);padding:0 10px;width:200px;font:inherit}
+.btn{height:30px;min-width:30px;padding:0 9px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;font:inherit;text-decoration:none}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn i{font-size:16px}
+#canvas{position:absolute;top:51px;left:0;right:0;bottom:0;overflow:hidden;cursor:grab;touch-action:none}
+#canvas.drag{cursor:grabbing}
+#stage{position:absolute;left:0;top:0;transform-origin:0 0}
+#stage.anim{transition:transform .35s ease}
+.tn{position:absolute;width:104px;text-align:center;cursor:pointer;transition:left .35s ease,top .35s ease,opacity .3s}
+.tn .ic{position:relative;width:48px;height:48px;margin:0 auto;border-radius:14px;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:24px;color:var(--muted);box-shadow:var(--shadow);transition:transform .15s,border-color .15s}
+.tn .ic img{width:28px;height:28px}
+.tn:hover .ic{transform:translateY(-2px);border-color:var(--accent)}
+.tn.sel .ic{border:2px solid var(--accent);color:var(--accent)}
+.tn.match .ic{outline:3px solid var(--warn);outline-offset:2px}
+.tn .st{position:absolute;top:-3px;right:-3px;width:11px;height:11px;border-radius:50%;border:2px solid var(--card)}
+.tn .nm{font-size:12px;font-weight:500;margin-top:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tn .sb{font-size:11px;color:var(--faint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tn.off .ic{opacity:.55}.tn.off .nm{color:var(--faint)}
+.tn.down .ic{border-color:var(--bad);color:var(--bad)}
+.tn.new .ic{animation:pulse 1.8s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(79,91,213,.5)}50%{box-shadow:0 0 0 7px rgba(79,91,213,0)}}
+.tag{display:inline-block;font-size:10px;font-weight:600;padding:0 6px;border-radius:999px;margin:2px 1px 0}
+.t-new,.t-unknown{background:var(--accent-bg);color:var(--accent)}
+.t-moved,.t-ip{background:var(--warn-bg);color:var(--warn)}
+.t-down{background:var(--bad-bg);color:var(--bad)}
+.tg{position:absolute;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:15px;line-height:19px;text-align:center;cursor:pointer;user-select:none;transition:left .35s,top .35s;box-shadow:0 0 0 3px var(--bg)}
+.cnt{position:absolute;font-size:11px;color:var(--muted);transition:left .35s,top .35s}
+.pt{position:absolute;font-size:10px;font-weight:600;padding:1px 7px;border-radius:999px;border:1px solid var(--line);color:var(--accent);background:var(--card);white-space:nowrap;transform:translateX(-50%);transition:left .35s,top .35s}
+svg line{transition:stroke .2s}
+.ln{stroke:var(--line);stroke-width:1.5}
+.ln.off{stroke:var(--off);stroke-dasharray:4 4}
+.ln.hl{stroke:var(--accent);stroke-width:2.5}
+.fl{stroke:var(--ok);stroke-width:2.2;stroke-dasharray:3 9;animation:flow linear infinite}
+@keyframes flow{to{stroke-dashoffset:-12}}
+@media (prefers-reduced-motion:reduce){.fl,.tn.new .ic{animation:none}}
+aside{position:absolute;top:51px;right:0;bottom:0;width:390px;max-width:100%;background:var(--card);border-left:1px solid var(--border);transform:translateX(100%);transition:transform .3s ease;overflow-y:auto;padding:16px 18px;z-index:5}
+aside.open{transform:none}
+aside h2{font-size:16px;margin:0;font-weight:600}
+.ph{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.ph .ic{width:44px;height:44px;border-radius:12px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:22px;color:var(--muted)}
+.ph .ic img{width:26px;height:26px}
+.x{margin-left:auto}
+table{width:100%;border-collapse:collapse}
+.kv td{padding:5px 0;border-bottom:1px solid var(--border);vertical-align:top}
+.kv td:first-child{color:var(--muted);width:38%}
+.lst td{padding:6px 4px;border-bottom:1px solid var(--border)}
+.lst td:first-child,.lst td:nth-child(3){white-space:nowrap}
+.lst tr.h td{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.03em}
+.lst tr.r{cursor:pointer}.lst tr.r:hover td{background:var(--bg)}
+.lst tr.on td{background:var(--accent-bg)}
+.sec{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 6px}
+.front{display:inline-flex;flex-direction:column;gap:5px;padding:9px;border-radius:10px;border:1px solid var(--border);background:var(--bg)}
+.front div{display:flex;gap:5px}
+.port{width:30px;height:24px;border-radius:5px;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--faint)}
+.port.up,.port.s1g{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.port.s100{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.port.s25g{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
+.port.s10g{background:var(--pur-bg);color:var(--pur);border-color:var(--pur)}
+.spd{display:inline-flex;align-items:center;gap:5px;margin-right:10px;font-size:11px;color:var(--muted)}
+.spd i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.port.on{outline:2px solid var(--accent)}
+.traffic{display:flex;gap:14px;font-size:13px;margin:4px 0 2px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px}
+#msg{position:absolute;top:45%;left:0;right:0;text-align:center;color:var(--muted)}
+.legend{display:flex;gap:10px;flex-wrap:wrap}
+#gw{position:absolute;top:63px;left:12px;width:310px;max-height:calc(100% - 75px);overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);z-index:4;font-size:13px;overflow:hidden}
+#gw .gh{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer}
+#gw .gh .ic{width:38px;height:38px;border-radius:10px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:20px;color:var(--muted)}
+#gw .gb{padding:0 14px 14px}
+#gw.min .gb{display:none}
+.warnb{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--warn-bg);color:var(--warn);font-weight:600;cursor:pointer}
+.chain{display:flex;align-items:center;gap:6px;margin:2px 0 10px;color:var(--accent);font-size:13px}
+.chain .c{display:inline-flex;align-items:center;gap:4px;position:relative}
+.chain .c i{font-size:18px}
+.chain .c b{font-weight:500;color:var(--text)}
+.chain .rd{position:absolute;top:-2px;left:12px;width:7px;height:7px;border-radius:50%;background:var(--bad)}
+.chain .ln1{flex:1;border-top:1.5px solid var(--line)}
+.chain .ln2{flex:1;border-top:1.5px dotted var(--line)}
+.gr{display:flex;justify-content:space-between;padding:5px 0;color:var(--muted)}
+.gr span:last-child{color:var(--text);text-align:right}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}
+.tile{background:var(--bg);border-radius:8px;padding:6px;text-align:center}
+.tile b{display:block;font-size:14px;font-weight:600}
+.tile span{font-size:11px;color:var(--muted)}
+.spark{width:100%;height:46px;display:block;margin:6px 0 2px}
+.livedot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:5px;animation:blink 1.5s infinite}
+@keyframes blink{50%{opacity:.25}}
+.st-big{display:flex;gap:16px;align-items:baseline;margin:6px 0 2px}
+.st-big b{font-size:20px;font-weight:600}
+.spin{display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.wide{width:100%;justify-content:center;margin-top:10px;border-color:var(--accent);color:var(--accent)}
+.bar{height:7px;border-radius:4px;background:var(--bg);overflow:hidden;margin:3px 0 8px}
+.bar div{height:100%;border-radius:4px}
+.srow{display:flex;justify-content:space-between;font-size:12px}
+.srow span:first-child{color:var(--muted)}
+.lgd{display:flex;gap:12px;font-size:11px;color:var(--muted)}
+.lgd i{display:inline-block;width:10px;height:3px;border-radius:2px;vertical-align:middle;margin-right:4px}
+.ef label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+.ef input[type=text],.ef select{width:100%;height:32px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);padding:0 9px;font:inherit}
+.ef .ck{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--text);font-size:13px}
+.ef .msg{font-size:12px;margin-top:8px}
+.tb{position:relative}
+.tb .bd{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;border-radius:8px;background:var(--bad);color:#fff;font-size:10px;line-height:16px;padding:0 4px;text-align:center}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 10px}
+.chip{border:1px solid var(--border);border-radius:999px;padding:2px 10px;font-size:12px;cursor:pointer;background:var(--card);color:var(--muted)}
+.chip.on{border-color:var(--accent);color:var(--accent);background:var(--accent-bg)}
+.evd{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 4px}
+.evr{display:flex;gap:10px;padding:7px 4px;border-bottom:1px solid var(--border);align-items:flex-start}
+.evr.go{cursor:pointer}.evr.go:hover{background:var(--bg)}
+.evr i{font-size:17px;margin-top:1px}
+.evr .tx{flex:1}
+.evr .tm{color:var(--faint);font-size:11px;white-space:nowrap}
+.pres{display:block;width:100%;height:10px;border-radius:3px;margin:3px 0}
+.prow{display:grid;grid-template-columns:34px 1fr;gap:6px;align-items:center;font-size:11px;color:var(--muted)}
+.ticks{display:flex;justify-content:space-between;font-size:10px;color:var(--faint);margin-left:40px}
+.pp{padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.pp .top{display:flex;justify-content:space-between;align-items:center;font-size:13px}
+.ttr{padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer}
+.ttr .top{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.ttr .bb{height:5px;border-radius:3px;background:var(--accent);margin-top:4px;opacity:.75}
+.t-cable,.t-traffic{background:var(--warn-bg);color:var(--warn)}
+.t-conflict{background:var(--bad-bg);color:var(--bad)}
+.port.iss{box-shadow:0 0 0 2px var(--warn)}
+.iss-line{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:7px 10px;margin:8px 0;font-size:12px}
+#toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:9}
+#toast.on{opacity:.92}
+.tile small{display:block;font-size:10px;color:var(--faint)}
+@media (max-width:700px){#gw{display:none}aside{top:auto;height:60%;width:100%;border-left:0;border-top:1px solid var(--border);transform:translateY(100%)}.search{width:130px}.legend{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1 title="SpiderMap · Nothing touches the web unnoticed."><img src="spidermap-assets/spidermap-favicon.svg" alt=""><b>Spider<span>Map</span></b></h1>
+  <span class="stat" id="s-on"></span><span class="stat" id="s-off"></span><span class="stat" id="s-new"></span>
+  <span class="stat legend">
+    <span><i class="dot" style="background:var(--ok)"></i> online</span>
+    <span><i class="dot" style="background:var(--off)"></i> off / asleep</span>
+    <span><i class="dot" style="background:var(--accent)"></i> new / unknown</span>
+    <span><i class="dot" style="background:var(--warn)"></i> changed</span>
+    <span><i class="dot" style="background:var(--bad)"></i> down</span>
+  </span>
+  <span class="sp"></span>
+  <span class="stat" id="s-time"></span>
+  <input class="search" id="q" placeholder="Name, IP or MAC" aria-label="Search devices">
+  <button class="btn tb" id="b-act" title="Activity" aria-label="Activity"><i class="ti ti-bell"></i><span class="bd" id="act-bd" style="display:none"></span></button>
+  <button class="btn" id="b-ppl" title="Who's online" aria-label="Who's online"><i class="ti ti-users"></i></button>
+  <button class="btn" id="b-top" title="Top talkers" aria-label="Top talkers"><i class="ti ti-chart-bar"></i></button>
+  <button class="btn" id="b-spd" title="Run speed test" aria-label="Run speed test"><i class="ti ti-gauge"></i></button>
+  <button class="btn" id="b-csv" title="Export device list (CSV)" aria-label="Export device list"><i class="ti ti-download"></i></button>
+  <button class="btn" id="zin" aria-label="Zoom in"><i class="ti ti-plus"></i></button>
+  <button class="btn" id="zout" aria-label="Zoom out"><i class="ti ti-minus"></i></button>
+  <button class="btn" id="zfit" aria-label="Fit to screen"><i class="ti ti-arrows-maximize"></i></button>
+  <button class="btn" id="theme" aria-label="Theme"><i class="ti ti-sun-moon"></i></button>
+</header>
+<div id="canvas"><div id="stage"></div><div id="msg">Loading…</div></div>
+<div id="gw" class="min"></div>
+<aside id="panel"></aside>
+<div id="toast" role="status"></div>
+<script>
+"use strict";
+const PAGE_VERSION = "2026-11-02-spidermap";
+const COL = 108, ROW = 150;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = (k, v) => { try { if (v === undefined) return JSON.parse(localStorage.getItem(k)); localStorage.setItem(k, JSON.stringify(v)); } catch (e) { return null; } };
+let RT = null, DATA = null, LIVE = { ports: {}, nodes: {} }, byId = {}, kids = {}, pos = {}, els = {}, sel = null, selPort = null;
+let folded = store("nm-folded") || {};
+const view = { x: 20, y: 20, k: 1 };
+let fitted = false;
+
+/* ---------- theme ---------- */
+const themes = ["auto", "light", "dark"];
+function applyTheme(t) { if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); $("#theme").title = "Theme: " + t; }
+let theme = store("nm-theme") || "auto"; applyTheme(theme);
+$("#theme").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; store("nm-theme", theme); applyTheme(theme); };
+
+/* ---------- data ---------- */
+async function load() {
+  try {
+    const r = await fetch("spidermap.json?" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    DATA = await r.json(); $("#msg").style.display = "none";
+    if (DATA.page_version && DATA.page_version !== PAGE_VERSION && !location.search.includes("v=" + DATA.page_version)) {
+      location.replace(location.pathname + "?v=" + encodeURIComponent(DATA.page_version)); return;
+    }
+    index(); render(); gwCard();
+    if (!fitted) { fit(false); fitted = true; }
+    if (sel && sel[0] === "#") special(sel.slice(1)); else if (sel && byId[sel]) panel(sel); else if (sel) closePanel();
+  } catch (e) { $("#msg").textContent = "No topology data yet. Run spidermap.py on the Zabbix server."; }
+}
+async function loadLive() {
+  try {
+    const r = await fetch("spidermap_live.json?" + Date.now(), { cache: "no-store" });
+    if (r.ok) { LIVE = await r.json(); if (DATA) { render(); gwCard(); if (sel && sel[0] === "#") special(sel.slice(1)); else if (sel && byId[sel] && !($("#ef") && $("#ef").style.display === "block")) panel(sel, true); } }
+  } catch (e) {}
+}
+async function loadRT() {
+  try {
+    const r = await fetch("spidermap_rt.json?" + Date.now(), { cache: "no-store" });
+    if (!r.ok) return;
+    RT = await r.json();
+    if (DATA) { render(); gwCard(); if (sel === "#top") special("top"); else if (sel && byId[sel] && !($("#ef") && $("#ef").style.display === "block")) panel(sel, true); }
+  } catch (e) {}
+}
+const rtFresh = () => RT && Date.now() / 1000 - RT.t < 30;
+function portNum(lbl) { const m = /(\d+)/.exec(lbl || ""); return m ? +m[1] : 999; }
+function index() {
+  byId = {}; kids = {};
+  DATA.nodes.forEach(n => { byId[n.id] = n; });
+  DATA.nodes.forEach(n => { if (n.parent && byId[n.parent]) (kids[n.parent] = kids[n.parent] || []).push(n.id); });
+  const rank = n => n.kind === "switch" ? 3 : n.kind === "group" ? (n.id === "wifi" ? 0 : 2) : 1;
+  Object.values(kids).forEach(a => a.sort((x, y) => {
+    const a1 = byId[x], b1 = byId[y];
+    return (a1.id === "wifi" ? -1 : 0) - (b1.id === "wifi" ? -1 : 0) || rank(a1) - rank(b1) || portNum(a1.port) - portNum(b1.port) || a1.name.localeCompare(b1.name);
+  }));
+  const all = DATA.nodes.filter(n => n.kind === "device" || n.kind === "router");
+  const on = all.filter(n => status(n) === "up").length;
+  $("#s-on").innerHTML = `<i class="dot" style="background:var(--ok)"></i>${on} online`;
+  $("#s-off").innerHTML = `<i class="dot" style="background:var(--off)"></i>${all.length - on} offline`;
+  const nw = all.filter(n => n.flags.includes("new") || n.flags.includes("unknown")).length;
+  $("#s-new").innerHTML = nw ? `<i class="dot" style="background:var(--accent)"></i>${nw} new / unknown` : "";
+  $("#s-time").textContent = "Scan " + (DATA.generated_text || "").slice(11);
+}
+function status(n) { return (LIVE.nodes && LIVE.nodes[n.id]) || n.status; }
+function portLive(ref) {
+  if (!ref) return null;
+  const a = LIVE.ports && LIVE.ports[ref[0]] ? LIVE.ports[ref[0]][String(ref[1])] : null;
+  const b = rtFresh() && RT.ports[ref[0]] ? RT.ports[ref[0]][String(ref[1])] : null;
+  return b ? Object.assign({}, a || {}, b) : a;
+}
+function portHist(ref) {
+  if (!ref) return null;
+  if (rtFresh() && RT.hist.ports[ref[0]] && RT.hist.ports[ref[0]][String(ref[1])]) return { rows: RT.hist.ports[ref[0]][String(ref[1])], live: true };
+  const h = LIVE.hist && LIVE.hist.ports && LIVE.hist.ports[ref[0]] ? LIVE.hist.ports[ref[0]][String(ref[1])] : null;
+  return h ? { rows: h, live: false } : null;
+}
+function isFolded(id) { return id in folded ? folded[id] : (!!byId[id].collapsed || (kids[id] || []).length > 8); }
+function mbps(b) { const m = (b || 0) / 1e6; return m >= 1000 ? (m / 1000).toFixed(2) + " Gbps" : m >= 10 ? m.toFixed(0) + " Mbps" : m >= 0.01 ? m.toFixed(2) + " Mbps" : "0 Mbps"; }
+function dotColor(n) {
+  const s = status(n), f = n.flags || [];
+  if (s === "down") return "var(--bad)";
+  if (f.includes("new") || f.includes("unknown")) return "var(--accent)";
+  if (f.includes("moved") || f.includes("ip changed") || issues(n).length) return "var(--warn)";
+  return s === "up" ? "var(--ok)" : "var(--off)";
+}
+function issues(n) {
+  const out = [], r = n.port_ref;
+  if (r && n.kind !== "switch") {
+    const c = LIVE.cable && LIVE.cable[r[0]] && LIVE.cable[r[0]][String(r[1])];
+    if (c) out.push({ k: "cable", text: "Possible cable problem: " + c.join("; ") });
+    const u = LIVE.unusual && LIVE.unusual[r[0] + ":" + r[1]];
+    if (u) out.push({ k: "traffic", text: "Unusual traffic: " + u });
+  }
+  if ((n.flags || []).includes("ip conflict")) {
+    const c = (DATA.conflicts || []).find(x => x.macs.includes(n.mac));
+    out.push({ k: "conflict", text: "IP conflict" + (c ? ": " + c.ip + " is also used by " + c.names.filter(x => x !== n.name).join(", ") : "") });
+  }
+  return out;
+}
+function tags(n) {
+  const out = [];
+  issues(n).forEach(i => out.push(`<span class="tag t-${i.k}">${i.k === "cable" ? "cable?" : i.k === "traffic" ? "traffic" : "IP conflict"}</span>`));
+  if (status(n) === "down") out.push('<span class="tag t-down">down</span>');
+  (n.flags || []).forEach(f => {
+    if (f === "new") out.push('<span class="tag t-new">new</span>');
+    else if (f === "unknown") out.push('<span class="tag t-unknown">unknown</span>');
+    else if (f === "moved") out.push('<span class="tag t-moved">moved</span>');
+    else if (f === "ip changed") out.push('<span class="tag t-ip">IP changed</span>');
+  });
+  return out.join("");
+}
+function iconHtml(n) { return n.logo ? `<img src="${esc(n.logo)}" alt="">` : `<i class="ti ti-${esc(n.icon || "help-circle")}" aria-hidden="true"></i>`; }
+
+/* ---------- small graphs ---------- */
+function spark(rows, a, b, max) {
+  if (!rows || rows.length < 3) return '<div class="srow"><span>Graph builds up over the next few minutes.</span></div>';
+  const Wd = 300, H = 46, vals = rows.flatMap(r => [r[a] || 0, b != null ? r[b] || 0 : 0]);
+  const mx = max || Math.max(...vals, 1);
+  const pts = i => rows.map((r, k) => [k * Wd / (rows.length - 1), H - 2 - Math.min(1, (r[i] || 0) / mx) * (H - 6)]);
+  const path = p => p.map((q, k) => (k ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1)).join(" ");
+  const one = (i, c) => { const p = pts(i); return `<path d="${path(p)} L${Wd} ${H} L0 ${H} Z" fill="${c}" fill-opacity=".13"/><path d="${path(p)}" fill="none" stroke="${c}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`; };
+  return `<svg class="spark" viewBox="0 0 ${Wd} ${H}" preserveAspectRatio="none">${b != null ? one(b, "var(--pur)") : ""}${one(a, "var(--accent)")}</svg>`;
+}
+function ago(ts) { if (!ts) return ""; const s = Date.now() / 1000 - ts; return s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago"; }
+function bytes(v) { const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (v >= 1024 && i < 4) { v /= 1024; i++; } return (i ? v.toFixed(1) : v.toFixed(0)) + " " + u[i]; }
+
+/* ---------- gateway card ---------- */
+let gwMin = store("nm-gwmin"); if (gwMin === null) gwMin = false;
+function gwCard() {
+  const box = $("#gw"); if (!DATA) return;
+  const gw = DATA.nodes.find(n => n.kind === "router"), inet = byId.inet, I = LIVE.inet || {};
+  const sws = DATA.nodes.filter(n => n.kind === "switch");
+  const devs = DATA.nodes.filter(n => n.kind === "device" && n.mac);
+  const on = devs.filter(n => status(n) === "up").length;
+  const down = DATA.nodes.filter(n => status(n) === "down" && n.kind !== "inet");
+  const live = rtFresh();
+  const wan = live && RT.wan ? RT.wan : I.wan;
+  const wanRows = live && RT.hist.wan.length > 2 ? RT.hist.wan : LIVE.hist && LIVE.hist.wan;
+  const lat = live && RT.latency && Object.keys(RT.latency).length ? RT.latency : I.latency || {};
+  const SP = live ? RT.speedtest : null;
+  let h = "";
+  const W = (LIVE.warnings || []);
+  if (W.length && !down.length) h += `<div class="warnb" id="gw-warn"><i class="ti ti-alert-triangle"></i>${W.length === 1 ? esc(W[0]) : W.length + " warnings"}<span style="margin-left:auto">›</span></div>`;
+  if (down.length) h += `<div class="warnb" data-go="${esc(down[0].id)}"><i class="ti ti-alert-triangle"></i>${down.length === 1 ? esc(down[0].name) + " is offline" : down.length + " important devices offline"}<span style="margin-left:auto">›</span></div>`;
+  h += `<div class="gh" id="gwh"><div class="ic">${gw ? iconHtml(gw) : '<i class="ti ti-router"></i>'}</div><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">${esc(gw ? gw.name : "Gateway")}</div><div style="color:var(--muted);font-size:12px">${I.up === false ? '<span style="color:var(--bad)">Internet down</span>' : "Internet online"}${wan ? " · ↓ " + mbps(wan.down) + " ↑ " + mbps(wan.up) : ""}</div></div><i class="ti ti-chevron-${gwMin ? "down" : "up"}" style="color:var(--muted)"></i></div>`;
+  h += `<div class="gb"><div class="chain">
+    <span class="c" title="Internet"><i class="ti ti-world"></i>${I.up === false ? '<span class="rd"></span>' : ""}</span><span class="ln1"></span>
+    <span class="c" title="Gateway"><i class="ti ti-router"></i></span><span class="ln1"></span>
+    <span class="c" title="Switches"><i class="ti ti-server-2"></i><b>${sws.length}</b></span><span class="ln2"></span>
+    <span class="c" title="Devices online / total"><i class="ti ti-devices"></i><b>${on}</b><span style="color:var(--muted)">/${devs.length}</span>${devs.some(n => status(n) === "down") ? '<span class="rd"></span>' : ""}</span></div>`;
+  const row = (k, v) => `<div class="gr"><span>${k}</span><span>${v}</span></div>`;
+  h += row("Gateway IP", esc(gw && gw.ip || "-")) + row("Public IP", esc(inet && inet.sub || "-"));
+  const RI = live && RT.inet ? RT.inet : I;
+  h += row("Internet", RI.down_since ? `<span style="color:var(--bad)">down since ${ago(RI.down_since)}</span>` : RI.last_outage ? "last outage " + ago(RI.last_outage[0]) : "no outages seen");
+  if (live && RT.inet && RT.inet.uptime_month != null) h += row("Uptime this month", RT.inet.uptime_month.toFixed(RT.inet.uptime_month >= 99.995 ? 2 : 3) + " %" + (RT.inet.outages_month.length ? ` · ${RT.inet.outages_month.length} outage${RT.inet.outages_month.length > 1 ? "s" : ""}` : ""));
+  const gT = live && RT.targets && RT.targets.Gateway;
+  if (gT) h += row("Gateway ping", gT.ms == null ? '<span style="color:var(--bad)">no answer</span>' : gT.ms + " ms" + (gT.loss ? ` · ${gT.loss} % loss` : ""));
+  const rootSw = DATA.nodes.find(n => n.kind === "switch" && n.flip && n.port_ref);
+  const mu = live && rootSw && RT.usage && RT.usage.m && RT.usage.m[rootSw.port_ref[0]] ? RT.usage.m[rootSw.port_ref[0]][String(rootSw.port_ref[1])] : null;
+  if (mu) h += row("Gateway port this month", "↓ " + bytes(mu[0]) + " ↑ " + bytes(mu[1]));
+  else if (I.month) h += row("Gateway port this month", "↓ " + bytes(I.month.down) + " ↑ " + bytes(I.month.up));
+  h += `<div class="gr" style="margin-top:4px"><span title="Measured on the switch port to the gateway. Wi-Fi traffic to the internet goes through the gateway directly and is not included.">Throughput <i class="ti ti-info-circle"></i></span><span>${wan ? `<span style="color:var(--accent)">↓ ${mbps(wan.down)}</span> &nbsp;<span style="color:var(--pur)">↑ ${mbps(wan.up)}</span>` : "-"}</span></div>`;
+  h += spark(wanRows, 1, 2) + `<div class="lgd"><span>${live ? '<span class="livedot"></span>live, every ' + (RT.every || 5) + " s" : "updated every minute"}</span><span style="margin-left:auto">${wanRows ? (live && wanRows === RT.hist.wan ? "last " + Math.round(wanRows.length * (RT.every || 5) / 60) + " min" : "last " + wanRows.length + " min") : ""}</span></div>`;
+  const TG = live && RT.targets ? RT.targets : {};
+  h += `<div class="tiles">${Object.entries(lat).map(([k, v]) => { const x = TG[k]; return `<div class="tile"><b style="color:${v == null ? "var(--bad)" : v > 80 ? "var(--warn)" : "var(--text)"}">${v == null ? "—" : Math.round(v) + " ms"}</b><span>${esc(k)}</span>${x ? `<small style="color:${x.loss >= 5 ? "var(--warn)" : "var(--faint)"}">loss ${x.loss}% · jitter ${x.jit ?? "-"}</small>` : ""}</div>`; }).join("")}</div>`;
+  if (SP) {
+    const L = SP.last;
+    h += `<div class="sec" style="margin-top:14px">Speed test</div>`;
+    if (SP.running) h += `<div class="st-big" style="color:var(--accent)"><i class="ti ti-loader-2 spin"></i><span>Running… ${Math.round(Date.now() / 1000 - (SP.started || 0))} s</span></div>`;
+    else if (L) h += `<div class="st-big"><span style="color:var(--accent)">↓ <b>${(L.down / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--pur)">↑ <b>${(L.up / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--muted)">${L.ping} ms</span></div><div style="font-size:11px;color:var(--muted)">${esc(L.server)} · ${ago(L.at)}</div>`;
+    if (SP.history && SP.history.length > 2) h += spark(SP.history.map(x => [x.at, x.down, x.up]), 1, 2);
+    if (SP.error) h += `<div style="color:var(--bad);font-size:12px;margin-top:6px">${esc(SP.error)}</div>`;
+    h += `<button class="btn wide" id="spt"><i class="ti ti-gauge"></i>${SP.running ? "Speed test running…" : L ? "Run again" : "Run speed test"}</button><div id="spm" style="font-size:11px;color:var(--muted);margin-top:5px">Runs from the Zabbix server and uses about 10 s of full-speed traffic each way.</div>`;
+  }
+  h += `</div>`;
+  box.innerHTML = h; box.classList.toggle("min", gwMin);
+  $("#gwh").onclick = () => { gwMin = !gwMin; store("nm-gwmin", gwMin); gwCard(); };
+  const wb = box.querySelector(".warnb"); if (wb) wb.onclick = () => select(wb.dataset.go, true);
+  const sb = $("#spt"); if (sb) sb.onclick = () => startSpeedtest($("#spm"));
+  const gwW = $("#gw-warn"); if (gwW) gwW.onclick = () => { evFilter = "warnings"; special("activity"); };
+}
+
+/* ---------- stats + edit form for the side panel ---------- */
+function statsHtml(id) {
+  const st = LIVE.stats && LIVE.stats[id]; if (!st) return "";
+  const col = p => p > 85 ? "var(--bad)" : p > 70 ? "var(--warn)" : "var(--accent)";
+  let h = '<div class="sec">Stats</div>';
+  ["cpu", "mem", "disk"].forEach(k => { const v = st[k]; if (v) h += `<div class="srow"><span>${esc(v.label)}</span><span>${esc(v.text)}</span></div><div class="bar"><div style="width:${Math.min(100, v.pct || 0)}%;background:${col(v.pct || 0)}"></div></div>`; });
+  ["temp", "uptime"].forEach(k => { const v = st[k]; if (v) h += `<div class="srow" style="margin-bottom:4px"><span>${esc(v.label)}</span><span>${esc(v.text)}</span></div>`; });
+  const hs = LIVE.hist && LIVE.hist.stats && LIVE.hist.stats[id];
+  if (hs && (st.cpu || st.mem)) h += `<div class="lgd" style="margin-top:8px"><span><i style="background:var(--accent)"></i>CPU</span><span><i style="background:var(--pur)"></i>Memory</span><span style="margin-left:auto">last ${Math.round(hs.length)} min</span></div>` + spark(hs, 1, 2, 100);
+  return h;
+}
+const TYPES = { router: "router", switch: "server-2", unifi: "cloud", camera: "device-cctv", tv: "device-tv", laptop: "device-laptop", desktop: "device-desktop", phone: "device-mobile", printer: "printer", appliance: "wash-machine", iot: "bulb", nas: "database", server: "server", vm: "device-desktop", lxc: "box", unknown: "help-circle" };
+function editForm(n) {
+  const url = (n.url || "").split(n.ip || "\u0000").join("{ip}");
+  return `<div class="ef" id="ef" style="display:none"><div class="sec">Edit device</div>
+    <label for="e-name">Name</label><input type="text" id="e-name" value="${esc(n.name)}">
+    <label for="e-type">Type (icon)</label><select id="e-type">${Object.keys(TYPES).map(t => `<option ${t === n.type ? "selected" : ""}>${t}</option>`).join("")}</select>
+    <label for="e-url">Web UI address</label><input type="text" id="e-url" value="${esc(url)}" placeholder="http://{ip}:8080">
+    <div style="font-size:11px;color:var(--muted);margin-top:3px">{ip} is replaced by the device's current IP.</div>
+    <label for="e-pin">Pin to port (optional)</label><input type="text" id="e-pin" placeholder="SW-Office:3">
+    <label class="ck"><input type="checkbox" id="e-imp" ${(n.flags || []).includes("important") ? "checked" : ""}> Important (red and alert when down)</label>
+    <div class="acts"><button class="btn" id="e-save"><i class="ti ti-device-floppy"></i>Save</button><button class="btn" id="e-cancel">Cancel</button></div>
+    <div class="msg" id="e-msg"></div></div>`;
+}
+async function saveEdit(n) {
+  const body = { mac: n.mac, name: $("#e-name").value.trim(), type: $("#e-type").value, url: $("#e-url").value.trim(), important: $("#e-imp").checked };
+  if ($("#e-pin").value.trim()) body.pin = $("#e-pin").value.trim();
+  const msg = $("#e-msg");
+  if (!body.name) { msg.style.color = "var(--bad)"; msg.textContent = "Enter a name."; return; }
+  msg.style.color = "var(--muted)"; msg.textContent = "Saving…";
+  try {
+    const r = await fetch("spidermap_edit.php", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({ ok: false, error: "Unexpected answer (" + r.status + ")" }));
+    if (!j.ok) { msg.style.color = "var(--bad)"; msg.textContent = j.error || "Couldn't save."; return; }
+    n.name = body.name; n.type = body.type; n.icon = TYPES[body.type] || n.icon;
+    n.url = body.url ? body.url.split("{ip}").join(n.ip || "") : (n.ip ? "http://" + n.ip : "");
+    n.flags = (n.flags || []).filter(f => f !== "important" && f !== "unknown").concat(body.important ? ["important"] : []);
+    render(); panel(n.id);
+    const m2 = $("#e-msg"); if (m2) { m2.style.color = "var(--ok)"; m2.textContent = "Saved. The map updates for everyone within a minute."; }
+  } catch (e) { msg.style.color = "var(--bad)"; msg.textContent = "Couldn't reach the server."; }
+}
+
+/* ---------- layout + render ---------- */
+function W(id) { const c = kids[id]; return (!c || isFolded(id)) ? 1 : c.reduce((a, k) => a + W(k), 0); }
+function render() {
+  const roots = DATA.nodes.filter(n => !n.parent || !byId[n.parent]).map(n => n.id);
+  const stage = $("#stage"), seen = new Set();
+  let svg = "", extra = "", maxd = 0, left = 0;
+  const flowDur = l => { if (!l || l.st === 2) return 0; const m = ((l.rx || 0) + (l.tx || 0)) / 1e6; return m > 50 ? .35 : m > 5 ? .7 : m > .5 ? 1.3 : m > .005 ? 2.6 : 0; };
+  function line(x1, y1, x2, y2, cls, child) { svg += `<line class="ln ${cls}" data-c="${esc(child || "")}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`; }
+  function place(id, l, d) {
+    const n = byId[id], x = l + W(id) * COL / 2, y = d * ROW + 10;
+    pos[id] = { x, y }; maxd = Math.max(maxd, d); seen.add(id);
+    let e = els[id];
+    if (!e) {
+      e = document.createElement("div"); e.dataset.id = id;
+      e.style.left = (x - 52) + "px"; e.style.top = y + "px"; e.style.opacity = 0;
+      stage.appendChild(e); els[id] = e; requestAnimationFrame(() => { e.style.opacity = 1; });
+    }
+    const s = status(n), f = n.flags || [];
+    e.className = "tn" + (s === "off" || s === "asleep" ? " off" : "") + (s === "down" ? " down" : "") + (f.includes("new") ? " new" : "") + (sel === id ? " sel" : "");
+    const inner = `<div class="ic">${iconHtml(n)}<span class="st" style="background:${dotColor(n)}"></span></div><div class="nm" title="${esc(n.name)}">${esc(n.name)}</div><div class="sb">${esc(n.sub)}</div>${tags(n)}`;
+    if (e._h !== inner) { e.innerHTML = inner; e._h = inner; }
+    e.style.left = (x - 52) + "px"; e.style.top = y + "px"; e.style.opacity = 1;
+    const c = kids[id];
+    if (c) {
+      const by = y + ROW - 36, top = y + (tags(n) ? 104 : 90);
+      line(x, top, x, by - 10, s === "up" || n.kind !== "device" ? "" : "off", "p:" + id);
+      if (!isFolded(id)) {
+        let cl = l; const xs = [];
+        c.forEach(k => {
+          const cx = cl + W(k) * COL / 2, ch = byId[k], cs = status(ch), lv = portLive(ch.port_ref);
+          const off = (cs === "off" || cs === "down" || cs === "asleep") && !(lv && lv.st === 1) || (lv && lv.st === 2);
+          xs.push(cx); line(cx, by, cx, by + 36, off ? "off" : "", k);
+          const dur = off ? 0 : flowDur(lv);
+          if (dur) svg += `<line class="fl" style="animation-duration:${dur}s" x1="${cx}" y1="${by}" x2="${cx}" y2="${by + 36}"/>`;
+          if (ch.port) extra += `<div class="pt" style="left:${cx}px;top:${by + 12}px">${esc(ch.port)}</div>`;
+          place(k, cl, d + 1); cl += W(k) * COL;
+        });
+        const a = Math.min(...xs), b = Math.max(...xs);
+        if (b > a) line(a, by, b, by, "", "bus:" + id);
+      }
+      extra += `<div class="tg" data-t="${esc(id)}" style="left:${x - 10}px;top:${by - 10}px">${isFolded(id) ? "+" : "−"}</div>`;
+      if (isFolded(id)) extra += `<div class="cnt" style="left:${x + 14}px;top:${by - 8}px">${c.length}</div>`;
+    }
+  }
+  roots.forEach(r => { place(r, left, 0); left += W(r) * COL; });
+  Object.keys(els).forEach(id => { if (!seen.has(id)) { const e = els[id]; delete els[id]; e.style.opacity = 0; setTimeout(() => e.remove(), 300); } });
+  stage.querySelectorAll("svg,.tg,.pt,.cnt").forEach(x => x.remove());
+  const w = left, h = (maxd + 1) * ROW + 20;
+  stage.insertAdjacentHTML("afterbegin", `<svg width="${w}" height="${h}" style="position:absolute;left:0;top:0;overflow:visible;pointer-events:none">${svg}</svg>`);
+  stage.insertAdjacentHTML("beforeend", extra);
+  stage.style.width = w + "px"; stage.style.height = h + "px";
+  if (hoverId) highlight(hoverId);
+}
+
+/* ---------- path highlight ---------- */
+let hoverId = null;
+function highlight(id) {
+  document.querySelectorAll("line.hl").forEach(l => l.classList.remove("hl"));
+  if (!id) return;
+  let cur = id;
+  while (cur && byId[cur]) {
+    const p = byId[cur].parent;
+    document.querySelectorAll(`line[data-c="${CSS.escape(cur)}"]`).forEach(l => l.classList.add("hl"));
+    if (p) document.querySelectorAll(`line[data-c="p:${CSS.escape(p)}"]`).forEach(l => l.classList.add("hl"));
+    cur = p;
+  }
+}
+$("#stage").addEventListener("mouseover", e => { const t = e.target.closest(".tn"); const id = t ? t.dataset.id : null; if (id !== hoverId) { hoverId = id; highlight(id); } });
+$("#stage").addEventListener("mouseleave", () => { hoverId = null; highlight(null); });
+
+/* ---------- pan / zoom ---------- */
+function apply(anim) { const s = $("#stage"); s.classList.toggle("anim", !!anim); s.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.k})`; }
+function fit(anim) {
+  const c = $("#canvas"), s = $("#stage"), w = parseFloat(s.style.width) || 1, h = parseFloat(s.style.height) || 1;
+  const avail = c.clientWidth - ($("#panel").classList.contains("open") && c.clientWidth > 700 ? 390 : 0);
+  const lp = c.clientWidth > 700 && $("#gw").innerHTML ? 334 : 0;
+  view.k = Math.max(.25, Math.min(1.15, (avail - lp - 40) / w, (c.clientHeight - 40) / h));
+  view.x = lp + (avail - lp - w * view.k) / 2; view.y = 20; apply(anim);
+}
+function zoom(f, cx, cy) {
+  const c = $("#canvas").getBoundingClientRect(); cx = cx ?? c.width / 2; cy = cy ?? c.height / 2;
+  const k = Math.max(.2, Math.min(2.5, view.k * f));
+  view.x = cx - (cx - view.x) * k / view.k; view.y = cy - (cy - view.y) * k / view.k; view.k = k;
+}
+function centerOn(id) {
+  const p = pos[id], c = $("#canvas"); if (!p) return;
+  const avail = c.clientWidth - (c.clientWidth > 700 ? 390 : 0);
+  if (view.k < .8) view.k = .9;
+  view.x = avail / 2 - p.x * view.k; view.y = c.clientHeight / 3 - p.y * view.k; apply(true);
+}
+$("#zin").onclick = () => { zoom(1.25); apply(true); };
+$("#zout").onclick = () => { zoom(.8); apply(true); };
+$("#zfit").onclick = () => fit(true);
+const cv = $("#canvas"); let drag = null;
+cv.addEventListener("wheel", e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoom(e.deltaY < 0 ? 1.12 : .89, e.clientX - r.left, e.clientY - r.top); apply(false); }, { passive: false });
+cv.addEventListener("pointerdown", e => { if (e.target.closest(".tn,.tg")) return; drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }; cv.classList.add("drag"); cv.setPointerCapture(e.pointerId); });
+cv.addEventListener("pointermove", e => { if (!drag) return; view.x = drag.vx + e.clientX - drag.x; view.y = drag.vy + e.clientY - drag.y; drag.moved = true; apply(false); });
+cv.addEventListener("pointerup", e => { if (drag && !drag.moved && !e.target.closest(".tn,.tg")) closePanel(); drag = null; cv.classList.remove("drag"); });
+
+/* ---------- clicks ---------- */
+$("#stage").addEventListener("click", e => {
+  const t = e.target.closest(".tg");
+  if (t) { const id = t.dataset.t; folded[id] = !isFolded(id); store("nm-folded", folded); render(); return; }
+  const n = e.target.closest(".tn"); if (n) select(n.dataset.id);
+});
+function select(id, center) {
+  let p = byId[id] && byId[id].parent; let opened = false;
+  while (p && byId[p]) { if (isFolded(p)) { folded[p] = false; opened = true; } p = byId[p].parent; }
+  if (opened) store("nm-folded", folded);
+  sel = id; selPort = null; render(); panel(id);
+  if (center) centerOn(id);
+}
+function closePanel() { sel = null; $("#panel").classList.remove("open"); if (DATA) render(); }
+
+/* ---------- side panel ---------- */
+function rowsTable(ids) {
+  return `<table class="lst"><tr class="h"><td>Name</td><td>IP</td><td>Status</td></tr>${ids.map(k => {
+    const c = byId[k], s = status(c);
+    return `<tr class="r" data-go="${esc(k)}"><td><i class="dot" style="background:${dotColor(c)};margin-right:6px"></i>${esc(c.name)}</td><td>${esc(c.ip || "")}</td><td>${s === "up" ? "online" : esc(c.sub || s)}</td></tr>`;
+  }).join("")}</table>`;
+}
+function panel(id, quiet) {
+  const n = byId[id], P = $("#panel"); if (!n) return;
+  const lv = portLive(n.port_ref);
+  const down = lv ? (n.flip ? lv.rx : lv.tx) : 0, up = lv ? (n.flip ? lv.tx : lv.rx) : 0;
+  let h = `<div class="ph"><div class="ic">${iconHtml(n)}</div><div><h2>${esc(n.name)}</h2><div style="color:var(--muted)">${esc(n.sub)} ${tags(n)}</div></div><button class="btn x" id="pclose" aria-label="Close"><i class="ti ti-x"></i></button></div>`;
+  const phh = portHist(n.port_ref), ph = phh && phh.rows;
+  if (lv && status(n) !== "off") h += `<div class="traffic"><span><i class="ti ti-arrow-down" style="color:var(--accent)"></i> ${mbps(down)}</span><span><i class="ti ti-arrow-up" style="color:var(--ok)"></i> ${mbps(up)}</span><span style="color:var(--muted)">${phh && phh.live ? '<span class="livedot"></span>' : ""}${esc(n.port || "")}</span></div>` + (ph ? spark(ph, n.flip ? 1 : 2, n.flip ? 2 : 1) + `<div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">${phh.live ? "last " + Math.round(ph.length * (RT.every || 5) / 60) + " min, live" : "last " + ph.length + " min"}</span></div>` : "");
+  const acts = [];
+  if (n.url) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open web UI</a>`);
+  if (n.zbx) acts.push(`<a class="btn" href="${esc(DATA.zabbix_url)}?action=latest.view&filter_set=1&hostids%5B%5D=${encodeURIComponent(n.zbx)}" target="_top"><i class="ti ti-chart-line"></i>Show in Zabbix</a>`);
+  if (n.mac) acts.push(`<button class="btn" id="cmac"><i class="ti ti-copy"></i>Copy MAC</button>`, `<button class="btn" id="edit"><i class="ti ti-pencil"></i>Edit</button>`);
+  if (acts.length) h += `<div class="acts">${acts.join("")}</div>`;
+  issues(n).forEach(i => { h += `<div class="iss-line"><i class="ti ti-alert-triangle"></i> ${esc(i.text)}</div>`; });
+  if (n.id === "inet") h += internetHtml();
+  if (n.mac) h += editForm(n);
+  h += statsHtml(id);
+  if (n.mac) h += presenceHtml(n.mac);
+  if (n.kind === "switch" && DATA.switches[n.sw]) {
+    const sw = DATA.switches[n.sw], live = LIVE.ports && LIVE.ports[n.sw] || {};
+    const st = p => { const l = live[String(p.n)]; return l && l.st ? (l.st === 1 ? "up" : "down") : p.status; };
+    const mb = p => { const m = /([\d.]+)\s*(G|M)/i.exec(p.speed || ""); return m ? parseFloat(m[1]) * (m[2].toUpperCase() === "G" ? 1000 : 1) : 0; };
+    const sc = p => st(p) !== "up" ? "" : (v => v >= 10000 ? "s10g" : v >= 2500 ? "s25g" : v >= 1000 ? "s1g" : v > 0 ? "s100" : "up")(mb(p));
+    const ci = p => LIVE.cable && LIVE.cable[n.sw] && LIVE.cable[n.sw][String(p.n)];
+    const pb = p => `<span class="port ${sc(p)} ${ci(p) ? "iss" : ""} ${selPort === p.n ? "on" : ""}" data-p="${p.n}" title="${esc(p.full)} ${esc(p.speed || "")}${ci(p) ? " · " + esc(ci(p).join("; ")) : ""}">${p.n}</span>`;
+    const odd = sw.ports.filter(p => p.n % 2), even = sw.ports.filter(p => !(p.n % 2));
+    h += `<div class="sec">Ports · ${sw.ports.filter(p => st(p) === "up").length} of ${sw.ports.length} up</div><div class="front"><div>${odd.map(pb).join("")}</div><div>${even.map(pb).join("")}</div></div>`
+      + `<div style="margin-top:8px"><span class="spd"><i style="background:var(--warn)"></i>10/100 Mbps</span><span class="spd"><i style="background:var(--ok)"></i>1 Gbps</span><span class="spd"><i style="background:var(--accent)"></i>2.5 Gbps</span><span class="spd"><i style="background:var(--pur)"></i>10 Gbps</span></div>`;
+    h += `<div class="sec">Port clients</div><table class="lst"><tr class="h"><td>Port</td><td>Client</td><td>Speed</td><td>Traffic</td></tr>${sw.ports.filter(p => st(p) === "up" || p.clients.length).map(p => {
+      const l = live[String(p.n)];
+      return `<tr class="${selPort === p.n ? "on" : ""}" data-pr="${p.n}"><td>${esc(p.label)}</td><td>${esc(p.clients.join(", ") || (p.alias || "—"))}${ci(p) ? `<div style="color:var(--warn);font-size:11px">cable? ${esc(ci(p).join("; "))}</div>` : ""}</td><td>${esc(p.speed || (st(p) === "up" ? "" : "down"))}</td><td style="white-space:nowrap">${l ? "↓" + mbps(l.tx) + " ↑" + mbps(l.rx) : ""}</td></tr>`;
+    }).join("")}</table>`;
+  }
+  if (kids[id] && kids[id].length) h += `<div class="sec">${n.kind === "switch" ? "Connected" : "Clients"} · ${kids[id].length}</div>` + rowsTable(kids[id]);
+  if (n.details && n.details.length) h += `<div class="sec">Details</div><table class="kv">${n.details.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
+  P.innerHTML = h; P.classList.add("open");
+  $("#pclose").onclick = closePanel;
+  const cm = $("#cmac"); if (cm) cm.onclick = () => { navigator.clipboard && navigator.clipboard.writeText(n.mac); cm.innerHTML = '<i class="ti ti-check"></i>Copied'; };
+  P.querySelectorAll("[data-go]").forEach(r => r.onclick = () => select(r.dataset.go, true));
+  const eb = $("#edit"); if (eb) eb.onclick = () => { const f = $("#ef"); f.style.display = f.style.display === "block" ? "none" : "block"; if (f.style.display === "block") $("#e-name").focus(); };
+  const es = $("#e-save"); if (es) es.onclick = () => saveEdit(n);
+  const ec = $("#e-cancel"); if (ec) ec.onclick = () => { $("#ef").style.display = "none"; };
+  P.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { selPort = +b.dataset.p; panel(id, true); });
+}
+
+/* ---------- presence ---------- */
+let PRES = null;
+async function loadPresence() { try { const r = await fetch("spidermap_presence.json?" + Date.now(), { cache: "no-store" }); if (r.ok) PRES = await r.json(); } catch (e) {} }
+function presBar(mac, from, to) {
+  const iv = (PRES && PRES.devices[mac]) || [], span = to - from;
+  const rects = iv.filter(x => x[1] + 150 >= from && x[0] - 150 <= to).map(x => {
+    const a = Math.max(from, x[0] - 150), b = Math.min(to, x[1] + 150);
+    return `<rect x="${((a - from) / span * 100).toFixed(2)}%" y="0" width="${Math.max(.3, (b - a) / span * 100).toFixed(2)}%" height="10" fill="var(--ok)"/>`;
+  }).join("");
+  return `<svg class="pres"><rect width="100%" height="10" fill="var(--bg)"/>${rects}</svg>`;
+}
+function presenceHtml(mac) {
+  if (!PRES || !PRES.devices[mac]) return "";
+  const t = Date.now() / 1000, d0 = new Date(); d0.setHours(0, 0, 0, 0);
+  let h = `<div class="sec">Online · last 24 h</div>${presBar(mac, t - 86400, t)}<div class="ticks" style="margin-left:0"><span>-24h</span><span>-18h</span><span>-12h</span><span>-6h</span><span>now</span></div>`;
+  h += `<div class="sec">Last 7 days</div>`;
+  for (let i = 0; i < 7; i++) {
+    const s = d0.getTime() / 1000 - i * 86400, day = new Date(s * 1000).toLocaleDateString(undefined, { weekday: "short" });
+    h += `<div class="prow"><span>${i ? esc(day) : "Today"}</span>${presBar(mac, s, s + 86400)}</div>`;
+  }
+  return h + `<div class="ticks"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
+}
+
+/* ---------- activity feed ---------- */
+let EVENTS = [], evFilter = "all";
+const EVI = { device: "devices", security: "shield", ip: "network", internet: "world", port: "plug-connected", cable: "plug-x", traffic: "activity", speedtest: "gauge" };
+const SEVC = { info: "var(--muted)", ok: "var(--ok)", warn: "var(--warn)", bad: "var(--bad)" };
+const EVF = { all: () => true, warnings: e => e.sev === "warn" || e.sev === "bad", devices: e => ["device", "security", "ip"].includes(e.type), internet: e => ["internet", "speedtest"].includes(e.type), ports: e => ["port", "cable", "traffic"].includes(e.type) };
+async function loadEvents() {
+  try { const r = await fetch("spidermap_events.json?" + Date.now(), { cache: "no-store" }); if (r.ok) { EVENTS = await r.json(); actBadge(); if (sel === "#activity") special("activity"); } } catch (e) {}
+}
+function actBadge() {
+  const seen = +(store("nm-seen") || 0), n = EVENTS.filter(e => e.t > seen && (e.sev === "warn" || e.sev === "bad")).length, b = $("#act-bd");
+  b.textContent = n > 99 ? "99+" : n; b.style.display = n ? "" : "none";
+}
+function activityHtml() {
+  const list = EVENTS.filter(EVF[evFilter]).slice().reverse().slice(0, 300);
+  let h = `<div class="chips">${Object.keys(EVF).map(k => `<span class="chip ${evFilter === k ? "on" : ""}" data-f="${k}">${k[0].toUpperCase() + k.slice(1)}</span>`).join("")}</div>`;
+  if (!list.length) return h + `<p style="color:var(--muted)">Nothing here yet. Events appear as things happen on your network.</p>`;
+  let day = "";
+  const today = new Date().toDateString(), yest = new Date(Date.now() - 86400000).toDateString();
+  list.forEach(e => {
+    const d = new Date(e.t * 1000), ds = d.toDateString();
+    if (ds !== day) { day = ds; h += `<div class="evd">${ds === today ? "Today" : ds === yest ? "Yesterday" : d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "short" })}</div>`; }
+    h += `<div class="evr ${e.node && byId[e.node] ? "go" : ""}" ${e.node && byId[e.node] ? `data-go="${esc(e.node)}"` : ""}><i class="ti ti-${EVI[e.type] || "point"}" style="color:${SEVC[e.sev] || "var(--muted)"}"></i><span class="tx">${esc(e.text)}</span><span class="tm">${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span></div>`;
+  });
+  return h;
+}
+
+/* ---------- who's online ---------- */
+let pplAll = false;
+function peopleHtml() {
+  const t = Date.now() / 1000;
+  const devs = DATA.nodes.filter(n => n.mac && (pplAll || ["phone", "laptop"].includes(n.type))).sort((a, b) => (status(b) === "up") - (status(a) === "up") || a.name.localeCompare(b.name));
+  let h = `<div class="chips"><span class="chip ${pplAll ? "" : "on"}" data-pa="0">Phones &amp; laptops</span><span class="chip ${pplAll ? "on" : ""}" data-pa="1">All devices</span></div>`;
+  if (!devs.length) return h + `<p style="color:var(--muted)">No ${pplAll ? "" : "phones or laptops "}found yet. Set a device's type with Edit.</p>`;
+  devs.forEach(n => {
+    const on = status(n) === "up", iv = PRES && PRES.devices[n.mac], last = iv && iv.length ? iv[iv.length - 1] : null;
+    const txt = on ? (last ? "online since " + new Date(last[0] * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "online") : (n.last ? "last seen " + ago(n.last) : "not seen");
+    h += `<div class="pp" data-go="${esc(n.id)}"><div class="top"><span><i class="dot" style="background:${on ? "var(--ok)" : "var(--off)"};margin-right:6px"></i>${esc(n.name)}</span><span style="color:var(--muted);font-size:12px">${esc(txt)}</span></div>${presBar(n.mac, t - 86400, t)}</div>`;
+  });
+  return h + `<div class="ticks" style="margin-left:0"><span>-24h</span><span>-12h</span><span>now</span></div><p style="font-size:11px;color:var(--muted)">Phones sleep their Wi-Fi to save battery, so short gaps are normal.</p>`;
+}
+
+/* ---------- top talkers ---------- */
+let topPer = "d";
+function topHtml() {
+  const U = rtFresh() && RT.usage ? RT.usage : null;
+  let h = `<div class="chips"><span class="chip ${topPer === "d" ? "on" : ""}" data-tp="d">Today</span><span class="chip ${topPer === "m" ? "on" : ""}" data-tp="m">This month</span></div>`;
+  if (!U) return h + `<p style="color:var(--muted)">Needs the real-time service (spidermap-rt).</p>`;
+  const rows = [];
+  Object.entries(U[topPer] || {}).forEach(([sid, pp]) => Object.entries(pp).forEach(([n, v]) => {
+    const sw = DATA.switches[sid]; if (!sw) return;
+    const p = sw.ports.find(x => String(x.n) === n); if (!p) return;
+    const node = DATA.nodes.find(x => x.port_ref && x.port_ref[0] === sid && String(x.port_ref[1]) === n && x.kind !== "switch");
+    const up = p.clients.some(c => Object.values(DATA.switches).some(s2 => s2.name === c));
+    rows.push({ name: p.clients.join(", ") || p.label, where: sw.name + " · " + p.label + (up ? " · uplink" : ""), sent: v[0], recv: v[1], tot: v[0] + v[1], node: node && node.id });
+  }));
+  rows.sort((a, b) => b.tot - a.tot);
+  const mx = rows.length ? rows[0].tot : 1;
+  rows.slice(0, 20).forEach(r => {
+    h += `<div class="ttr" ${r.node ? `data-go="${esc(r.node)}"` : ""}><div class="top"><span>${esc(r.name)}<div style="font-size:11px;color:var(--muted)">${esc(r.where)}</div></span><span style="text-align:right;white-space:nowrap">${bytes(r.tot)}<div style="font-size:11px;color:var(--muted)">↑ ${bytes(r.sent)} · ↓ ${bytes(r.recv)}</div></span></div><div class="bb" style="width:${(r.tot / mx * 100).toFixed(1)}%"></div></div>`;
+  });
+  return h + `<p style="font-size:11px;color:var(--muted)">Measured on the switch ports. Wi-Fi devices are counted together on the gateway's port. ↑ = sent by the device.</p>`;
+}
+
+/* ---------- internet details ---------- */
+function internetHtml() {
+  if (!rtFresh() || !RT.inet) return "";
+  const I = RT.inet, T = RT.targets || {};
+  let h = `<div class="sec">Internet health</div>`;
+  if (I.uptime_month != null) h += `<div class="srow" style="margin-bottom:4px"><span>Uptime this month</span><span>${I.uptime_month.toFixed(I.uptime_month >= 99.995 ? 2 : 3)} %</span></div>`;
+  Object.entries(T).forEach(([k, v]) => { h += `<div class="srow" style="margin-bottom:4px"><span>${esc(k)}</span><span>${v.ms == null ? '<span style="color:var(--bad)">no answer</span>' : v.ms + " ms · loss " + v.loss + " % · jitter " + (v.jit ?? "-") + " ms"}</span></div>`; });
+  const L = RT.hist.lat || [];
+  if (L.length > 2) h += `<div class="lgd" style="margin-top:8px"><span><i style="background:var(--accent)"></i>latency</span><span><i style="background:var(--pur)"></i>jitter</span><span style="margin-left:auto">last ${Math.round(L.length / 4)} min</span></div>` + spark(L, 1, 3);
+  const outs = (I.outages_month || []).slice().reverse();
+  h += `<div class="sec">Outages this month · ${outs.length}</div>`;
+  h += outs.length ? `<table class="lst">${outs.map(o => `<tr><td>${new Date(o[0] * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td><td>${Math.max(1, Math.round((o[1] - o[0]) / 60))} min</td></tr>`).join("")}</table>` : `<p style="color:var(--muted);margin:0">None.</p>`;
+  const ph = DATA.public_ip_history || [];
+  if (ph.length) h += `<div class="sec">Public IP changes</div><table class="lst">${ph.slice().reverse().map(x => `<tr><td>${new Date(x[0] * 1000).toLocaleDateString()}</td><td>${esc(x[1])} → ${esc(x[2])}</td></tr>`).join("")}</table>`;
+  return h;
+}
+
+/* ---------- special panels (activity, people, top talkers) ---------- */
+const SPECIAL = { activity: ["Activity", "bell", activityHtml], people: ["Who's online", "users", peopleHtml], top: ["Top talkers", "chart-bar", topHtml] };
+function special(kind) {
+  const [title, icon, fn] = SPECIAL[kind], P = $("#panel");
+  sel = "#" + kind;
+  P.innerHTML = `<div class="ph"><div class="ic"><i class="ti ti-${icon}"></i></div><div><h2>${title}</h2></div><button class="btn x" id="pclose" aria-label="Close"><i class="ti ti-x"></i></button></div>` + fn();
+  P.classList.add("open");
+  $("#pclose").onclick = closePanel;
+  P.querySelectorAll("[data-go]").forEach(r => r.onclick = () => select(r.dataset.go, true));
+  P.querySelectorAll("[data-f]").forEach(c => c.onclick = () => { evFilter = c.dataset.f; special("activity"); });
+  P.querySelectorAll("[data-pa]").forEach(c => c.onclick = () => { pplAll = c.dataset.pa === "1"; special("people"); });
+  P.querySelectorAll("[data-tp]").forEach(c => c.onclick = () => { topPer = c.dataset.tp; special("top"); });
+  if (kind === "activity") { store("nm-seen", Date.now() / 1000); actBadge(); }
+  if (DATA) render();
+}
+$("#b-act").onclick = () => special("activity");
+$("#b-ppl").onclick = () => special("people");
+$("#b-top").onclick = () => special("top");
+
+/* ---------- speed test + CSV + toast ---------- */
+function toast(t) { const e = $("#toast"); e.textContent = t; e.classList.add("on"); clearTimeout(toast.h); toast.h = setTimeout(() => e.classList.remove("on"), 3500); }
+async function startSpeedtest(msg) {
+  const say = (t, bad) => { if (msg) { msg.style.color = bad ? "var(--bad)" : "var(--muted)"; msg.textContent = t; } else toast(t); };
+  if (RT && RT.speedtest && RT.speedtest.running) return say("A speed test is already running.");
+  say("Starting speed test…");
+  try {
+    const r = await fetch("spidermap_edit.php", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "speedtest" }) });
+    const j = await r.json().catch(() => ({ ok: false, error: "Unexpected answer (" + r.status + ")" }));
+    if (!j.ok) return say(j.error || "Couldn't start the test.", true);
+    if (RT && RT.speedtest) { RT.speedtest.running = true; RT.speedtest.started = Date.now() / 1000; RT.speedtest.error = ""; }
+    gwCard(); say("Speed test started. Results appear on the gateway card in about 30 s.");
+    if (gwMin) { gwMin = false; store("nm-gwmin", false); gwCard(); }
+  } catch (e) { say("Couldn't reach the server.", true); }
+}
+$("#b-spd").onclick = () => startSpeedtest(null);
+$("#b-csv").onclick = () => {
+  if (!DATA) return;
+  const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';
+  const ts = x => x ? new Date(x * 1000).toLocaleString() : "";
+  const rows = [["Name", "Type", "Status", "IP", "MAC", "Manufacturer", "Connection", "First seen", "Last seen", "Important", "Web UI"]];
+  DATA.nodes.filter(n => n.mac).sort((a, b) => a.name.localeCompare(b.name)).forEach(n => rows.push([n.name, n.type, status(n), n.ip, n.mac, n.vendor, n.conn, ts(n.first), ts(n.last), (n.flags || []).includes("important") ? "yes" : "", n.url]));
+  const blob = new Blob(["\ufeff" + rows.map(r => r.map(q).join(",")).join("\r\n")], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "network-devices-" + new Date().toISOString().slice(0, 10) + ".csv";
+  document.body.appendChild(a); a.click(); a.remove(); toast("Device list exported.");
+};
+
+/* ---------- search ---------- */
+function matches(q) {
+  q = q.trim().toLowerCase(); if (!q) return [];
+  return DATA.nodes.filter(n => [n.name, n.ip, n.mac, n.sub].some(v => (v || "").toLowerCase().includes(q))).map(n => n.id);
+}
+$("#q").addEventListener("input", () => {
+  const m = new Set(matches($("#q").value));
+  Object.entries(els).forEach(([id, e]) => e.classList.toggle("match", m.has(id)));
+});
+$("#q").addEventListener("keydown", e => { if (e.key === "Enter") { const m = matches($("#q").value); if (m.length) select(m[0], true); } if (e.key === "Escape") { $("#q").value = ""; $("#q").dispatchEvent(new Event("input")); } });
+
+window.addEventListener("resize", () => fit(false));
+load(); loadLive(); loadRT(); loadEvents(); loadPresence();
+setInterval(load, 60000); setInterval(loadLive, 30000); setInterval(loadRT, 5000); setInterval(loadEvents, 20000); setInterval(loadPresence, 300000);
+</script>
+</body>
+</html>

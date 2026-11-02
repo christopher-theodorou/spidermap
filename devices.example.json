@@ -1,0 +1,17 @@
+{
+ "settings": {
+  "flag_hours": 24,
+  "forget_after_days": 30,
+  "speedtest_daily": "03:30",
+  "scan_subnets": ["192.168.1.0/24"],
+  "core_switch": "SW-Core",
+  "manual_links": [["Zabbix server", "Proxmox", "VM on vmbr0"]],
+  "aliases": {"pve": "Proxmox"}
+ },
+ "devices": {
+  "aa:bb:cc:dd:ee:01": {"name": "Router", "type": "router", "important": true},
+  "aa:bb:cc:dd:ee:02": {"name": "Front door camera", "type": "camera", "important": true, "url": "http://{ip}:8080"},
+  "aa:bb:cc:dd:ee:03": {"name": "NAS", "type": "nas", "pin": "SW-Office:3"},
+  "aa:bb:cc:dd:ee:04": {"name": "Anna's phone", "type": "phone"}
+ }
+}

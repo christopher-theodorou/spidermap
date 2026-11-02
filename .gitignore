@@ -1,0 +1,7 @@
+# Everything about YOUR network stays out of git
+zabbix.env
+devices.json
+spidermap_*.json
+.spidermap.lock
+__pycache__/
+*.log
