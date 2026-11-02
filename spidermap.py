@@ -1092,7 +1092,8 @@ def _speedtest_once(server=""):
     """Run one speed test. Prefers Ookla's official CLI (accurate on fast lines), falls back to speedtest-cli."""
     if os.path.isfile(OOKLA):
         cmd = [OOKLA, "--accept-license", "--accept-gdpr", "-f", "json", "-p", "no"] + (["-s", str(server)] if server else [])
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        env = dict(os.environ, HOME=os.environ.get("HOME") or "/root")   # Ookla crashes without HOME
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
         j = None
         for line in (r.stdout or "").splitlines():
             try:
@@ -1108,6 +1109,8 @@ def _speedtest_once(server=""):
                     msg = json.loads(line).get("message", msg)
                 except ValueError:
                     msg = line or msg
+            if "basic_string" in msg or "terminate called" in msg:
+                msg = "Ookla speed test crashed (missing HOME) - run: bash install.sh --update"
             raise RuntimeError((msg or "speed test failed")[:200])
         d, u, p = j.get("download", {}), j.get("upload", {}), j.get("ping", {})
         srv = j.get("server", {})
@@ -1356,6 +1359,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory={HERE}
+Environment=HOME=/root
 ExecStart=/bin/bash -c '. ./zabbix.env && exec python3 spidermap.py --rt'
 Restart=always
 RestartSec=10
