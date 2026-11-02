@@ -140,6 +140,10 @@ def _web_gid():
 
 
 def save_json(path, data):
+    if path.startswith(DATA_DIR + "/"):
+        ensure_data_dir()                          # also creates it on the very first run
+    else:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=1, ensure_ascii=False)
