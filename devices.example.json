@@ -3,6 +3,7 @@
   "flag_hours": 24,
   "forget_after_days": 30,
   "speedtest_daily": "03:30",
+  "speedtest_server": "",
   "scan_subnets": ["192.168.1.0/24"],
   "core_switch": "SW-Core",
   "manual_links": [["Zabbix server", "Proxmox", "VM on vmbr0"]],

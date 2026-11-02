@@ -184,7 +184,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "2026-11-02-spidermap";
+const PAGE_VERSION = "2026-11-02b";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -353,7 +353,14 @@ function gwCard() {
     const L = SP.last;
     h += `<div class="sec" style="margin-top:14px">Speed test</div>`;
     if (SP.running) h += `<div class="st-big" style="color:var(--accent)"><i class="ti ti-loader-2 spin"></i><span>Running… ${Math.round(Date.now() / 1000 - (SP.started || 0))} s</span></div>`;
-    else if (L) h += `<div class="st-big"><span style="color:var(--accent)">↓ <b>${(L.down / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--pur)">↑ <b>${(L.up / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--muted)">${L.ping} ms</span></div><div style="font-size:11px;color:var(--muted)">${esc(L.server)} · ${ago(L.at)}</div>`;
+    else if (L) {
+      h += `<div class="st-big"><span style="color:var(--accent)">↓ <b>${(L.down / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--pur)">↑ <b>${(L.up / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--muted)">${L.ping} ms</span></div><div style="font-size:11px;color:var(--muted)">${esc(L.server)} · ${ago(L.at)}${L.url && /^https:\/\/www\.speedtest\.net\//.test(L.url) ? ` · <a href="${esc(L.url)}" target="_blank" rel="noopener" style="color:var(--accent)">details</a>` : ""}</div>`;
+      if (L.load_down) {
+        const rise = Math.max(L.load_down || 0, L.load_up || 0) - (L.ping || 0);
+        const [g, c] = rise < 30 ? ["low", "var(--ok)"] : rise < 100 ? ["medium", "var(--warn)"] : ["high", "var(--bad)"];
+        h += `<div class="gr" style="margin-top:6px" title="How much the ping rises while the line is busy. High bufferbloat makes video calls and games stutter during downloads."><span>Latency under load</span><span>↓ ${Math.round(L.load_down)} ms · ↑ ${Math.round(L.load_up || 0)} ms</span></div><div class="gr"><span>Bufferbloat</span><span style="color:${c};font-weight:600">${g}</span></div>`;
+      }
+    }
     if (SP.history && SP.history.length > 2) h += spark(SP.history.map(x => [x.at, x.down, x.up]), 1, 2);
     if (SP.error) h += `<div style="color:var(--bad);font-size:12px;margin-top:6px">${esc(SP.error)}</div>`;
     h += `<button class="btn wide" id="spt"><i class="ti ti-gauge"></i>${SP.running ? "Speed test running…" : L ? "Run again" : "Run speed test"}</button><div id="spm" style="font-size:11px;color:var(--muted);margin-top:5px">Runs from the Zabbix server and uses about 10 s of full-speed traffic each way.</div>`;

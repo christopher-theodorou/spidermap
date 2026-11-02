@@ -1067,7 +1067,8 @@ SPEED_REQ = os.path.join(EDITS_DIR, "speedtest.request")
 SPEED_FILE = os.path.join(EDITS_DIR, "speedtest.json")
 SPEED_ITEMS = [("autotopo.speed.down", "Speed test: download", "bps"),
                ("autotopo.speed.up", "Speed test: upload", "bps"),
-               ("autotopo.speed.ping", "Speed test: ping", "ms")]
+               ("autotopo.speed.ping", "Speed test: ping", "ms"),
+               ("autotopo.speed.load", "Speed test: latency under load", "ms")]
 SERVICE = "/etc/systemd/system/spidermap-rt.service"
 
 
@@ -1084,20 +1085,61 @@ def snmp_get(auth, target, oids):
     return out
 
 
-def run_speedtest(api, zh, state):
-    state.update({"running": True, "started": now(), "error": ""})
-    try:
-        if not shutil.which("speedtest-cli"):
-            raise RuntimeError("speedtest-cli is not installed (apt install speedtest-cli)")
-        r = subprocess.run(["speedtest-cli", "--secure", "--json"], capture_output=True, text=True, timeout=180)
+OOKLA = "/usr/local/bin/ookla-speedtest"   # Ookla's official CLI, installed by install.sh
+
+
+def _speedtest_once(server=""):
+    """Run one speed test. Prefers Ookla's official CLI (accurate on fast lines), falls back to speedtest-cli."""
+    if os.path.isfile(OOKLA):
+        cmd = [OOKLA, "--accept-license", "--accept-gdpr", "-f", "json", "-p", "no"] + (["-s", str(server)] if server else [])
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        j = None
+        for line in (r.stdout or "").splitlines():
+            try:
+                x = json.loads(line)
+            except ValueError:
+                continue
+            if x.get("type") == "result":
+                j = x
+        if not j:
+            msg = ""
+            for line in (r.stderr or "").splitlines() + (r.stdout or "").splitlines():
+                try:
+                    msg = json.loads(line).get("message", msg)
+                except ValueError:
+                    msg = line or msg
+            raise RuntimeError((msg or "speed test failed")[:200])
+        d, u, p = j.get("download", {}), j.get("upload", {}), j.get("ping", {})
+        srv = j.get("server", {})
+        return {"down": d.get("bandwidth", 0) * 8, "up": u.get("bandwidth", 0) * 8,
+                "ping": round(p.get("latency", 0), 1), "jitter": round(p.get("jitter", 0), 1),
+                "load_down": round((d.get("latency") or {}).get("iqm", 0), 1) or None,
+                "load_up": round((u.get("latency") or {}).get("iqm", 0), 1) or None,
+                "loss": j.get("packetLoss"), "server": f"{srv.get('name', '')}, {srv.get('location', '')}".strip(", "),
+                "isp": j.get("isp", ""), "url": (j.get("result") or {}).get("url", ""), "engine": "Ookla"}
+    if shutil.which("speedtest-cli"):
+        cmd = ["speedtest-cli", "--secure", "--json"] + (["--server", str(server)] if server else [])
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
         j = json.loads(r.stdout or "{}")
         if not j.get("download"):
             raise RuntimeError((r.stderr or "speed test failed").strip().splitlines()[-1][:200])
-        res = {"at": now(), "down": j["download"], "up": j["upload"], "ping": round(j.get("ping", 0), 1),
-               "server": (j.get("server") or {}).get("sponsor", "") + ", " + (j.get("server") or {}).get("name", ""),
-               "isp": (j.get("client") or {}).get("isp", "")}
+        sv = j.get("server") or {}
+        return {"down": j["download"], "up": j["upload"], "ping": round(j.get("ping", 0), 1),
+                "server": f"{sv.get('sponsor', '')}, {sv.get('name', '')}", "isp": (j.get("client") or {}).get("isp", ""),
+                "engine": "speedtest-cli"}
+    raise RuntimeError("No speed test program found - run: bash install.sh --update")
+
+
+def run_speedtest(api, zh, state):
+    state.update({"running": True, "started": now(), "error": ""})
+    try:
+        server = load_json(DEVICES_FILE, {}).get("settings", {}).get("speedtest_server", "")
+        res = dict(_speedtest_once(server), at=now())
+        extra = ""
+        if res.get("load_down"):
+            extra = f", under load ↓ {res['load_down']:.0f} ms ↑ {res.get('load_up') or 0:.0f} ms"
         add_events([ev("speedtest", "info", f"Speed test: ↓ {res['down'] / 1e6:.0f} Mbps, ↑ {res['up'] / 1e6:.0f} Mbps, "
-                                            f"ping {res['ping']} ms ({res['server']})", "inet")])
+                                            f"ping {res['ping']} ms{extra} ({res['server']})", "inet")])
         hist = load_json(SPEED_FILE, [])
         hist.append(res)
         save_json(SPEED_FILE, hist[-50:])
@@ -1108,9 +1150,9 @@ def run_speedtest(api, zh, state):
                 ids[key] = it[0]["itemid"] if it else api.call("item.create", {
                     "hostid": zh["hostid"], "name": name, "key_": key, "type": 2, "value_type": 0, "units": units,
                     "tags": [{"tag": "source", "value": "autotopo"}]})["itemids"][0]
-            api.call("history.push", [{"itemid": ids["autotopo.speed.down"], "value": res["down"]},
-                                      {"itemid": ids["autotopo.speed.up"], "value": res["up"]},
-                                      {"itemid": ids["autotopo.speed.ping"], "value": res["ping"]}])
+            vals = {"autotopo.speed.down": res["down"], "autotopo.speed.up": res["up"], "autotopo.speed.ping": res["ping"],
+                    "autotopo.speed.load": max(res.get("load_down") or 0, res.get("load_up") or 0) or None}
+            api.call("history.push", [{"itemid": ids[k], "value": v} for k, v in vals.items() if v is not None and k in ids])
     except Exception as e:  # noqa: BLE001
         state["error"] = str(e)
     state["running"] = False
@@ -1532,8 +1574,8 @@ def setup(api):
         d = at.Dash(api, DASHBOARD_NAME, ["Topology"])
         d.add("Topology", "url", "Network", 0, 0, 72, 20, [{"url": (1, PAGE)}])
         print(f"Dashboard created: {DASHBOARD_NAME}")
-    if not shutil.which("speedtest-cli"):
-        print("For speed tests: apt install -y speedtest-cli")
+    if not os.path.isfile(OOKLA) and not shutil.which("speedtest-cli"):
+        print("For speed tests: bash install.sh --update (installs a speed test program)")
     install_service()
     print("\nSetup done. install.sh adds the scheduled jobs (or see README.md to add them by hand).")
 

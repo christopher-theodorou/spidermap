@@ -20,11 +20,34 @@ cleanup_old_jobs() {   # the earlier version was called zabbix-netmap / netmap
   ( crontab -l 2>/dev/null | grep -v 'zabbix_netmap.py' || true ) | crontab -
 }
 
+install_ookla() {   # Ookla's official speed test: accurate on fast lines, picks a nearby server
+  [ -x /usr/local/bin/ookla-speedtest ] && return 0
+  case "$(uname -m)" in
+    x86_64) arch=x86_64 ;; aarch64) arch=aarch64 ;; armv7l) arch=armhf ;;
+    *) echo "  (no Ookla build for $(uname -m) - speed tests use speedtest-cli)"; return 0 ;;
+  esac
+  echo
+  echo "SpiderMap can use Ookla's official speed test (the speedtest.net engine)."
+  echo "It is much more accurate on fast lines, and also measures latency under load."
+  echo "Free for personal, non-commercial use. Terms: https://www.speedtest.net/about/eula"
+  read -r -p "Install it and accept Ookla's license and privacy terms? [Y/n] " ans
+  case "${ans:-Y}" in n|N) echo "  skipped - speed tests use speedtest-cli"; return 0 ;; esac
+  tmp=$(mktemp -d)
+  if curl -fsSL "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux-${arch}.tgz" | tar xz -C "$tmp" speedtest \
+     && install -m 755 "$tmp/speedtest" /usr/local/bin/ookla-speedtest; then
+    echo "  Ookla speed test installed"
+  else
+    echo "  download failed - speed tests use speedtest-cli"
+  fi
+  rm -rf "$tmp"
+}
+
 if [ "${1:-}" = "--update" ]; then
   say "Updating SpiderMap..."
   [ -f zabbix.env ] || fail "No zabbix.env here - run: bash install.sh"
   . ./zabbix.env
   cleanup_old_jobs
+  install_ookla
   python3 spidermap.py --quiet
   python3 spidermap.py --install-service
   say "Done. Open pages reload themselves with the new version within a minute."
@@ -42,6 +65,7 @@ say "1/5  Installing packages"
 apt-get update -qq
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq snmp python3-requests ieee-data speedtest-cli cron iputils-ping curl >/dev/null
 systemctl enable --now cron >/dev/null 2>&1 || true
+install_ookla
 
 say "2/5  Configuration"
 if [ ! -f zabbix.env ]; then
