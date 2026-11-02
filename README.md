@@ -144,3 +144,6 @@ cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by ha
 | `spidermap_zabbix.py` | Zabbix API and SNMP helpers, plus the classic Zabbix map and dashboard |
 | `install.sh` | Installer and updater |
 | `assets/` | Logo, icons and screenshots |
+   ## License
+
+   SpiderMap is licensed under the [GNU Affero General Public License v3.0](LICENSE).
