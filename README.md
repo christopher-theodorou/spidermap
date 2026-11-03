@@ -174,7 +174,7 @@ cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by ha
 | `spidermap_ports.py` | Switch port scanner (also usable alone: port report and HTML table) |
 | `spidermap_zabbix.py` | Zabbix API and SNMP helpers, plus the classic Zabbix map and dashboard |
 | `install.sh` | Installer and updater |
-| `tests/` | Automated security tests |
+| `tests/` | Automated tests |
 | `docs/` | Architecture and release documentation |
 | `assets/` | Logo, icons and screenshots |
 
@@ -187,6 +187,7 @@ cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by ha
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How SpiderMap works: jobs, files, data flow, Zabbix integration, extending it |
 | [docs/RELEASING.md](docs/RELEASING.md) | Checklist for publishing a new version |
 | [tests/test_gateway.py](tests/test_gateway.py) | Security tests for `spidermap.php` (`python3 tests/test_gateway.py`, needs `php-cli`) |
+| [tests/test_core.py](tests/test_core.py) | Tests for scheduling, edits and job locking (`python3 tests/test_core.py`) |
 
 ## License
 

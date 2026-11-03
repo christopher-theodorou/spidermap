@@ -66,7 +66,7 @@ if [ "${1:-}" = "--update" ]; then
   . ./zabbix.env
   cleanup_old_jobs
   install_ookla
-  python3 spidermap.py --quiet
+  python3 spidermap.py                 # waits for a scan that cron may be running right now
   python3 spidermap.py --install-service
   check_webserver_rules
   say "Done. Open pages reload themselves with the new version within a minute."

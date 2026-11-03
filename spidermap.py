@@ -28,7 +28,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.2.2"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.2.3"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEVICES_FILE = os.path.join(HERE, "devices.json")
@@ -801,10 +801,31 @@ STAT_RULES = [("cpu", "CPU", r"(?i)\bcpu\b.*(util|usage)"),
 
 
 def apply_edits():
-    """Merge edits saved from the page (spidermap.php) into devices.json."""
-    edits = load_json(EDITS_FILE, {})
-    if not edits:
+    """Merge edits saved from the page (spidermap.php) into devices.json.
+    edits.json is read and cleared under the same lock spidermap.php uses when it writes,
+    so an edit saved at that very moment is never lost."""
+    import fcntl
+    try:
+        fh = open(EDITS_FILE, "r+", encoding="utf-8")
+    except FileNotFoundError:
         return {}
+    with fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            edits = json.loads(fh.read() or "{}")
+        except ValueError:
+            edits = {}
+        if not isinstance(edits, dict) or not edits:
+            return {}
+        merged = _merge_edits(edits)
+        fh.seek(0)
+        fh.truncate()            # in place: keeps the web server's ownership
+        fh.write("{}")
+        fh.flush()
+    return merged
+
+
+def _merge_edits(edits):
     cfg = load_json(DEVICES_FILE, DEFAULT_DEVICES)
     devs = cfg.setdefault("devices", {})
     for mac, e in edits.items():
@@ -819,8 +840,6 @@ def apply_edits():
         if d.get("important") is False:
             d.pop("important")
     save_json(DEVICES_FILE, cfg)
-    with open(EDITS_FILE, "w", encoding="utf-8") as f:   # in place: keeps the web server's ownership
-        f.write("{}")
     return {m.lower(): devs[m.lower()] for m in edits}
 
 
@@ -1213,6 +1232,26 @@ def month_uptime(inet, t):
     return round(100 * (1 - down / (t - since)), 3), outs
 
 
+SCHED_FILE = os.path.join(HERE, "spidermap_schedule.json")   # last scheduled speed test (survives restarts)
+
+
+def gateway_step(fails, answered):
+    """Count missed gateway pings in a row. Returns (fails, "down" | "up" | None).
+    "down" after the 2nd miss in a row, "up" on the first answer after that."""
+    if answered:
+        return 0, ("up" if fails >= 2 else None)
+    fails += 1
+    return fails, ("down" if fails == 2 else None)
+
+
+def speedtest_due(daily, now_dt, last_day):
+    """True when the daily speed test time ("HH:MM") has passed today and it has not run today yet."""
+    m = re.match(r"^\s*(\d{1,2}):(\d{2})\s*$", daily or "")
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return False
+    return now_dt.strftime("%Y-%m-%d") != last_day and (now_dt.hour, now_dt.minute) >= (int(m.group(1)), int(m.group(2)))
+
+
 def rt_loop(api):
     import threading
     from collections import deque
@@ -1220,7 +1259,7 @@ def rt_loop(api):
     hosts, data, last_cfg, prev = [], None, 0, {}
     hist = {"wan": [], "ports": {}, "lat": []}
     targets, last_lat, speed = {}, 0, {"running": False, "error": ""}
-    daily_done, last_save = "", 0
+    daily_done, last_save = load_json(SCHED_FILE, {}).get("speedtest_daily_last", ""), 0
     prev_st, flap_t = {}, {}
     inet = load_json(INET_FILE, {})
     inet.setdefault("since", now())
@@ -1338,10 +1377,10 @@ def rt_loop(api):
                 evs.append(ev("internet", "ok", f"Internet back after {_dur(t - s0)}", "inet"))
             gwv = targets.get("Gateway")
             if gwv:
-                gw_fails = gw_fails + 1 if gwv["ms"] is None else 0
-                if gw_fails == 2:
+                gw_fails, change = gateway_step(gw_fails, gwv["ms"] is not None)
+                if change == "down":
                     evs.append(ev("internet", "bad", f"Gateway {gw['name']} is not responding", gw["id"]))
-                if gwv["ms"] is not None and gw_fails >= 2:
+                if change == "up":
                     evs.append(ev("internet", "ok", f"Gateway {gw['name']} is responding again", gw["id"]))
             if up:
                 loss_win.append(loss)
@@ -1360,7 +1399,7 @@ def rt_loop(api):
         cfg = load_json(DEVICES_FILE, {}).get("settings", {})
         daily = cfg.get("speedtest_daily", "")
         today = datetime.datetime.now().strftime("%Y-%m-%d")
-        due = daily and datetime.datetime.now().strftime("%H:%M") >= daily and daily_done != today
+        due = speedtest_due(daily, datetime.datetime.now(), daily_done)
         if (os.path.exists(SPEED_REQ) or due) and not speed["running"]:
             try:
                 os.remove(SPEED_REQ)
@@ -1368,6 +1407,7 @@ def rt_loop(api):
                 pass
             if due:
                 daily_done = today
+                save_json(SCHED_FILE, {"speedtest_daily_last": today})
             zh = next((h for h in hosts if h["_role"] == "zabbix"), None)
             threading.Thread(target=run_speedtest, args=(api, zh, speed), daemon=True).start()
         add_events(evs)
@@ -1820,6 +1860,18 @@ def setup(api):
     print("\nSetup done. install.sh adds the scheduled jobs (or see README.md to add them by hand).")
 
 
+def job_lock(name, wait):
+    """One job of each kind at a time. wait=False: return None if it is already running."""
+    import fcntl
+    fh = open(os.path.join(HERE, f".spidermap-{name}.lock"), "w")
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+    except BlockingIOError:
+        fh.close()
+        return None
+    return fh
+
+
 def main():
     ap = argparse.ArgumentParser(description="UniFi-style live network topology for Zabbix")
     ap.add_argument("--setup", action="store_true", help="install page, icons, Zabbix items, dashboard")
@@ -1843,11 +1895,27 @@ def main():
         install_service()
         return
     if args.live:
-        live_refresh(api)
+        lock = job_lock("live", wait=False)
+        if lock is None:
+            return                       # the previous minute's refresh is still running
+        with lock:
+            live_refresh(api)
         return
-    events, down, hosts = full_scan(api, args.community, args.quiet)
+    # cron (--quiet) skips a scan while the previous one still runs; by hand / installer waits for it
+    lock = job_lock("scan", wait=False)
+    if lock is None:
+        if args.quiet:
+            print(f"{datetime.datetime.now():%Y-%m-%d %H:%M} previous scan still running - skipped", flush=True)
+            return
+        print("Another scan is running - waiting for it to finish...", flush=True)
+        lock = job_lock("scan", wait=True)
+    with lock:
+        events, down, hosts = full_scan(api, args.community, args.quiet)
     push_events(api, hosts, events, down)
-    live_refresh(api)
+    lock = job_lock("live", wait=False)
+    if lock is not None:
+        with lock:
+            live_refresh(api)
 
 
 if __name__ == "__main__":

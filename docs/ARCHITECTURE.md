@@ -38,6 +38,7 @@ creates only its own items, triggers and dashboard (see *Zabbix integration*).
 | `spidermap.html` | The whole user interface in one file: tree layout, panels, gateway card, activity feed, editing. No build step. |
 | `install.sh` | Installer and updater (`--update`). Packages, Ookla CLI, migration from older installs, cron jobs, checks. |
 | `tests/test_gateway.py` | Security tests for `spidermap.php` (needs `php-cli`). |
+| `tests/test_core.py` | Tests for scheduling, edits and job locking. |
 
 ## What runs when
 
@@ -48,6 +49,7 @@ creates only its own items, triggers and dashboard (see *Zabbix integration*).
 | Real time | systemd `spidermap-rt` (`--rt`) | 5 s | SNMP port counters → live traffic, port up/down and flap counting, data usage per port, latency / loss / jitter (every 15 s), outages, speed test requests, writes `spidermap_rt.json` |
 
 Cron output goes to `/var/log/spidermap.log`; the service logs to the journal (`journalctl -u spidermap-rt`).
+Only one full scan and one live refresh run at a time: cron skips a turn if the previous run is still busy.
 
 ## Where files live
 
@@ -64,6 +66,8 @@ Cron output goes to `/var/log/spidermap.log`; the service logs to the journal (`
 | `spidermap_presence_all.json` | Online intervals per device, 30 days |
 | `spidermap_inet.json` | Outages, packet-loss state |
 | `spidermap_usage.json` | Bytes per port, today and this month |
+| `spidermap_schedule.json` | Date of the last scheduled speed test |
+| `.spidermap-scan.lock`, `.spidermap-live.lock` | Make sure only one scan and one live refresh run at a time |
 
 **`/var/lib/spidermap/`** (root, mode 755):
 
@@ -91,7 +95,8 @@ redirects from old addresses (`spidermap.html`, `netmap.html`, `spider-secure.ph
 
 The login check reads the Zabbix session cookie and asks the Zabbix API (`user.checkAuthentication`, with
 `extend: false`). The answer is cached for 10 seconds per session in `inbox/sess/`. Edits are written to
-`inbox/edits.json` and merged into `devices.json` by the next live refresh (within a minute).
+`inbox/edits.json` and merged into `devices.json` by the next live refresh (within a minute). Both sides lock
+the file (`flock`) while they use it, so no edit is lost.
 
 The page polls: map every 60 s, live data every 30 s, real-time data every 5 s, events every 20 s, presence every
 5 min. When the data reports a newer `page_version`, the page reloads itself.

@@ -191,7 +191,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.2.2";
+const PAGE_VERSION = "0.2.3";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -573,7 +573,7 @@ function panel(id, quiet) {
   const phh = portHist(n.port_ref), ph = phh && phh.rows;
   if (lv && status(n) !== "off") h += `<div class="traffic"><span><i class="ti ti-arrow-down" style="color:var(--accent)"></i> ${mbps(down)}</span><span><i class="ti ti-arrow-up" style="color:var(--ok)"></i> ${mbps(up)}</span><span style="color:var(--muted)">${phh && phh.live ? '<span class="livedot"></span>' : ""}${esc(n.port || "")}</span></div>` + (ph ? spark(ph, n.flip ? 1 : 2, n.flip ? 2 : 1) + `<div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">${phh.live ? "last " + Math.round(ph.length * (RT.every || 5) / 60) + " min, live" : "last " + ph.length + " min"}</span></div>` : "");
   const acts = [];
-  if (n.url) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open web UI</a>`);
+  if (n.url && /^https?:\/\//i.test(n.url)) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open web UI</a>`);
   if (n.zbx) acts.push(`<a class="btn" href="${esc(DATA.zabbix_url)}?action=latest.view&filter_set=1&hostids%5B%5D=${encodeURIComponent(n.zbx)}" target="_top"><i class="ti ti-chart-line"></i>Show in Zabbix</a>`);
   if (n.mac) acts.push(`<button class="btn" id="cmac"><i class="ti ti-copy"></i>Copy MAC</button>`, `<button class="btn" id="edit"><i class="ti ti-pencil"></i>Edit</button>`);
   if (acts.length) h += `<div class="acts">${acts.join("")}</div>`;

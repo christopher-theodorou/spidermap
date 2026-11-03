@@ -4,6 +4,25 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.2.3] - 2026-11-03
+
+Bug fixes from the review by Nikolaos Karanikolas (findings F08-F11). Nothing else changes.
+
+### Fixed
+- **Gateway recovery was never reported** (F10). "Gateway is not responding" appeared in the activity feed, but
+  "Gateway is responding again" never did.
+- **The daily speed test could run twice** (F11). The date of the last scheduled test is now kept on disk
+  (`spidermap_schedule.json`), so restarting the service no longer repeats it. Times like `3:30` now work like `03:30`.
+- **An edit could be lost** (F09) when it was saved from the map at the exact moment SpiderMap read the edits.
+  SpiderMap now reads and clears them under the same lock the page uses when writing.
+- **Two scans could run at the same time** (F08) when one took longer than 5 minutes. Now only one scan and one
+  live refresh run at a time; cron skips a turn instead of starting a second copy, and `install.sh --update` waits
+  for a running scan before installing the new version.
+- The "Open web UI" button only opens `http://` and `https://` addresses (the server already refused others).
+
+### Added
+- `tests/test_core.py`: tests for these fixes (19 checks, no network needed).
+
 ## [0.2.2] - 2026-11-03
 
 **Security - please upgrade.** One protected entry point for the page and the data.
@@ -71,6 +90,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.2.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.3
 [0.2.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.2
 [0.2.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.0
 [0.1.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.1.0
