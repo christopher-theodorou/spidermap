@@ -42,14 +42,33 @@ install_ookla() {   # Ookla's official speed test: accurate on fast lines, picks
   rm -rf "$tmp"
 }
 
+check_webserver_rules() {   # a rule written for spider-secure.php would block spidermap.php
+  local hits
+  hits=$(grep -rlsE 'spidermap[^"]*\\?\.\(?[a-z|]*(php|html)' /etc/apache2 /etc/httpd /etc/nginx 2>/dev/null || true)
+  [ -z "$hits" ] && return 0
+  printf '\n\033[33m%s\033[0m\n' "!! A web server rule blocks SpiderMap files:"
+  echo "$hits" | sed 's/^/     /'
+  cat <<'EOW'
+   SpiderMap is now opened through spidermap.php, which checks the Zabbix login itself,
+   so the rule must no longer block .php and .html files. Change it to block only .json:
+
+     <FilesMatch "^spidermap.*\.json$">
+       Require all denied
+     </FilesMatch>
+
+   then check and reload:  apachectl configtest && systemctl reload apache2
+EOW
+}
+
 if [ "${1:-}" = "--update" ]; then
-  say "Updating SpiderMap..."
+  say "Updating SpiderMap to $(python3 spidermap.py --version 2>/dev/null | cut -d' ' -f2)..."
   [ -f zabbix.env ] || fail "No zabbix.env here - run: bash install.sh"
   . ./zabbix.env
   cleanup_old_jobs
   install_ookla
   python3 spidermap.py --quiet
   python3 spidermap.py --install-service
+  check_webserver_rules
   say "Done. Open pages reload themselves with the new version within a minute."
   exit 0
 fi
@@ -116,9 +135,9 @@ echo "  full scan every 5 minutes, live refresh every minute"
 
 ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 path=$(python3 -c 'import os; from urllib.parse import urlparse; print(urlparse(os.environ["ZABBIX_URL"]).path.rsplit("/", 1)[0])')
-say "SpiderMap is running."
+say "SpiderMap $(python3 spidermap.py --version 2>/dev/null | cut -d' ' -f2) is running."
 cat <<EOF2
-Open the map:   http://${ip}${path}/spidermap.html
+Open the map:   http://${ip}${path}/spidermap.php   (Zabbix Super admins; see view_min_user_type)
 Or in Zabbix:   Dashboards > "SpiderMap"
 
 One manual step in Zabbix (needed for the dashboard widget):
@@ -127,3 +146,4 @@ One manual step in Zabbix (needed for the dashboard widget):
 
 Your names, icons and pins live in devices.json in this folder.
 EOF2
+check_webserver_rules

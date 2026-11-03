@@ -191,7 +191,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "2026-11-03-secure";
+const PAGE_VERSION = "0.2.2";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -201,8 +201,8 @@ let folded = store("nm-folded") || {};
 const view = { x: 20, y: 20, k: 1 };
 let fitted = false;
 
-/* ---------- data access: everything goes through spidermap_api.php (Zabbix login required) ---------- */
-const API = "spidermap_api.php";
+/* ---------- data access: everything goes through spidermap.php (Zabbix login required) ---------- */
+const API = "spidermap.php";
 let authMsg = "";
 async function getData(name) {
   const r = await fetch(API + "?data=" + name + "&_=" + Date.now(), { cache: "no-store", credentials: "same-origin" });

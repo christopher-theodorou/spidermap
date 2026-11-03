@@ -75,7 +75,8 @@ starts the real-time service (`spidermap-rt`) and schedules the scans. Upgrading
 allow-scripts allow-same-origin allow-popups allow-downloads
 ```
 
-Then open **Dashboards → SpiderMap**, or the page directly at `http://<zabbix>/zabbix/spidermap.html`.
+Then open **Dashboards → SpiderMap**, or the page directly at `http://<zabbix>/zabbix/spidermap.php`
+(Zabbix Super admins by default, see [Security](#security)).
 
 ## Your settings: `devices.json`
 
@@ -121,21 +122,39 @@ or once a day if you set `speedtest_daily`.
 
 ## Security
 
-- **The map needs a Zabbix login.** The topology data is kept outside the web folder (`/var/lib/spidermap/www`) and is
-  only handed out by `spidermap_api.php` to users with a valid Zabbix session. The Zabbix *guest* account is refused.
-  Checking the map never keeps an expired Zabbix session alive.
-- **Changes need a Zabbix admin**: editing devices and starting speed tests. These requests are protected against
-  cross-site request forgery (a special request header plus an Origin check).
-- **Least privilege on disk**: the data files are readable by root and the web server only; the web server can write
-  to just one folder (`/var/lib/spidermap/inbox`) for edits and speed test requests. Your Zabbix API token stays in
-  `zabbix.env` (root only) and never reaches the browser.
-- **Only Zabbix admins should see the map?** Set `"view_min_user_type": 2` in `devices.json` settings
-  (1 = any Zabbix user, 2 = admins, 3 = super admins) and run `bash install.sh --update`.
+SpiderMap has a single entry point in the Zabbix web folder: **`spidermap.php`**. It checks your Zabbix login
+through the public Zabbix API before it shows anything, so it keeps working across Zabbix upgrades.
 
-**Behind a reverse proxy:** keep forwarding the original host name (for nginx: `proxy_set_header Host $host;`),
-otherwise SpiderMap refuses edits as cross-site requests. Better still, don't publish Zabbix to the internet at all
-and reach it through a VPN. If you must publish it: HTTPS only, an IP allowlist or an extra login at the proxy, and
-multi-factor authentication for Zabbix users (*Users → Authentication → MFA settings*, Zabbix 7.0+).
+- **Page and data need a Zabbix login.** By default only **Zabbix Super admins** can open SpiderMap, because it shows
+  the whole network. Change it with `"view_min_user_type"` in `devices.json` settings (1 = any Zabbix user,
+  2 = admins, 3 = Super admins) and run `bash install.sh --update`. The Zabbix *guest* account is always refused.
+- **Nothing about your network is in the web folder.** The page and the map data live in `/var/lib/spidermap/www`,
+  readable by root and the web server only. The web folder contains just `spidermap.php`, the icons, and redirects
+  from older addresses (`spidermap.html`, `spider-secure.php`).
+- **Changes need a Zabbix admin**: editing devices and starting speed tests, protected against cross-site request
+  forgery (a special request header and an Origin check). The web server can write to one folder only,
+  `/var/lib/spidermap/inbox`.
+- **Session checks** are reused for at most 10 seconds and never extend an expired Zabbix session.
+- **Browser hardening**: no caching, no framing by other sites (`X-Frame-Options`, `frame-ancestors`), and a
+  Content-Security-Policy that only allows SpiderMap's own resources.
+- Your Zabbix API token stays in `zabbix.env` (root only) and never reaches the browser.
+
+**Optional extra layer:** a web server rule that blocks any stray `spidermap*.json` in the web folder. Do **not**
+block `.php` or `.html` files: `spidermap.php` must stay reachable. The installer warns you if a rule blocks it.
+
+```apache
+<FilesMatch "^spidermap.*\.json$">
+  Require all denied
+</FilesMatch>
+```
+
+**HTTPS:** SpiderMap protects *who* can see the map, not the connection itself. Without HTTPS the Zabbix login cookie
+travels unencrypted on your network. Enable HTTPS on the Zabbix frontend, even with a self-signed certificate.
+
+**Behind a reverse proxy:** keep forwarding the original host name (nginx: `proxy_set_header Host $host;`),
+otherwise edits are refused as cross-site requests. Better still, don't publish Zabbix to the internet and reach it
+through a VPN. If you must publish it: HTTPS only, an IP allowlist or an extra login at the proxy, and multi-factor
+authentication for Zabbix users (*Users → Authentication → MFA settings*, Zabbix 7.0+).
 
 ## Troubleshooting
 
@@ -151,11 +170,23 @@ cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by ha
 | File | Purpose |
 |---|---|
 | `spidermap.py` | Scans, live refresh, real-time service, Zabbix integration |
-| `spidermap.html` | The map page (copied into the Zabbix web folder) |
+| `spidermap.html` | The map page (installed in the protected folder, served by `spidermap.php`) |
 | `spidermap_ports.py` | Switch port scanner (also usable alone: port report and HTML table) |
 | `spidermap_zabbix.py` | Zabbix API and SNMP helpers, plus the classic Zabbix map and dashboard |
 | `install.sh` | Installer and updater |
+| `tests/` | Automated security tests |
+| `docs/` | Architecture and release documentation |
 | `assets/` | Logo, icons and screenshots |
+
+## Documentation
+
+| Document | For |
+|---|---|
+| [CHANGELOG.md](CHANGELOG.md) | What changed in every version, and upgrade notes |
+| [SECURITY.md](SECURITY.md) | Supported versions and how to report a vulnerability |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How SpiderMap works: jobs, files, data flow, Zabbix integration, extending it |
+| [docs/RELEASING.md](docs/RELEASING.md) | Checklist for publishing a new version |
+| [tests/test_gateway.py](tests/test_gateway.py) | Security tests for `spidermap.php` (`python3 tests/test_gateway.py`, needs `php-cli`) |
 
 ## License
 
