@@ -51,7 +51,8 @@ SpiderMap only **reads** from your network. It never changes your switch configu
 
 - **Zabbix 7.0 or newer.** SpiderMap runs on the Zabbix server (or its LXC container), Debian or Ubuntu.
 - **Switches in Zabbix with an SNMP interface** and a template that discovers interfaces.
-  Tested with Huawei VRP; other brands using the standard BRIDGE-MIB and LLDP-MIB should work.
+  Port names and traffic are tested with interface tables of Huawei VRP, MikroTik RouterOS, TP-Link Omada and
+  Cisco-style switches; other brands using the standard IF-MIB, BRIDGE-MIB and LLDP-MIB should work.
 - **LLDP enabled** on the switches (and `lldpd` on Linux and Proxmox hosts so they are recognised).
 - A Zabbix **API token** for an admin user: *Users → API tokens → Create API token*.
 
@@ -97,6 +98,7 @@ Most of it can also be changed from the map with the **Edit** button (Zabbix adm
 | `scan_subnets` | Subnets to scan (default: the /24 of each switch) |
 | `flag_hours` | How long "new" and "moved" stay highlighted |
 | `forget_after_days` | Forget unknown devices not seen for this long |
+| `port_media` | Mark ports as SFP / SFP+ when SpiderMap cannot tell, per switch: `{"SW-Core": {"17": "SFP+", "18": "SFP+"}}` (`"copper"` removes a mark) |
 | `core_switch`, `manual_links`, `aliases` | Only for the classic Zabbix map (`spidermap_zabbix.py`) |
 
 ### Optional: Proxmox guest names
@@ -163,6 +165,7 @@ systemctl status spidermap-rt                      # real-time service
 journalctl -u spidermap-rt -n 30                   # its log
 tail -n 30 /var/log/spidermap.log                  # scans
 cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by hand
+cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py --check-ports   # how every switch port is seen
 ```
 
 ## Files
@@ -188,6 +191,7 @@ cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by ha
 | [docs/RELEASING.md](docs/RELEASING.md) | Checklist for publishing a new version |
 | [tests/test_gateway.py](tests/test_gateway.py) | Security tests for `spidermap.php` (`python3 tests/test_gateway.py`, needs `php-cli`) |
 | [tests/test_core.py](tests/test_core.py) | Tests for scheduling, edits and job locking (`python3 tests/test_core.py`) |
+| [tests/test_ports.py](tests/test_ports.py) | Tests for port names and traffic counters with real switch tables (`python3 tests/test_ports.py`) |
 
 ## License
 

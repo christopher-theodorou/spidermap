@@ -28,7 +28,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.2.3"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.3.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEVICES_FILE = os.path.join(HERE, "devices.json")
@@ -219,6 +219,72 @@ def port_num(name):
     return int(m.group(1)) if m else 0
 
 
+def _port_family(name):
+    """'GigabitEthernet0/0/5' -> 'gigabitethernet', 'sfp-sfpplus1' -> 'sfp-sfpplus', 'two-gigabitEthernet 1/0/3' -> ..."""
+    return re.sub(r"[\d/\s.:_-]+$", "", name or "").lower()
+
+
+def _port_unit(name):
+    """Stack member from names like 'GigabitEthernet2/0/5' or 'Gi2/0/5' (None when there is no unit)."""
+    m = re.search(r"(\d+)/\d+/\d+\s*$", name or "")
+    return int(m.group(1)) if m else None
+
+
+def label_ports(ports, media_override=None):
+    """Vendor-neutral port labels, unique per switch. Identity is always the ifIndex (p["pid"]);
+    the label is only for display.
+      - one family of ports with unique numbers (GigabitEthernet0/0/1-24, ether1-8, Gi1/0/1-48): the device's
+        own numbers -> Port 1..N
+      - several families (ether1-8 + sfp-sfpplus1-2, Fa0/1-24 + Gi0/1-2): numbered in device order -> Port 1..N
+      - stacks (Gi1/0/x and Gi2/0/x): Port 1/x, Port 2/x
+      - link aggregations: LAG 1..N
+    Pluggable ports are marked: "Port 9 (SFP+)". The type comes from, in this order: media_override
+    ({"9": "SFP+"} or {"<interface name>": "SFP+"}, "copper" removes it), the interface name when it says so
+    (sfp, sfpplus, qsfp), or the device's hardware inventory (p["media_hw"]). Without any of these: no mark."""
+    ifkey = lambda p: int(p["ifindex"]) if str(p["ifindex"]).isdigit() else 0  # noqa: E731
+
+    def number(group):
+        nums = [port_num(p["name"]) for p in group]
+        if len({_port_family(p["name"]) for p in group}) == 1 and all(nums) and len(set(nums)) == len(nums):
+            for p, n in zip(group, nums):
+                p["pos"] = n
+        else:
+            for i, p in enumerate(sorted(group, key=ifkey), 1):
+                p["pos"] = i
+
+    phys = [p for p in ports if p.get("kind", "port") == "port"]
+    lags = [p for p in ports if p.get("kind") == "lag"]
+    multi = len({_port_unit(p["name"]) for p in phys} - {None}) > 1
+    groups = {}
+    for p in phys:
+        groups.setdefault(_port_unit(p["name"]) if multi else None, []).append(p)
+    for unit, group in groups.items():
+        number(group)
+        for p in group:
+            p["label"] = f"Port {unit}/{p['pos']}" if unit is not None else f"Port {p['pos']}"
+    if lags:
+        number(lags)
+        for p in lags:
+            p["label"], p["pos"] = f"LAG {p['pos']}", 1000 + p["pos"]
+    media_override = media_override or {}
+    for p in phys:
+        ov = media_override.get(str(p.get("pos"))) or media_override.get(p["name"])
+        if ov is not None:
+            media = "" if str(ov).strip().lower() in ("", "copper", "rj45", "none") else str(ov).strip()
+        else:
+            media = zp.media_from_text(p["name"]) or p.get("media_hw", "")
+        p["media"], p["base"] = media, p["label"]
+        if media:
+            p["label"] = f"{p['label']} ({media})"
+    seen = set()
+    for p in sorted(ports, key=ifkey):
+        p["pid"] = str(p["ifindex"])
+        if p.get("label") in seen or not p.get("label"):
+            p["label"] = p["name"]                 # never two ports with the same label
+        seen.add(p["label"])
+    return ports
+
+
 def port_label(name):
     n = port_num(name)
     if re.match(r"(?i)(xge|xgigabit|10ge|25ge|40ge|100ge)", name or ""):
@@ -354,6 +420,19 @@ def full_scan(api, community=None, quiet=False):
         for mac, ip in sarp.items():
             arp.setdefault(mac, (ip, "STALE"))
         say(f"  {h['name']}: {len(ports)} ports, {sum(p['status'] == 'up' for p in ports)} up")
+    port_media = cfg.get("settings", {}).get("port_media", {})
+    for s_ in sw.values():
+        label_ports(s_["ports"], port_media.get(s_["host"]["name"]) or port_media.get(s_["host"]["host"]) or {})
+    _pinfo = {(sid, p["name"]): p for sid, s_ in sw.items() for p in s_["ports"]}
+
+    def plabel(sid, pname):
+        return _pinfo[(sid, pname)]["label"] if (sid, pname) in _pinfo else pname
+
+    def pid_of(sid, pname):
+        return _pinfo[(sid, pname)]["pid"] if (sid, pname) in _pinfo else pname
+
+    def pos_of(sid, pname):
+        return _pinfo[(sid, pname)].get("pos", 0) if (sid, pname) in _pinfo else 0
     ipmap = {m: v[0] for m, v in arp.items()}
     dns = zp.rdns_all(sorted(set(ipmap.values())))
     gw_ip = zp.default_gateway()
@@ -421,7 +500,7 @@ def full_scan(api, community=None, quiet=False):
             return "gateway"
         if loc["k"] == "behind":
             return "Wi-Fi / gateway LAN" if loc["of"] == gw_mac else "via " + dname(loc["of"])
-        return f"{sw_name.get(loc['sw'], '?')} {port_label(loc['port'])}"
+        return f"{sw_name.get(loc['sw'], '?')} {plabel(loc['sw'], loc['port'])}"
 
     # private-MAC phones: same hostname, new random MAC -> same device
     for mac in list(online):
@@ -536,8 +615,8 @@ def full_scan(api, community=None, quiet=False):
             flags.append("ip conflict")
         conn = ""
         if port_ref:
-            pinfo = next((p for p in sw[port_ref[0]]["ports"] if port_num(p["name"]) == port_ref[1]), None)
-            conn = f"{sw_name[port_ref[0]]} · {port_label(pinfo['name']) if pinfo else port_lbl}" + \
+            pinfo = next((p for p in sw[port_ref[0]]["ports"] if p["pid"] == port_ref[1]), None)
+            conn = f"{sw_name[port_ref[0]]} · {pinfo['label'] if pinfo else port_lbl}" + \
                    (f" ({pinfo['name']}) · {pinfo['speed']}" if pinfo and pinfo["speed"] else "")
         elif parent in nodes:
             conn = "via " + nodes[parent]["name"]
@@ -584,11 +663,12 @@ def full_scan(api, community=None, quiet=False):
         up = sum(p["status"] == "up" for p in sw[sid]["ports"])
         if sid in parent_of:
             par, pa, pb = parent_of[sid]
-            parent, lbl = "s-" + par, f"{port_label(pa)} ↔ {port_num(pb)}"
-            pref = [par, port_num(pa)]
+            rb = next((p for p in sw[sid]["ports"] if zp.norm(p["name"]) == zp.norm(pb)), None)
+            parent, lbl = "s-" + par, f"{plabel(par, pa)} ↔ {rb['label'].replace('Port ', '') if rb else pb}"
+            pref = [par, pid_of(par, pa)]
         else:
-            parent, lbl = gw_id, (port_label(gw_loc[1]) if gw_loc and sid == root_sw else "")
-            pref = [sid, port_num(gw_loc[1])] if gw_loc and sid == root_sw else None
+            parent, lbl = gw_id, (plabel(sid, gw_loc[1]) if gw_loc and sid == root_sw else "")
+            pref = [sid, pid_of(sid, gw_loc[1])] if gw_loc and sid == root_sw else None
         add("s-" + sid, parent, name=h["name"], sub="." + h["_snmp"]["ip"].split(".")[-1], icon="server-2",
             kind="switch", sw=sid, status="up", port=lbl, port_ref=pref, zbx=sid, flip=sid not in parent_of,
             url=f"http://{h['_snmp']['ip']}",
@@ -612,7 +692,9 @@ def full_scan(api, community=None, quiet=False):
         if ":" in pin:
             swn, pn = pin.rsplit(":", 1)
             sid = next((s for s in sw if sw_name[s] == swn), None)
-            p = next((p for p in sw[sid]["ports"] if port_num(p["name"]) == int(pn)), None) if sid else None
+            pn = pn.strip()
+            p = next((p for p in sw[sid]["ports"] if p.get("base", p["label"]) == f"Port {pn}" or p["label"] == pn
+                      or p["name"] == pn), None) if sid else None
             if p:
                 return {"k": "port", "sw": sid, "port": p["name"]}
         return None
@@ -627,11 +709,11 @@ def full_scan(api, community=None, quiet=False):
         if mac not in sdev and pin_loc(mac):
             loc = pin_loc(mac)
             port_groups.setdefault((loc["sw"], loc["port"]), []).append(mac)
-    for (sid, pname), macs in sorted(port_groups.items(), key=lambda x: (x[0][0], port_num(x[0][1]))):
-        pr, lbl = [sid, port_num(pname)], port_label(pname)
+    for (sid, pname), macs in sorted(port_groups.items(), key=lambda x: (x[0][0], pos_of(*x[0]))):
+        pr, lbl = [sid, pid_of(sid, pname)], plabel(sid, pname)
         live_macs = [m for m in macs if m in online]
         if len(live_macs) > 1 and (sid, pname) not in host_port:
-            gid = f"g-{sid}-{port_num(pname)}"
+            gid = f"g-{sid}-{pid_of(sid, pname)}"
             add(gid, "s-" + sid, name=f"{lbl} devices", sub=f"{len(macs)} devices", icon="sitemap", kind="group",
                 status="up", port=lbl, port_ref=pr, details=[["Connection", f"{sw_name[sid]} · {lbl}"]])
             for m in macs:
@@ -685,16 +767,18 @@ def full_scan(api, community=None, quiet=False):
             if n.get("port_ref") and n["port_ref"][0] == sid and n["kind"] != "switch":
                 clients.setdefault(n["port_ref"][1], []).append(n["name"])
         if gw_loc and gw_loc[0] == sid and gw_mac in by_mac:
-            clients.setdefault(port_num(gw_loc[1]), []).insert(0, nodes[by_mac[gw_mac]]["name"] + " (gateway)")
+            clients.setdefault(pid_of(sid, gw_loc[1]), []).insert(0, nodes[by_mac[gw_mac]]["name"] + " (gateway)")
         for (a, b), (pa, _pb) in sw_link.items():
             if a == sid:
-                clients.setdefault(port_num(pa), []).append(sw_name[b])
+                clients.setdefault(pid_of(sid, pa), []).append(sw_name[b])
         switches_out[sid] = {"name": sw_name[sid], "ports": [
-            {"n": port_num(p["name"]), "label": port_label(p["name"]), "full": p["name"], "status": p["status"],
+            {"id": p["pid"], "n": p.get("pos", 0), "label": p["label"], "kind": p.get("kind", "port"),
+             "media": p.get("media", ""),
+             "full": p["name"], "status": p["status"], "speed_mbps": p.get("speed_mbps", 0),
              "speed": p["speed"], "alias": p["alias"], "ifindex": p.get("ifindex"),
              "downgrade": downgrade.get(f"{sid}:{p['name']}", ""),
-             "clients": clients.get(port_num(p["name"]), [])}
-            for p in sw[sid]["ports"]]}
+             "clients": clients.get(p["pid"], [])}
+            for p in sorted(sw[sid]["ports"], key=lambda p: (p.get("kind") == "lag", _port_unit(p["name"]) or 0, p.get("pos", 0)))]}
 
     # ---------------- events for Zabbix
     for n in nodes.values():
@@ -909,6 +993,24 @@ def ping_stats(ip, count=4):
             "jit": round(float(q.group(2)), 1) if q else None}
 
 
+ZBX_PORT_KEYS = [("net.if.status[", "st"), ("net.if.in.errors[", "ein"), ("net.if.out.errors[", "eout"),
+                 ("net.if.in[", "rx"), ("net.if.out[", "tx")]
+
+
+def zabbix_port_item(key, name, by_name):
+    """Which port and which value a Zabbix interface item is: (kind, ifIndex) or (None, None).
+    Standard SNMP templates put the ifIndex in the key: net.if.in[ifHCInOctets.<ifIndex>].
+    Fallback: the interface name in the item name ("Interface <name>(<alias>): ..."), names may contain spaces."""
+    kind = next((k for prefix, k in ZBX_PORT_KEYS if key.startswith(prefix)), None)
+    if not kind:
+        return None, None
+    m = re.search(r"\.(\d+)\]$", key)
+    if m:
+        return kind, m.group(1)
+    m = re.match(r"^Interface (.+?)\(", name or "")
+    return (kind, by_name.get(m.group(1).strip())) if m else (None, None)
+
+
 def live_refresh(api):
     webd = webdir()
     data = load_json(os.path.join(DATA_DIR, DATA), None)
@@ -933,24 +1035,30 @@ def live_refresh(api):
                          (["important"] if c.get("important") else [])
         save_json(os.path.join(DATA_DIR, DATA), data)
 
-    # switch ports from Zabbix (status, traffic, errors)
-    names = {"Operational status": "st", "Bits received": "rx", "Bits sent": "tx",
-             "Inbound packets with errors": "ein", "Outbound packets with errors": "eout"}
+    # switch ports from Zabbix (status, traffic, errors), matched by the ifIndex in the item key
     ports = {}
-    for sid in data["switches"]:
-        for it in api.call("item.get", {"hostids": sid, "output": ["name", "lastvalue"], "filter": {"status": 0},
-                                        "search": {"name": "Interface "}}):
-            m = re.match(r"Interface (\S+?)\(.*\): (.+)$", it["name"])
+    for sid, sw_ in data["switches"].items():
+        known = {str(p.get("id", "")) for p in sw_["ports"]}
+        by_name = {p["full"]: str(p.get("id", "")) for p in sw_["ports"]}
+        for it in api.call("item.get", {"hostids": sid, "output": ["key_", "name", "lastvalue"], "filter": {"status": 0},
+                                        "search": {"key_": "net.if."}}):
+            kind, pid = zabbix_port_item(it.get("key_", ""), it.get("name", ""), by_name)
             v = _f(it["lastvalue"])
-            if m and m.group(2) in names and v is not None:
-                ports.setdefault(sid, {}).setdefault(str(port_num(m.group(1))), {})[names[m.group(2)]] = v
+            if kind and pid in known and v is not None:
+                ports.setdefault(sid, {}).setdefault(pid, {})[kind] = v
 
     rt = load_json(os.path.join(DATA_DIR, RT), {}) or {}
     rt_fresh = bool(rt) and t - rt.get("t", 0) < 60
     hist = load_json(HIST_FILE, {})
+    if hist.get("schema") != 2:
+        # 0.3.0: ports are identified by ifIndex. Per-port data stored under the old port numbers could belong to
+        # the wrong port, so it starts fresh (graphs: 90 minutes, normal-traffic baselines: 24 hours).
+        for k in ("cable", "unusual", "base", "ports", "wan"):
+            hist.pop(k, None)
+        hist["schema"] = 2
 
     def node_on_port(sid, n):
-        return next((x["id"] for x in data["nodes"] if x.get("port_ref") == [sid, int(n)] and x["kind"] != "switch"), None)
+        return next((x["id"] for x in data["nodes"] if x.get("port_ref") == [sid, str(n)] and x["kind"] != "switch"), None)
 
     # important devices: ping every minute, log changes
     imp = {n["id"]: n["ip"] for n in data["nodes"] if "important" in n.get("flags", []) and n.get("ip")}
@@ -1000,7 +1108,7 @@ def live_refresh(api):
     flaps = rt.get("flaps", {}) if rt_fresh else {}
     for sid, sw in data["switches"].items():
         for p in sw["ports"]:
-            n, issues = str(p["n"]), []
+            n, issues = str(p.get("id") or p["n"]), []
             zp_ = ports.get(sid, {}).get(n, {})
             err = (zp_.get("ein") or 0) + (zp_.get("eout") or 0)
             if err > 0:
@@ -1024,7 +1132,7 @@ def live_refresh(api):
     base, unusual, prev_u = hist.setdefault("base", {}), {}, hist.get("unusual", {})
     for sid, sw in data["switches"].items():
         for p in sw["ports"]:
-            n = str(p["n"])
+            n = str(p.get("id") or p["n"])
             if not p["clients"] or any(c in sw_names or c.endswith("(gateway)") for c in p["clients"]):
                 continue
             r = port_rate(sid, n)
@@ -1131,16 +1239,53 @@ SERVICE = "/etc/systemd/system/spidermap-rt.service"
 
 
 def snmp_get(auth, target, oids):
+    """Integer values of the given OIDs. Counters stay exact integers (a Counter64 does not fit a float);
+    anything that is not a plain integer (noSuchInstance, strings, ...) is left out."""
     out = {}
     for i in range(0, len(oids), 30):                      # keep each request small
-        r = subprocess.run(["snmpget", "-t", "2", "-r", "0", "-On", "-Oq", "-Oe", *auth, target, *oids[i:i + 30]],
+        r = subprocess.run(["snmpget", "-t", "2", "-r", "0", "-On", "-Oq", "-Oe", "-Ot", *auth, target, *oids[i:i + 30]],
                            capture_output=True, text=True, timeout=10)
         for line in r.stdout.splitlines():
             oid, _, val = line.partition(" ")
-            v = _f(re.sub(r"[^\d.]", "", val))
-            if v is not None:
-                out[oid.lstrip(".")] = v
+            val = val.strip().strip('"')
+            if re.fullmatch(r"\d+", val):
+                out[oid.lstrip(".")] = int(val)
     return out
+
+
+COUNTER_SANITY_BPS = 400e9          # upper limit when the link speed is unknown
+
+
+def counter_rate(prev, cur, speed_mbps):
+    """Bits per second for one port from two counter samples, following RFC 2863.
+    prev / cur: (monotonic_seconds, rx_octets, tx_octets, sysUpTime, discontinuity_time, is_32bit)
+    Returns (rx_bps, tx_bps, rx_bytes, tx_bytes, reason): reason is None for a valid sample, otherwise
+      "first"          no earlier sample (or the counter type changed)
+      "short"          samples less than a second apart
+      "reboot"         the device restarted (sysUpTime went back)
+      "discontinuity"  the device says the counters are not comparable (ifCounterDiscontinuityTime changed)
+      "reset"          a 64-bit counter went back
+      "impossible"     more than the link can carry"""
+    none = (None, None, None, None)
+    if prev is None or prev[5] != cur[5]:
+        return none + ("first",)
+    dt = cur[0] - prev[0]
+    if dt < 1:
+        return none + ("short",)
+    if cur[3] is not None and prev[3] is not None and cur[3] < prev[3]:
+        return none + ("reboot",)
+    if cur[4] != prev[4]:
+        return none + ("discontinuity",)
+    drx, dtx = cur[1] - prev[1], cur[2] - prev[2]
+    if cur[5]:                                  # 32-bit counters wrap around at 2^32
+        drx, dtx = drx % 2 ** 32, dtx % 2 ** 32
+    elif drx < 0 or dtx < 0:
+        return none + ("reset",)
+    rx, tx = drx * 8 / dt, dtx * 8 / dt
+    limit = speed_mbps * 1e6 * 1.05 if speed_mbps else COUNTER_SANITY_BPS
+    if rx > limit or tx > limit:
+        return rx, tx, drx, dtx, "impossible"
+    return rx, tx, drx, dtx, None
 
 
 OOKLA = "/usr/local/bin/ookla-speedtest"   # Ookla's official CLI, installed by install.sh
@@ -1261,11 +1406,22 @@ def rt_loop(api):
     targets, last_lat, speed = {}, 0, {"running": False, "error": ""}
     daily_done, last_save = load_json(SCHED_FILE, {}).get("speedtest_daily_last", ""), 0
     prev_st, flap_t = {}, {}
+    use32, quality, rej_said = {}, {}, {}
     inet = load_json(INET_FILE, {})
     inet.setdefault("since", now())
     inet.setdefault("outages", [])
     fails, gw_fails, loss_win = 0, 0, deque(maxlen=8)
     usage = load_json(USAGE_FILE, {})
+    if usage.get("schema") != 2:
+        # before 0.3.0 two ports could share one counter baseline and add impossible amounts to the totals.
+        # Keep the old totals as a backup and start counting again, marked with the date.
+        if usage.get("d") or usage.get("m"):
+            base, ext = os.path.splitext(USAGE_FILE)
+            save_json(f"{base}.before-0.3.0{ext or '.json'}", usage)
+            add_events([ev("traffic", "info", "Data usage totals restarted: earlier totals could be wrong "
+                                              "(backup kept as spidermap_usage.before-0.3.0.json)")])
+        usage = {"schema": 2, "since": now()}
+        save_json(USAGE_FILE, usage)
     while True:
         t0 = time.time()
         if t0 - last_cfg > 300 or data is None:
@@ -1292,22 +1448,37 @@ def rt_loop(api):
             h = hb.get(sid)
             if not h or not h["_snmp"]:
                 continue
-            idx = {str(p["ifindex"]): str(p["n"]) for p in sw["ports"] if p.get("ifindex")}
-            for p in sw["ports"]:
-                port_name[(sid, str(p["n"]))] = f"{sw['name']} {p['label']}" + \
+            # identity = ifIndex ("id"); "n" is only the number shown on screen
+            plist = [p for p in sw["ports"] if p.get("ifindex")]
+            idx = {str(p["ifindex"]): str(p.get("id") or p["ifindex"]) for p in plist}
+            speeds = {str(p["ifindex"]): p.get("speed_mbps", 0) for p in plist}
+            for p in plist:
+                port_name[(sid, idx[str(p["ifindex"])])] = f"{sw['name']} {p['label']}" + \
                     (f" ({', '.join(p['clients'])})" if p["clients"] else "")
-            oids = [f"1.3.6.1.2.1.31.1.1.1.{c}.{i}" for i in idx for c in (6, 10)] + \
-                   [f"1.3.6.1.2.1.2.2.1.8.{i}" for i in idx]
+            v1 = str((h["_snmp"].get("details") or {}).get("version", "2")) == "1"
+            low32 = use32.setdefault(sid, set(idx) if v1 else set())   # SNMPv1 has no 64-bit counters
+            oids = ["1.3.6.1.2.1.1.3.0"]                                  # sysUpTime: detects a reboot
+            for i in idx:
+                oids += ([f"1.3.6.1.2.1.2.2.1.10.{i}", f"1.3.6.1.2.1.2.2.1.16.{i}"] if i in low32 else
+                         [f"1.3.6.1.2.1.31.1.1.1.6.{i}", f"1.3.6.1.2.1.31.1.1.1.10.{i}"])
+                oids.append(f"1.3.6.1.2.1.2.2.1.8.{i}")
+                if not v1:
+                    oids.append(f"1.3.6.1.2.1.31.1.1.1.19.{i}")              # ifCounterDiscontinuityTime
             try:
                 auth, target = at.snmp_auth(h["_snmp"], h["_macros"])
                 vals = snmp_get(auth, target, oids)
             except Exception as e:  # noqa: BLE001
                 print(f"{h['name']}: {e}", flush=True)
                 continue
-            now_t = time.time()
+            mono = time.monotonic()
+            uptime = vals.get("1.3.6.1.2.1.1.3.0")
             for i, n in idx.items():
-                rx_o, tx_o = vals.get(f"1.3.6.1.2.1.31.1.1.1.6.{i}"), vals.get(f"1.3.6.1.2.1.31.1.1.1.10.{i}")
+                c32 = i in low32
+                rx_o = vals.get(f"1.3.6.1.2.1.2.2.1.10.{i}" if c32 else f"1.3.6.1.2.1.31.1.1.1.6.{i}")
+                tx_o = vals.get(f"1.3.6.1.2.1.2.2.1.16.{i}" if c32 else f"1.3.6.1.2.1.31.1.1.1.10.{i}")
                 st = vals.get(f"1.3.6.1.2.1.2.2.1.8.{i}")
+                if not c32 and rx_o is None and st is not None:
+                    low32.add(i)                       # the device answers, but has no 64-bit counters for this port
                 key = (sid, n)
                 # port up/down changes -> activity feed + flap counter
                 if st in (1, 2):
@@ -1315,25 +1486,33 @@ def rt_loop(api):
                     if was in (1, 2) and was != st:
                         flap_t.setdefault(key, deque()).append(t)
                         imp = any("important" in x.get("flags", []) for x in data["nodes"]
-                                  if x.get("port_ref") == [sid, int(n)])
+                                  if x.get("port_ref") == [sid, str(n)])
                         evs.append(ev("port", "ok" if st == 1 else ("bad" if imp else "info"),
                                       f"{port_name.get(key, n)} is {'up' if st == 1 else 'down'}",
-                                      next((x["id"] for x in data["nodes"] if x.get("port_ref") == [sid, int(n)]
+                                      next((x["id"] for x in data["nodes"] if x.get("port_ref") == [sid, str(n)]
                                             and x["kind"] != "switch"), None)))
                     prev_st[key] = st
                 if rx_o is None or tx_o is None:
                     continue
-                if key in prev:
-                    pt, prx, ptx = prev[key]
-                    dt = now_t - pt
-                    if dt > 0 and rx_o >= prx and tx_o >= ptx:
-                        ports.setdefault(sid, {})[n] = {"rx": (rx_o - prx) * 8 / dt, "tx": (tx_o - ptx) * 8 / dt,
-                                                        "st": st or 0}
-                        for per in ("d", "m"):
-                            u = usage.setdefault(per, {}).setdefault(sid, {}).setdefault(n, [0, 0])
-                            u[0] += rx_o - prx
-                            u[1] += tx_o - ptx
-                prev[key] = (now_t, rx_o, tx_o)
+                cur = (mono, rx_o, tx_o, uptime, vals.get(f"1.3.6.1.2.1.31.1.1.1.19.{i}"), c32)
+                rx, tx, drx, dtx, why = counter_rate(prev.get(key), cur, speeds.get(i, 0))
+                prev[key] = cur
+                if why is None:
+                    ports.setdefault(sid, {})[n] = {"rx": rx, "tx": tx, "st": st or 0}
+                    for per in ("d", "m"):
+                        u = usage.setdefault(per, {}).setdefault(sid, {}).setdefault(n, [0, 0])
+                        u[0] += drx
+                        u[1] += dtx
+                elif why in ("impossible", "reboot", "discontinuity", "reset"):
+                    q_ = quality.setdefault(sid, {}).setdefault(n, {"ignored": 0})
+                    q_["ignored"] += 1
+                    q_["last"], q_["at"] = why, t
+                    if why == "impossible" and t - rej_said.get(key, 0) > 6 * 3600:
+                        rej_said[key] = t
+                        evs.append(ev("traffic", "info", f"Ignored an impossible traffic reading on {port_name.get(key, n)}: "
+                                                         f"{mbps_txt(max(rx, tx))} on a {speeds.get(i, 0)} Mbps link",
+                                      next((x["id"] for x in data["nodes"] if x.get("port_ref") == [sid, str(n)]
+                                            and x["kind"] != "switch"), None)))
         for q in flap_t.values():
             while q and q[0] < t - 3600:
                 q.popleft()
@@ -1424,7 +1603,9 @@ def rt_loop(api):
                      "last_outage": inet["outages"][-1] if inet["outages"] else None,
                      "outages_month": outs[-30:], "uptime_month": upt, "since": inet.get("since"),
                      "loss_warn": inet.get("loss_warn", False), "loss": inet.get("loss", 0)},
-            "usage": {"day": usage.get("day"), "month": usage.get("month"), "d": usage.get("d", {}), "m": usage.get("m", {})},
+            "usage": {"day": usage.get("day"), "month": usage.get("month"), "d": usage.get("d", {}), "m": usage.get("m", {}),
+                      "since": usage.get("since")},
+            "quality": quality,
             "hist": hist, "speedtest": {"running": speed["running"], "started": speed.get("started"),
                                         "error": speed.get("error", ""), "last": sh[-1] if sh else None,
                                         "history": sh[-12:]}})
@@ -1860,6 +2041,65 @@ def setup(api):
     print("\nSetup done. install.sh adds the scheduled jobs (or see README.md to add them by hand).")
 
 
+OPER = {"1": "up", "2": "down", "3": "testing", "5": "dormant", "6": "not present", "7": "lower layer down"}
+
+
+def check_ports_report(sw_name, names, types, speeds, opers, hw_media=None, media_override=None):
+    """Text report for one switch: every interface, its SpiderMap label (or why it is not a port),
+    and the interfaces that shared one identity in SpiderMap 0.2.x."""
+    order = sorted(names, key=lambda x: int(x) if x.isdigit() else 0)
+    ports = []
+    for idx in order:
+        kind, _ = zp.iface_kind(names[idx], types.get(idx, ""))
+        if kind:
+            ports.append({"ifindex": idx, "name": names[idx], "kind": kind, "media_hw": (hw_media or {}).get(idx, "")})
+    label_ports(ports, media_override)
+    labels = {p["ifindex"]: p["label"] for p in ports}
+    lines = [f"{sw_name} - {len(ports)} ports",
+             f"  {'ifIndex':>8}  {'Interface':30} {'Type':>5}  {'Status':17} {'Speed':>9}   SpiderMap"]
+    for idx in order:
+        kind, why = zp.iface_kind(names[idx], types.get(idx, ""))
+        sp = int(zp.num(speeds.get(idx, "")) or 0)
+        spd = (f"{sp / 1000:g} Gbps" if sp >= 1000 else f"{sp} Mbps") if sp else "-"
+        st = OPER.get(zp.num(opers.get(idx, "")), zp.num(opers.get(idx, "")) or "-")
+        lines.append(f"  {idx:>8}  {names[idx][:30]:30} {zp.num(types.get(idx, '')):>5}  {st:17} {spd:>9}   "
+                     + (labels[idx] if kind else f"- ({why})"))
+    old = {}                     # 0.2.x: Ethernet/LAG types, identified by the digits at the end of the name
+    for idx in order:
+        if zp.num(types.get(idx, "")) in zp.PHYS_TYPES:
+            old.setdefault(port_num(names[idx]), []).append(names[idx])
+    clashes = [v for v in old.values() if len(v) > 1]
+    if clashes:
+        lines.append("  Fixed in 0.3.0 - these interfaces shared one identity in 0.2.x (wrong traffic and totals):")
+        lines += [f"    {' + '.join(v)}" for v in clashes]
+    else:
+        lines.append("  No conflicts.")
+    return "\n".join(lines), bool(clashes)
+
+
+def check_ports(api, community=None):
+    hosts = [h for h in at.load_hosts(api) if h["_snmp"] and str(h["status"]) == "0"]
+    if not hosts:
+        print("No enabled hosts with an SNMP interface in Zabbix.")
+    for h in hosts:
+        try:
+            auth, target = at.snmp_auth(h["_snmp"], h["_macros"], community)
+            auth = auth + ["-Oe"]
+            w = lambda k: at.snmpwalk(auth, target, zp.OID[k])  # noqa: E731
+            names, types, speeds, opers = w("name"), w("type"), w("speed"), w("oper")
+            hw = zp.entity_media(auth, target)
+        except Exception as e:  # noqa: BLE001
+            print(f"\n{h['name']}: cannot read it over SNMP ({e})")
+            continue
+        if not names:
+            print(f"\n{h['name']}: no interfaces returned (check SNMP access to IF-MIB)")
+            continue
+        pm = load_json(DEVICES_FILE, {}).get("settings", {}).get("port_media", {})
+        text, _ = check_ports_report(f"{h['name']} ({target.split(':')[1]})", names, types, speeds, opers, hw,
+                                     pm.get(h["name"]) or pm.get(h["host"]) or {})
+        print("\n" + text)
+
+
 def job_lock(name, wait):
     """One job of each kind at a time. wait=False: return None if it is already running."""
     import fcntl
@@ -1878,6 +2118,7 @@ def main():
     ap.add_argument("--live", action="store_true", help="refresh live status and traffic only")
     ap.add_argument("--rt", action="store_true", help="run the real-time collector (used by the service)")
     ap.add_argument("--version", action="version", version=f"SpiderMap {__version__}")
+    ap.add_argument("--check-ports", action="store_true", help="show how SpiderMap sees every switch port (read-only)")
     ap.add_argument("--install-service", action="store_true", help="install/restart the real-time service")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--community", help="SNMP v1/v2c community override")
@@ -1888,6 +2129,9 @@ def main():
     if args.setup:
         setup(api)
         args.quiet = False
+    if args.check_ports:
+        check_ports(api, args.community)
+        return
     if args.rt:
         rt_loop(api)
         return

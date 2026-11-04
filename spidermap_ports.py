@@ -36,6 +36,12 @@ DASHBOARD_NAME = "Switch ports (auto)"
 HTML_NAME = "autotopo_ports.html"
 WEB_DIRS = ["/usr/share/zabbix/ui", "/usr/share/zabbix", "/var/www/html/zabbix", "/var/www/html"]
 PHYS_TYPES = {"6", "117", "161"}   # ethernet, gigabitEthernet, LAG (Eth-Trunk)
+# Interfaces that are never physical switch ports, whatever ifType the device reports
+# (TP-Link, for example, reports its VLAN interface as Ethernet).
+VIRTUAL_RX = re.compile(r"(?i)^(vlan|vlanif|vlan-interface|bridge|br-|lo$|loopback|inloopback|null|tunnel|tun\d|"
+                        r"meth|mgmt|management|stackport|stack-port|appgigabit|cpu|internal|wlan|wifi|veth|"
+                        r"docker|virtual|sit\d|gre|ip6tnl)")
+LAG_RX = re.compile(r"(?i)^(port-channel|po\d|eth-trunk|bond|lag|trk|ae\d|aggregat)")
 
 OID = {
     "name": "1.3.6.1.2.1.31.1.1.1.1", "alias": "1.3.6.1.2.1.31.1.1.1.18",
@@ -103,6 +109,52 @@ def rdns_all(ips):
 # --------------------------------------------------------------------------- #
 # Switch scan
 # --------------------------------------------------------------------------- #
+def iface_kind(name, iftype):
+    """What one interface is: ("port" | "lag" | None, reason when it is not a switch port)."""
+    t = num(iftype) if iftype not in (None, "") else ""
+    if LAG_RX.match(name or "") or t == "161":
+        return "lag", ""
+    if VIRTUAL_RX.match(name or ""):
+        return None, "virtual interface"
+    if t and t not in ("6", "117"):
+        return None, f"not an Ethernet port (ifType {t})"
+    return "port", ""
+
+
+def media_from_text(text):
+    """Pluggable port type when a name or description says it explicitly; "" otherwise (no guessing)."""
+    t = (text or "").lower()
+    for rx, media in ((r"qsfp-?dd", "QSFP-DD"), (r"qsfp28", "QSFP28"), (r"qsfp", "QSFP+"), (r"sfp28", "SFP28"),
+                      (r"sfp\+|sfpplus|sfp-plus|sfp plus", "SFP+"), (r"\bxfp", "XFP"), (r"sfp", "SFP")):
+        if re.search(rx, t):
+            return media
+    return ""
+
+
+ENT_DESCR, ENT_NAME = "1.3.6.1.2.1.47.1.1.1.1.2", "1.3.6.1.2.1.47.1.1.1.1.7"
+ENT_ALIAS = "1.3.6.1.2.1.47.1.3.2.1.2"     # entAliasMappingIdentifier: hardware entity -> ifIndex
+
+
+def entity_media(auth, target):
+    """ifIndex -> SFP / SFP+ / ... from the device's hardware inventory (ENTITY-MIB), when the device describes
+    its ports there. Devices without ENTITY-MIB simply return nothing."""
+    try:
+        alias = at.snmpwalk(auth, target, ENT_ALIAS)
+        if not alias:
+            return {}
+        descr, names = at.snmpwalk(auth, target, ENT_DESCR), at.snmpwalk(auth, target, ENT_NAME)
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    for suffix, val in alias.items():
+        phys = suffix.split(".")[0]
+        m = re.search(r"1\.3\.6\.1\.2\.1\.2\.2\.1\.1\.(\d+)$", val or "")
+        media = media_from_text(f"{descr.get(phys, '')} {names.get(phys, '')}")
+        if m and media:
+            out[m.group(1)] = media
+    return out
+
+
 def scan_switch(h, community, hosts):
     auth, target = at.snmp_auth(h["_snmp"], h["_macros"], community)
     auth = auth + ["-Oe"]                       # enums as numbers
@@ -127,6 +179,8 @@ def scan_switch(h, community, hosts):
         if re.match(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", mac):
             arp[mac] = ".".join(suffix.split(".")[-4:])
 
+    hw_media = entity_media(auth, target)
+
     lldp = {}
     for nb in at.lldp_neighbors(auth, target):
         peer = at.match_host(nb, hosts)
@@ -135,16 +189,16 @@ def scan_switch(h, community, hosts):
 
     ports = []
     for idx in sorted(names, key=lambda x: int(x) if x.isdigit() else 0):
-        if types and num(types.get(idx)) not in PHYS_TYPES:
-            continue
         name = names[idx]
-        if not types and re.match(r"(?i)(null|vlanif|inloop|meth|loop)", name):
+        kind, _why = iface_kind(name, types.get(idx, ""))
+        if not kind:
             continue
         a, o = num(admin.get(idx)), num(oper.get(idx))
         status = "disabled" if a == "2" else ("up" if o == "1" else "down")
         sp = int(num(speed.get(idx)) or 0)
         ports.append({
-            "ifindex": idx, "name": name, "alias": alias.get(idx, ""), "status": status,
+            "ifindex": idx, "name": name, "alias": alias.get(idx, ""), "status": status, "kind": kind,
+            "speed_mbps": sp if status == "up" else 0, "media_hw": hw_media.get(idx, ""),
             "speed": (f"{sp / 1000:g} Gbps" if sp >= 1000 else f"{sp} Mbps") if status == "up" and sp else "",
             "lldp": lldp.get(norm(name), []), "macs": sorted(macs.get(idx, set())),
         })

@@ -148,6 +148,10 @@ table{width:100%;border-collapse:collapse}
 .t-cable,.t-traffic{background:var(--warn-bg);color:var(--warn)}
 .t-conflict{background:var(--bad-bg);color:var(--bad)}
 .port.iss{box-shadow:0 0 0 2px var(--warn)}
+.frontwrap{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.sfpgrp{display:flex;flex-direction:column;gap:3px}
+.sfpgrp>span{font-size:10px;font-weight:600;color:var(--muted);letter-spacing:.03em}
+.sfpgrp .port{border-radius:2px;border-style:dashed}
 .iss-line{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:7px 10px;margin:8px 0;font-size:12px}
 #auth{position:fixed;inset:0;z-index:20;background:var(--bg);display:none;align-items:center;justify-content:center;padding:20px}
 .ab-box{max-width:380px;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px 26px;box-shadow:var(--shadow)}
@@ -191,7 +195,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.2.3";
+const PAGE_VERSION = "0.3.0";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -257,6 +261,7 @@ async function loadRT() {
   } catch (e) {}
 }
 const rtFresh = () => RT && Date.now() / 1000 - RT.t < 30;
+const pidOf = p => String(p.id ?? p.n);          // a port's identity (ifIndex); p.n is only the number shown
 function portNum(lbl) { const m = /(\d+)/.exec(lbl || ""); return m ? +m[1] : 999; }
 function index() {
   byId = {}; kids = {};
@@ -371,7 +376,9 @@ function gwCard() {
   if (gT) h += row("Gateway ping", gT.ms == null ? '<span style="color:var(--bad)">no answer</span>' : gT.ms + " ms" + (gT.loss ? ` · ${gT.loss} % loss` : ""));
   const rootSw = DATA.nodes.find(n => n.kind === "switch" && n.flip && n.port_ref);
   const mu = live && rootSw && RT.usage && RT.usage.m && RT.usage.m[rootSw.port_ref[0]] ? RT.usage.m[rootSw.port_ref[0]][String(rootSw.port_ref[1])] : null;
-  if (mu) h += row("Gateway port this month", "↓ " + bytes(mu[0]) + " ↑ " + bytes(mu[1]));
+  const since = live && RT.usage && RT.usage.since && RT.usage.since > new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() / 1000
+    ? ` <span style="color:var(--muted)">(since ${new Date(RT.usage.since * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" })})</span>` : "";
+  if (mu) h += row("Gateway port this month", "↓ " + bytes(mu[0]) + " ↑ " + bytes(mu[1]) + since);
   else if (I.month) h += row("Gateway port this month", "↓ " + bytes(I.month.down) + " ↑ " + bytes(I.month.up));
   h += `<div class="gr" style="margin-top:4px"><span title="Measured on the switch port to the gateway. Wi-Fi traffic to the internet goes through the gateway directly and is not included.">Throughput <i class="ti ti-info-circle"></i></span><span>${wan ? `<span style="color:var(--accent)">↓ ${mbps(wan.down)}</span> &nbsp;<span style="color:var(--pur)">↑ ${mbps(wan.up)}</span>` : "-"}</span></div>`;
   h += spark(wanRows, 1, 2) + `<div class="lgd"><span>${live ? '<span class="livedot"></span>live, every ' + (RT.every || 5) + " s" : "updated every minute"}</span><span style="margin-left:auto">${wanRows ? (live && wanRows === RT.hist.wan ? "last " + Math.round(wanRows.length * (RT.every || 5) / 60) + " min" : "last " + wanRows.length + " min") : ""}</span></div>`;
@@ -571,7 +578,9 @@ function panel(id, quiet) {
   const down = lv ? (n.flip ? lv.rx : lv.tx) : 0, up = lv ? (n.flip ? lv.tx : lv.rx) : 0;
   let h = `<div class="ph"><div class="ic">${iconHtml(n)}</div><div><h2>${esc(n.name)}</h2><div style="color:var(--muted)">${esc(n.sub)} ${tags(n)}</div></div><button class="btn x" id="pclose" aria-label="Close"><i class="ti ti-x"></i></button></div>`;
   const phh = portHist(n.port_ref), ph = phh && phh.rows;
-  if (lv && status(n) !== "off") h += `<div class="traffic"><span><i class="ti ti-arrow-down" style="color:var(--accent)"></i> ${mbps(down)}</span><span><i class="ti ti-arrow-up" style="color:var(--ok)"></i> ${mbps(up)}</span><span style="color:var(--muted)">${phh && phh.live ? '<span class="livedot"></span>' : ""}${esc(n.port || "")}</span></div>` + (ph ? spark(ph, n.flip ? 1 : 2, n.flip ? 2 : 1) + `<div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">${phh.live ? "last " + Math.round(ph.length * (RT.every || 5) / 60) + " min, live" : "last " + ph.length + " min"}</span></div>` : "");
+  if (lv && status(n) !== "off") h += `<div class="traffic"><span><i class="ti ti-arrow-down" style="color:var(--accent)"></i> ${mbps(down)}</span><span><i class="ti ti-arrow-up" style="color:var(--ok)"></i> ${mbps(up)}</span><span style="color:var(--muted)">${phh && phh.live ? '<span class="livedot"></span>' : ""}${esc(n.port || "")}</span></div>`
+    + (() => { const q = rtFresh() && RT.quality && n.port_ref && RT.quality[n.port_ref[0]] ? RT.quality[n.port_ref[0]][String(n.port_ref[1])] : null;
+               return q && q.ignored ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px" title="Readings that could not be correct (device restart, counter reset or more than the link speed) are not used.">${q.ignored} reading${q.ignored > 1 ? "s" : ""} ignored · last: ${esc(q.last)}</div>` : ""; })() + (ph ? spark(ph, n.flip ? 1 : 2, n.flip ? 2 : 1) + `<div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">${phh.live ? "last " + Math.round(ph.length * (RT.every || 5) / 60) + " min, live" : "last " + ph.length + " min"}</span></div>` : "");
   const acts = [];
   if (n.url && /^https?:\/\//i.test(n.url)) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open web UI</a>`);
   if (n.zbx) acts.push(`<a class="btn" href="${esc(DATA.zabbix_url)}?action=latest.view&filter_set=1&hostids%5B%5D=${encodeURIComponent(n.zbx)}" target="_top"><i class="ti ti-chart-line"></i>Show in Zabbix</a>`);
@@ -584,17 +593,19 @@ function panel(id, quiet) {
   if (n.mac) h += presenceHtml(n.mac);
   if (n.kind === "switch" && DATA.switches[n.sw]) {
     const sw = DATA.switches[n.sw], live = LIVE.ports && LIVE.ports[n.sw] || {};
-    const st = p => { const l = live[String(p.n)]; return l && l.st ? (l.st === 1 ? "up" : "down") : p.status; };
+    const st = p => { const l = live[pidOf(p)]; return l && l.st ? (l.st === 1 ? "up" : "down") : p.status; };
     const mb = p => { const m = /([\d.]+)\s*(G|M)/i.exec(p.speed || ""); return m ? parseFloat(m[1]) * (m[2].toUpperCase() === "G" ? 1000 : 1) : 0; };
     const sc = p => st(p) !== "up" ? "" : (v => v >= 10000 ? "s10g" : v >= 2500 ? "s25g" : v >= 1000 ? "s1g" : v > 0 ? "s100" : "up")(mb(p));
-    const ci = p => LIVE.cable && LIVE.cable[n.sw] && LIVE.cable[n.sw][String(p.n)];
-    const pb = p => `<span class="port ${sc(p)} ${ci(p) ? "iss" : ""} ${selPort === p.n ? "on" : ""}" data-p="${p.n}" title="${esc(p.full)} ${esc(p.speed || "")}${ci(p) ? " · " + esc(ci(p).join("; ")) : ""}">${p.n}</span>`;
-    const odd = sw.ports.filter(p => p.n % 2), even = sw.ports.filter(p => !(p.n % 2));
-    h += `<div class="sec">Ports · ${sw.ports.filter(p => st(p) === "up").length} of ${sw.ports.length} up</div><div class="front"><div>${odd.map(pb).join("")}</div><div>${even.map(pb).join("")}</div></div>`
+    const ci = p => LIVE.cable && LIVE.cable[n.sw] && LIVE.cable[n.sw][pidOf(p)];
+    const pb = p => `<span class="port ${sc(p)} ${ci(p) ? "iss" : ""} ${selPort === pidOf(p) ? "on" : ""}" data-p="${esc(pidOf(p))}" title="${esc(p.full)} ${esc(p.speed || "")}${ci(p) ? " · " + esc(ci(p).join("; ")) : ""}">${p.n}</span>`;
+    const copper = sw.ports.filter(p => p.kind !== "lag" && !p.media), cages = sw.ports.filter(p => p.kind !== "lag" && p.media);
+    const grid = list => `<div class="front"><div>${list.filter(p => p.n % 2).map(pb).join("")}</div><div>${list.filter(p => !(p.n % 2)).map(pb).join("")}</div></div>`;
+    h += `<div class="sec">Ports · ${sw.ports.filter(p => st(p) === "up").length} of ${sw.ports.length} up</div><div class="frontwrap">${copper.length ? grid(copper) : ""}`
+      + (cages.length ? `<div class="sfpgrp"><span>${esc([...new Set(cages.map(p => p.media))].join(" / "))}</span>${grid(cages)}</div>` : "") + `</div>`
       + `<div style="margin-top:8px"><span class="spd"><i style="background:var(--warn)"></i>10/100 Mbps</span><span class="spd"><i style="background:var(--ok)"></i>1 Gbps</span><span class="spd"><i style="background:var(--accent)"></i>2.5 Gbps</span><span class="spd"><i style="background:var(--pur)"></i>10 Gbps</span></div>`;
     h += `<div class="sec">Port clients</div><table class="lst"><tr class="h"><td>Port</td><td>Client</td><td>Speed</td><td>Traffic</td></tr>${sw.ports.filter(p => st(p) === "up" || p.clients.length).map(p => {
-      const l = live[String(p.n)];
-      return `<tr class="${selPort === p.n ? "on" : ""}" data-pr="${p.n}"><td>${esc(p.label)}</td><td>${esc(p.clients.join(", ") || (p.alias || "—"))}${ci(p) ? `<div style="color:var(--warn);font-size:11px">cable? ${esc(ci(p).join("; "))}</div>` : ""}</td><td>${esc(p.speed || (st(p) === "up" ? "" : "down"))}</td><td style="white-space:nowrap">${l ? "↓" + mbps(l.tx) + " ↑" + mbps(l.rx) : ""}</td></tr>`;
+      const l = live[pidOf(p)];
+      return `<tr class="${selPort === pidOf(p) ? "on" : ""}" data-pr="${esc(pidOf(p))}"><td>${esc(p.label)}</td><td>${esc(p.clients.join(", ") || (p.alias || "—"))}${ci(p) ? `<div style="color:var(--warn);font-size:11px">cable? ${esc(ci(p).join("; "))}</div>` : ""}</td><td>${esc(p.speed || (st(p) === "up" ? "" : "down"))}</td><td style="white-space:nowrap">${l ? "↓" + mbps(l.tx) + " ↑" + mbps(l.rx) : ""}</td></tr>`;
     }).join("")}</table>`;
   }
   if (kids[id] && kids[id].length) h += `<div class="sec">${n.kind === "switch" ? "Connected" : "Clients"} · ${kids[id].length}</div>` + rowsTable(kids[id]);
@@ -606,7 +617,7 @@ function panel(id, quiet) {
   const eb = $("#edit"); if (eb) eb.onclick = () => { const f = $("#ef"); f.style.display = f.style.display === "block" ? "none" : "block"; if (f.style.display === "block") $("#e-name").focus(); };
   const es = $("#e-save"); if (es) es.onclick = () => saveEdit(n);
   const ec = $("#e-cancel"); if (ec) ec.onclick = () => { $("#ef").style.display = "none"; };
-  P.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { selPort = +b.dataset.p; panel(id, true); });
+  P.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { selPort = b.dataset.p; panel(id, true); });
 }
 
 /* ---------- presence ---------- */
@@ -682,7 +693,7 @@ function topHtml() {
   const rows = [];
   Object.entries(U[topPer] || {}).forEach(([sid, pp]) => Object.entries(pp).forEach(([n, v]) => {
     const sw = DATA.switches[sid]; if (!sw) return;
-    const p = sw.ports.find(x => String(x.n) === n); if (!p) return;
+    const p = sw.ports.find(x => pidOf(x) === n); if (!p) return;
     const node = DATA.nodes.find(x => x.port_ref && x.port_ref[0] === sid && String(x.port_ref[1]) === n && x.kind !== "switch");
     const up = p.clients.some(c => Object.values(DATA.switches).some(s2 => s2.name === c));
     rows.push({ name: p.clients.join(", ") || p.label, where: sw.name + " · " + p.label + (up ? " · uplink" : ""), sent: v[0], recv: v[1], tot: v[0] + v[1], node: node && node.id });
@@ -692,7 +703,8 @@ function topHtml() {
   rows.slice(0, 20).forEach(r => {
     h += `<div class="ttr" ${r.node ? `data-go="${esc(r.node)}"` : ""}><div class="top"><span>${esc(r.name)}<div style="font-size:11px;color:var(--muted)">${esc(r.where)}</div></span><span style="text-align:right;white-space:nowrap">${bytes(r.tot)}<div style="font-size:11px;color:var(--muted)">↑ ${bytes(r.sent)} · ↓ ${bytes(r.recv)}</div></span></div><div class="bb" style="width:${(r.tot / mx * 100).toFixed(1)}%"></div></div>`;
   });
-  return h + `<p style="font-size:11px;color:var(--muted)">Measured on the switch ports. Wi-Fi devices are counted together on the gateway's port. ↑ = sent by the device.</p>`;
+  const since = U.since ? ` Counting since ${new Date(U.since * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}.` : "";
+  return h + `<p style="font-size:11px;color:var(--muted)">Measured on the switch ports. Wi-Fi devices are counted together on the gateway's port. ↑ = sent by the device.${since}</p>`;
 }
 
 /* ---------- internet details ---------- */

@@ -39,6 +39,7 @@ creates only its own items, triggers and dashboard (see *Zabbix integration*).
 | `install.sh` | Installer and updater (`--update`). Packages, Ookla CLI, migration from older installs, cron jobs, checks. |
 | `tests/test_gateway.py` | Security tests for `spidermap.php` (needs `php-cli`). |
 | `tests/test_core.py` | Tests for scheduling, edits and job locking. |
+| `tests/test_ports.py` | Tests for port names and traffic counters with real switch tables. |
 
 ## What runs when
 
@@ -65,7 +66,7 @@ Only one full scan and one live refresh run at a time: cron skips a turn if the 
 | `spidermap_events_all.json` | Activity feed, 60 days |
 | `spidermap_presence_all.json` | Online intervals per device, 30 days |
 | `spidermap_inet.json` | Outages, packet-loss state |
-| `spidermap_usage.json` | Bytes per port, today and this month |
+| `spidermap_usage.json` | Bytes per port, today and this month, and since when it counts (`since`) |
 | `spidermap_schedule.json` | Date of the last scheduled speed test |
 | `.spidermap-scan.lock`, `.spidermap-live.lock` | Make sure only one scan and one live refresh run at a time |
 
@@ -100,6 +101,44 @@ the file (`flock`) while they use it, so no edit is lost.
 
 The page polls: map every 60 s, live data every 30 s, real-time data every 5 s, events every 20 s, presence every
 5 min. When the data reports a newer `page_version`, the page reloads itself.
+
+## Ports and traffic
+
+**Identity.** A port is identified by its switch (Zabbix host ID) and its **ifIndex**, everywhere: `port_ref` in the
+map data, live and real-time data, history, usage totals, cable and traffic checks. In the page, a port's `id` is the
+ifIndex; `n` and `label` are only for display.
+
+**Which interfaces are ports** (`iface_kind()` in `spidermap_ports.py`): Ethernet types (ifType 6, 117) and link
+aggregations (161, or names like `Port-channel`, `Eth-Trunk`, `bond`), minus virtual interfaces by name (VLAN
+interfaces, bridges, loopback, management ports, tunnels) - some switches report those as Ethernet.
+
+**Labels** (`label_ports()` in `spidermap.py`), the same for every vendor:
+
+| Switch | Labels |
+|---|---|
+| One kind of port with unique numbers (`GigabitEthernet0/0/1-24`, `ether1-8`, `Gi1/0/1-48`) | the device's own numbers: Port 1..N |
+| Several kinds (`ether1-8` + `sfp-sfpplus1-2`, `Fa0/1-24` + `Gi0/1-2`) | in device (ifIndex) order: Port 1..N |
+| Stack (`Gi1/0/x`, `Gi2/0/x`) | Port 1/x, Port 2/x |
+| Link aggregation | LAG 1..N |
+
+If two ports would still get the same label, the interface name is used instead. Pins in `devices.json`
+(`"SW-Office:5"`) refer to these labels.
+
+**Pluggable ports** get their type in the label (`Port 9 (SFP+)`) and their own group on the front panel. Sources,
+in order: `port_media` in `devices.json`, the interface name when it says so (`media_from_text()`), the device's
+hardware inventory (`entity_media()`: ENTITY-MIB port descriptions mapped to ifIndex). Nothing is guessed from
+speed or from names like `ten-gigabitEthernet`, which are used for SFP+ and for 10GBASE-T copper alike.
+
+**Counters** (`counter_rate()`): ifHCInOctets / ifHCOutOctets as exact integers, every 5 s, with a monotonic clock.
+A sample is not used when the device restarted (sysUpTime went back), ifCounterDiscontinuityTime changed, a 64-bit
+counter went back, or the rate is above the link speed (+5 %). Such samples are counted in `quality` in
+`spidermap_rt.json` and shown with the port. Devices without 64-bit counters fall back to ifInOctets / ifOutOctets
+(32-bit, wrap-around handled).
+
+**Zabbix items** are matched by the ifIndex in the item key (`net.if.in[ifHCInOctets.<ifIndex>]`), with the
+interface name in the item name as a fallback.
+
+**Check a switch:** `python3 spidermap.py --check-ports` lists every interface, its label or why it is not a port.
 
 ## Zabbix integration
 
@@ -141,7 +180,7 @@ Rules that keep SpiderMap safe:
 | PHP | 7.4+ (tested with 8.2 and 8.3) |
 | OS | Debian / Ubuntu with systemd and cron (incl. Proxmox LXC) |
 | Web server | Apache tested; nginx should work (no special rules needed) |
-| Switches | Huawei VRP tested; standard IF-MIB, BRIDGE-MIB / Q-BRIDGE-MIB and LLDP-MIB expected |
+| Switches | Huawei VRP in use; port tables of MikroTik RouterOS, TP-Link Omada and Cisco tested; standard IF-MIB, BRIDGE-MIB / Q-BRIDGE-MIB and LLDP-MIB expected |
 
 Known limitations: switches that keep MAC tables per VLAN community (e.g. some Cisco models) need a change in
 `spidermap_ports.py`; Wi-Fi clients behind a router are grouped under the gateway (no per-client Wi-Fi data).

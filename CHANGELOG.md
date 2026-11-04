@@ -4,6 +4,47 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.3.0] - 2026-11-03
+
+**Correct traffic numbers on every switch.** From the review by Nikolaos Karanikolas, confirmed with the interface
+tables of his MikroTik CRS310 / CRS112 and TP-Link Omada SG3218XP-M2 / SG2206MP.
+
+### Fixed
+- **Impossible speeds and data volumes** on switches where two interfaces end in the same number
+  (`ether1` + `sfp-sfpplus1` on MikroTik, `Vlan-interface1` + port 1 on TP-Link, stacked or mixed-speed switches).
+  SpiderMap identified a port by the digits at the end of its name, so two interfaces shared one counter baseline:
+  every 5 seconds a port's total traffic since boot was counted as new traffic. Ports are now identified by their
+  **ifIndex** everywhere (traffic, history, totals, cable and traffic checks, the page).
+- **No Zabbix data for TP-Link ports**: interface names with spaces (`two-gigabitEthernet 1/0/1`) were not
+  recognised. Zabbix items are now matched by the ifIndex in the item key, so port names and languages do not matter.
+- `Vlan-interface1` and other virtual interfaces that some switches report as Ethernet are no longer shown as ports.
+
+### Changed
+- **One port naming for every vendor:** `Port 1 … Port N` in the order of the device, also for SFP ports
+  (e.g. MikroTik `ether1-8` + `sfp-sfpplus1-2` → Port 1-10). Switches with one kind of port keep their own numbers
+  (Huawei `GigabitEthernet0/0/5` is still Port 5). Stacks: `Port 2/5`. Link aggregations: `LAG 1`.
+  The device's own interface name is shown in the switch panel.
+- **Pluggable ports are marked**: `Port 9 (SFP+)`, also in the activity feed, and shown as a separate group on the
+  switch's front panel. The type comes from the interface name when it says so (`sfp`, `sfpplus`, `qsfp`), the
+  device's hardware inventory (ENTITY-MIB), or the new `port_media` setting. SpiderMap does not guess: names like
+  `ten-gigabitEthernet` or `Te1/1/1` can be SFP+ or 10GBASE-T copper, so they stay `Port N` unless one of these says
+  otherwise.
+- **Counters follow RFC 2863:** exact integers, a monotonic clock, and a sample is ignored when the device restarted
+  (`sysUpTime`), says its counters are not comparable (`ifCounterDiscontinuityTime`), a counter went back, or the
+  traffic would be more than the link can carry. Ignored samples are counted and shown with the port.
+- Devices without 64-bit counters (SNMPv1, some older switches) use 32-bit counters, with wrap-around handled.
+
+### Added
+- `python3 spidermap.py --check-ports`: shows, read-only, every interface of every switch, its SpiderMap name or why
+  it is not a port, and whether it was affected by the old numbering.
+- `tests/test_ports.py`: 33 checks with real switch tables (MikroTik, TP-Link, Huawei, Cisco).
+
+### Upgrade notes
+- **Data usage totals restart** ("since …" is shown), because totals measured before 0.3.0 can be wrong. The old
+  totals are kept in `spidermap_usage.before-0.3.0.json`.
+- Per-port graphs restart, and the normal-traffic baselines for *unusual traffic* are learned again (24 hours).
+- On switches without the problem (e.g. Huawei with only GigabitEthernet ports) the map looks exactly the same.
+
 ## [0.2.3] - 2026-11-03
 
 Bug fixes from the review by Nikolaos Karanikolas (findings F08-F11). Nothing else changes.
@@ -90,6 +131,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.3.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.0
 [0.2.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.3
 [0.2.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.2
 [0.2.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.0

@@ -30,6 +30,7 @@ The version lives in **two** places, keep them equal:
    python3 -m py_compile spidermap.py spidermap_ports.py spidermap_zabbix.py
    bash -n install.sh
    python3 tests/test_core.py              # must end with "N/N passed"
+   python3 tests/test_ports.py             # must end with "N/N passed"
    python3 tests/test_gateway.py           # must end with "N/N passed"
    ```
 5. Make sure nothing personal is in the files: no real MAC addresses, IPs, switch names, tokens or screenshots of
