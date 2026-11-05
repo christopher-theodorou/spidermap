@@ -226,7 +226,7 @@ def test_scheduler():
     check("scheduler: a failed scan keeps its error message",
           sch.jobs["scan"]["last_result"] == "failed (exit 3)" and "SNMP timeout" in sch.jobs["scan"].get("error", ""), sch.jobs["scan"])
 
-    S2 = dict(S, discovery_paused=True)
+    S2 = dict(S, auto_scan=False)
     sch.jobs["scan"]["last_start"] = 0
     sm.Scheduler.command = staticmethod(lambda name: ["sh", "-c", "sleep 0.2"])
     sch.tick(t + 5000, S2)
@@ -307,6 +307,47 @@ def test_config_location():
           os.environ.get("ZABBIX_TEST_URL") == "http://x/api_jsonrpc.php" and os.environ.get("ZABBIX_TEST_TOK") == 'a b"c')
 
 
+def test_dialog_settings():
+    import datetime as dt
+    V = sm.validate_settings
+    check("dialog: a preview setting (v0.6) cannot be switched on", V({"zabbix_triggers": True})[1] and V({"topo_cdp": True})[1])
+    check("dialog: read-only SNMP is always on", V({"snmp_readonly": False})[1] and sm.effective_settings({"snmp_readonly": False})["snmp_readonly"] is True)
+    check("dialog: planned options are refused, offered ones accepted",
+          V({"layout": "force"})[1] and V({"default_view": "vlan"})[1] and not V({"layout": "tree", "units": "percent"})[1])
+    check("dialog: load critical must be above warning", V({"load_warn": 80, "load_crit": 70})[1] and not V({"load_warn": 60, "load_crit": 95})[1])
+    check("dialog: map name without HTML, at most 60 characters",
+          V({"map_name": "<script>"})[1] and V({"map_name": "x" * 61})[1] and V({"map_name": " Home network "})[0] == {"map_name": "Home network"})
+    check("dialog: the scan window needs two different times", V({"offpeak": True, "offpeak_start": "22:00", "offpeak_end": "22:00"})[1]
+          and not V({"offpeak": True, "offpeak_start": "22:00", "offpeak_end": "6:00"})[1])
+    check("dialog: ranges from the design (payload 0-65500, timeout 100-10000, parallel 1-128, pps 10-10000)",
+          not V({"ping_size": 0, "ping_timeout_ms": 100, "ping_parallel": 128, "scan_pps": 10000})[1]
+          and V({"ping_size": 65501})[1] and V({"ping_parallel": 129})[1] and V({"scan_pps": 9})[1])
+    S = dict(sm.effective_settings({}), offpeak=True, offpeak_start="22:00", offpeak_end="06:00")
+    check("dialog: off-peak window across midnight",
+          [sm.in_scan_window(S, dt.datetime(2026, 1, 1, h, 0)) for h in (21, 22, 3, 6)] == [False, True, True, False])
+    check("dialog: without the window, scans may always run", sm.in_scan_window(sm.effective_settings({}), dt.datetime(2026, 1, 1, 12)))
+    check("dialog: the earlier 'paused' setting becomes 'Automatic scan: off'",
+          sm.effective_settings({"discovery_paused": True})["auto_scan"] is False and sm.effective_settings({})["auto_scan"] is True)
+    h = {"_snmp": {"details": {"version": "3", "securityname": "{$U}", "securitylevel": "2", "authpassphrase": "SECRET1",
+                               "privpassphrase": "SECRET2"}}, "_macros": {"{$U}": "monitor"}}
+    sumry = sm.snmp_summary(h)
+    check("dialog: the SNMP summary shows version and user, never a password or community",
+          sumry == "v3 authPriv, user monitor" and "SECRET" not in sumry
+          and sm.snmp_summary({"_snmp": {"details": {"version": "2", "community": "public123"}}}) == "v2c, community from Zabbix", sumry)
+    tmp = tempfile.mkdtemp(prefix="spidermap-log-")
+    sm.JOB_LOG = os.path.join(tmp, "spidermap.log")
+    open(sm.JOB_LOG, "w").write("yesterday\n")
+    old = time.time() - 86400
+    os.utime(sm.JOB_LOG, (old, old))
+    ancient = os.path.join(tmp, "spidermap.log.2020-01-01")
+    open(ancient, "w").write("x")
+    os.utime(ancient, (old - 60 * 86400, old - 60 * 86400))
+    sm.rotate_log()
+    files = sorted(os.listdir(tmp))
+    check("dialog: logs are kept per day, older than 'Keep log files' are removed",
+          files == [f"spidermap.log.{dt.date.fromtimestamp(old).isoformat()}"], files)
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -318,6 +359,7 @@ def main():
     test_scheduler()
     test_settings_apply()
     test_config_location()
+    test_dialog_settings()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

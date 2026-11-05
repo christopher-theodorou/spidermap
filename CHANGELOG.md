@@ -10,12 +10,27 @@ and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap 
 this includes what was planned as 0.4.1).
 
 ### Added
-- **Settings panel** (Zabbix Super admins by default, `permissions.settings`): scan interval, networks to scan,
-  addresses never to scan, a safety limit on the number of addresses, ping timeout / parallel pings / size, how often
-  traffic and status are measured, the daily speed test, how long history is kept, and who may do what. Everything is
-  checked on the server; nothing is written when a value is wrong. Permission changes apply at once.
-- **Scan now, Cancel, Pause discovery.** A second click does not start a second scan; a paused discovery keeps the
-  last map (traffic and status keep updating).
+- **Settings dialog** (the gear button; Zabbix Super admins by default, `permissions.settings`), designed after the
+  "SpiderMap v0.5.0 - Settings" artifact: tabs *General, Scans, SNMP, Topology, Wireless & WAN, Device types,
+  Measurements, Security, Logging*, toggles, networks as chips, a collector status card with scan progress, Cancel and
+  Save with an unsaved-changes indicator. Every value is checked in the browser and again on the server; nothing is
+  written when a value is wrong.
+  - *General:* map name, map refresh, show offline devices, IP labels on nodes, how long devices stay marked.
+  - *Scans:* automatic scan, discovery via ICMP, SNMP collection, full scan and traffic intervals, ICMP payload size,
+    timeout, parallel checks, allowed networks and addresses never to scan.
+  - *SNMP:* max-repetitions (GETBULK), retries, timeout. The credentials stay on each switch's SNMP interface in
+    Zabbix; the tab shows what each switch uses, never a password.
+  - *Topology:* link sources LLDP, MAC tables and ARP tables.
+  - *Measurements:* link thickness by traffic, units (bits/s, bytes/s, % of capacity), load warning and critical
+    (links turn amber / red), status refresh, history, the daily speed test.
+  - *Security:* scan only in an off-peak window, a packet-per-second limit for the ping sweep, the address limit,
+    and who may open SpiderMap, change devices, start speed tests and change settings.
+  - *Logging:* log level (errors only up to debug, which also logs every SNMP command) and how many days of logs to
+    keep (one file per day), plus recent events.
+  - *Wireless & WAN* and *Device types* are shown as a preview of 0.6.0, as in the design; nothing there is active yet,
+    and neither are CDP, other layouts and the link with Zabbix triggers (marked "v0.6").
+- **Scan now, Cancel, Pause scans,** with the progress of the running scan. A second click does not start a second
+  scan; paused scans keep the last map (traffic and status keep updating).
 - **Restore, Export, Import:** the last 10 versions of the settings and devices are kept, one click brings one back;
   export to a file and import it elsewhere, with a preview before anything changes.
 - **Collector health:** the service, the last scans and their errors, the Zabbix API, every switch (answering or not),

@@ -23,6 +23,7 @@ import os
 import re
 import socket
 import subprocess
+import time
 from urllib.parse import urlparse
 
 import spidermap_zabbix as at
@@ -74,11 +75,25 @@ def sweep(nets):
     sweep_ips([str(ip) for n in nets for ip in ipaddress.ip_network(n, strict=False).hosts()])
 
 
-def sweep_ips(ips, timeout_ms=1000, parallel=64, size=56):
-    """Ping every address once, so that live devices show up in the ARP and MAC tables."""
-    wait = f"{max(timeout_ms, 200) / 1000:g}"
+def sweep_ips(ips, timeout_ms=1000, parallel=64, size=56, pps=0):
+    """Ping every address once, so that live devices show up in the ARP and MAC tables.
+    pps > 0: at most that many pings start per second (all threads together)."""
+    import threading
+    wait = f"{max(timeout_ms, 100) / 1000:g}"
+    gap, lock, nxt = (1.0 / pps if pps else 0), threading.Lock(), [time.monotonic()]
+
+    def pace():
+        if not gap:
+            return
+        with lock:
+            t = max(nxt[0], time.monotonic())
+            nxt[0] = t + gap
+        d = t - time.monotonic()
+        if d > 0:
+            time.sleep(d)
 
     def ping(ip):
+        pace()
         try:
             subprocess.run(["ping", "-n", "-c", "1", "-W", wait, "-s", str(int(size)), ip],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout_ms / 1000 + 3)

@@ -149,9 +149,15 @@ both places. The tests build the gateway with the same function.
 
 ## Settings
 
-`SETTINGS_SCHEMA` in `spidermap.py` is the one list of settings that can be changed from the page: key, type,
-default, limits, section, label and help. It drives the validation, the defaults (`effective_settings()`) and the form
-on the page. To add a setting: add a row there, use it with `setting("key")` (or `current_settings()`), and add a test.
+`SETTINGS_SCHEMA` in `spidermap.py` is the one list of settings that can be changed from the page. Each entry
+(`_S(...)`) has a key, type (`bool`, `int`, `choice`, `str`, `time`, `digits`, `cidrs`, `ips`, `level`), default,
+tab, group, label, and optionally a range, unit, drop-down choices (a third element `"planned"` shows an option that
+cannot be chosen yet), help text, `preview` (shown, not active: "v0.6") or `locked` (always the default). It drives
+the validation (`validate_settings()`), the defaults (`effective_settings()`) and the Settings dialog, which builds its
+tabs and fields from it. To add a setting: add an entry, use it with `setting("key")` or `current_settings()`, and
+add a test. Settings that change how the map looks (`DISPLAY_KEYS`) are passed to every viewer in
+`spidermap_status.json`; the scan's progress comes from `spidermap_scan_progress.json` in the state folder, and the
+scan log is one file per day (`spidermap.log.YYYY-MM-DD`, kept for `log_keep_days`).
 Other keys in `devices.json` (`port_media`, `aliases`, `manual_links`, `core_switch`) are kept as they are; an import
 may set them, with a type check.
 

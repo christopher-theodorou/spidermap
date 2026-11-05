@@ -552,22 +552,30 @@ def full_scan(api, community=None, quiet=False):
     host_by_ip = {ip: h for h in hosts for ip in h["_ips"]}
 
     S = effective_settings(cfg.get("settings", {}))
+    scan_progress(2, "starting")
+    at.SNMP_WALK.update(timeout_s=S["snmp_timeout_ms"] / 1000, retries=S["snmp_retries"], max_rep=S["snmp_max_repetitions"])
     nets = S["scan_subnets"] or sorted({str(ipaddress.ip_network(f"{h['_snmp']['ip']}/24", strict=False))
                                         for h in switches if h["_snmp"].get("ip")})
     targets = list(scan_targets(nets, S["scan_exclude"]))
-    if len(targets) > S["max_targets"]:
+    if not S["icmp_discovery"]:
+        say("Ping sweep off (Settings > Scans): only devices the network already knows are seen")
+    elif len(targets) > S["max_targets"]:
         say(f"Ping sweep skipped: {len(targets)} addresses, more than the limit of {S['max_targets']} (Settings > Scans)")
         report["warnings"].append(f"Ping sweep skipped: {len(targets)} addresses > limit {S['max_targets']}")
     else:
         say(f"Ping sweep {', '.join(nets)} ({len(targets)} addresses)...")
-        zp.sweep_ips(targets, S["ping_timeout_ms"], S["ping_parallel"], S["ping_size"])
+        scan_progress(5, "ping sweep")
+        zp.sweep_ips(targets, S["ping_timeout_ms"], S["ping_parallel"], S["ping_size"], S["scan_pps"])
     arp = arp_table()
 
     sw = {}
     cache = state.setdefault("switch_cache", {})
-    for h in switches:
+    for i_sw, h in enumerate(switches):
+        scan_progress(40 + 40 * i_sw / max(len(switches), 1), f"reading {h['name']}")
         t_sw = now()
         try:
+            if not S["snmp_collection"]:
+                raise RuntimeError("SNMP collection is off (Settings > Scans)")
             ports, sarp = zp.scan_switch(h, community, hosts)
             # a plain-JSON copy (sets become sorted lists), so the cache can always be saved with the state
             cache[h["hostid"]] = {"t": t_sw, "ports": json.loads(json.dumps(ports, default=sorted)), "sarp": dict(sarp)}
@@ -576,7 +584,7 @@ def full_scan(api, community=None, quiet=False):
             # one switch not answering must not make its devices look offline: use its last good data for 30 min
             old = cache.get(h["hostid"])
             msg = str(e)[:200] or type(e).__name__
-            if old and t0 - old["t"] <= 1800:
+            if old and (t0 - old["t"] <= 1800 or not S["snmp_collection"]):
                 ports, sarp = old["ports"], old["sarp"]
                 report["partial"] = True
                 report["switches"][h["hostid"]] = {"name": h["name"], "ok": False, "error": msg,
@@ -587,10 +595,14 @@ def full_scan(api, community=None, quiet=False):
                 report["partial"] = True                 # a switch is missing from the map
                 say(f"  ! {h['name']}: {msg}")
                 continue
+        if not S["topo_lldp"] or not S["topo_fdb"]:          # link sources (Settings > Topology)
+            ports = [dict(p, lldp=p["lldp"] if S["topo_lldp"] else [], macs=p["macs"] if S["topo_fdb"] else [])
+                     for p in ports]
         sw[h["hostid"]] = {"host": h, "ports": ports}
-        for mac, ip in sarp.items():
+        for mac, ip in (sarp.items() if S["topo_arp"] else ()):
             arp.setdefault(mac, (ip, "STALE"))
         say(f"  {h['name']}: {len(ports)} ports, {sum(p['status'] == 'up' for p in ports)} up")
+    scan_progress(82, "building the map")
     port_media = cfg.get("settings", {}).get("port_media", {})
     for s_ in sw.values():
         label_ports(s_["ports"], port_media.get(s_["host"]["name"]) or port_media.get(s_["host"]["host"]) or {})
@@ -1035,6 +1047,7 @@ def full_scan(api, community=None, quiet=False):
             "public_ip_history": state.get("public_ip_history", []), "scan_seconds": now() - t0, "nodes": list(nodes.values()),
             "switches": switches_out, "zabbix_url": "zabbix.php",
             "partial": report["partial"], "scan_warnings": report["warnings"]}
+    scan_progress(95, "saving")
     install_data_page()                   # a new page version reaches the browsers; the web folder is install.sh's job
     save_json(os.path.join(DATA_DIR, DATA), data)
     report.update(finished=now(), nodes=len(nodes), online=len(online), new=len(events["new"]),
@@ -1576,6 +1589,14 @@ def month_uptime(inet, t):
 
 SCHED_FILE = os.path.join(STATE_DIR, "spidermap_schedule.json")         # last scheduled speed test (survives restarts)
 SCAN_REPORT = os.path.join(STATE_DIR, "spidermap_scan_report.json")      # last full scan: per switch, warnings
+SCAN_PROGRESS = os.path.join(STATE_DIR, "spidermap_scan_progress.json")  # how far the running scan is
+
+
+def scan_progress(pct, phase):
+    try:
+        save_json(SCAN_PROGRESS, {"t": now(), "pct": int(pct), "phase": phase})
+    except OSError:
+        pass
 
 
 def gateway_step(fails, answered):
@@ -1701,6 +1722,7 @@ def apply_settings_request(req):
                 ns.pop("view_min_user_type", None)
             else:
                 ns[k] = v
+        ns.pop("discovery_paused", None)
         changed = {k: [old[k], v] for k, v in effective_settings(ns).items() if old[k] != v}
         if not changed:
             res.update(ok=True, message="Nothing changed.")
@@ -1769,12 +1791,23 @@ def publish_settings():
     cfg = load_json(DEVICES_FILE, DEFAULT_DEVICES)
     st = cfg.get("settings", {})
     save_json(os.path.join(DATA_DIR, SETTINGS_OUT), {
-        "schema": [{"key": k, "type": t, "default": d, "range": r, "section": sec, "label": lab, "help": hlp}
-                   for k, t, d, r, sec, lab, hlp in SETTINGS_SCHEMA],
+        "schema": SETTINGS_SCHEMA,
         "values": effective_settings(st), "effective_permissions": permissions(st),
         "advanced": {k: st[k] for k in ADVANCED_SETTINGS if k in st},
         "devices": cfg.get("devices", {}), "history": config_history()})
     save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
+
+
+DISPLAY_KEYS = ("map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
+
+
+def in_scan_window(S, dt):
+    """True when automatic scans may run now (always, unless the off-peak window is on)."""
+    if not S["offpeak"]:
+        return True
+    hm = lambda x: int(x[:2]) * 60 + int(x[3:5])  # noqa: E731
+    now_m, a, b = dt.hour * 60 + dt.minute, hm(S["offpeak_start"]), hm(S["offpeak_end"])
+    return a <= now_m < b if a < b else (now_m >= a or now_m < b)      # a window can pass midnight
 
 
 class Scheduler:
@@ -1795,7 +1828,8 @@ class Scheduler:
 
     @staticmethod
     def command(name):
-        return [sys.executable, os.path.join(HERE, "spidermap.py"), "--quiet" if name == "scan" else "--live"]
+        quiet = setting("log_level") in ("error", "warning")
+        return [sys.executable, os.path.join(HERE, "spidermap.py")] + (["--live"] if name == "live" else (["--quiet"] if quiet else []))
 
     def save(self):
         save_json(JOBS_FILE, {"jobs": self.jobs, "history": self.history[-30:], "config_result": self.config_result})
@@ -1803,7 +1837,7 @@ class Scheduler:
     def due(self, name, t, S):
         if name in self.proc:
             return False
-        if name == "scan" and S["discovery_paused"]:
+        if name == "scan" and (not S["auto_scan"] or not in_scan_window(S, datetime.datetime.now())):
             return False
         every = S["scan_interval_min"] * 60 if name == "scan" else S["live_interval_s"]
         return t - self.jobs[name].get("last_start", 0) >= every
@@ -1811,14 +1845,13 @@ class Scheduler:
     def start(self, name, reason, by=None):
         if name in self.proc:
             return False
-        os.makedirs(os.path.dirname(JOB_LOG), exist_ok=True)
-        if os.path.exists(JOB_LOG) and os.path.getsize(JOB_LOG) > 2_000_000:
-            os.replace(JOB_LOG, JOB_LOG + ".1")
+        rotate_log()
         log = open(JOB_LOG, "a", encoding="utf-8")
         log.write(f"--- {iso(now())} {name} ({reason}{', by ' + by if by else ''})\n")
         log.flush()
         try:
-            p = subprocess.Popen(self.command(name), stdout=log, stderr=subprocess.STDOUT, cwd=HERE, start_new_session=True)
+            env = dict(os.environ, SPIDERMAP_DEBUG="1") if setting("log_level") == "debug" else None
+            p = subprocess.Popen(self.command(name), stdout=log, stderr=subprocess.STDOUT, cwd=HERE, start_new_session=True, env=env)
         finally:
             log.close()
         self.proc[name] = {"p": p, "t": now(), "mono": time.monotonic(), "reason": reason, "by": by}
@@ -1889,13 +1922,45 @@ class Scheduler:
             jj = dict(j)
             if name in self.proc:
                 jj["elapsed"] = round(time.monotonic() - self.proc[name]["mono"])
+                if name == "scan":
+                    pr = load_json(SCAN_PROGRESS, {})
+                    if pr.get("t", 0) >= self.proc[name]["t"]:          # only this scan's progress
+                        jj["pct"], jj["phase"] = pr.get("pct"), pr.get("phase")
             every = S["scan_interval_min"] * 60 if name == "scan" else S["live_interval_s"]
-            jj["next"] = None if (name == "scan" and S["discovery_paused"]) else j.get("last_start", t) + every
+            jj["next"] = None if (name == "scan" and not S["auto_scan"]) else j.get("last_start", t) + every
             jobs[name] = jj
         return {"t": t, "version": __version__, "user": _run_user(), "service_since": self.started_at,
-                "paused": S["discovery_paused"], "jobs": jobs, "history": self.history[-15:],
+                "paused": not S["auto_scan"], "offpeak": [S["offpeak_start"], S["offpeak_end"]] if S["offpeak"] else None,
+                "display": {k: S[k] for k in DISPLAY_KEYS}, "jobs": jobs, "history": self.history[-15:],
                 "config": {"result": self.config_result, "saved_at": int(os.path.getmtime(DEVICES_FILE))
                            if os.path.exists(DEVICES_FILE) else None}, "health": health}
+
+
+def rotate_log():
+    """One log file per day (spidermap.log.YYYY-MM-DD), kept for "log_keep_days"; at most 5 MB a day."""
+    os.makedirs(os.path.dirname(JOB_LOG), exist_ok=True)
+    if os.path.exists(JOB_LOG):
+        day = datetime.date.fromtimestamp(os.path.getmtime(JOB_LOG)).isoformat()
+        if day != datetime.date.today().isoformat():
+            os.replace(JOB_LOG, f"{JOB_LOG}.{day}")
+        elif os.path.getsize(JOB_LOG) > 5_000_000:
+            os.replace(JOB_LOG, f"{JOB_LOG}.{day}.{int(time.time())}")
+    cut = time.time() - setting("log_keep_days") * 86400
+    folder, base = os.path.split(JOB_LOG)
+    for f in os.listdir(folder):
+        full = os.path.join(folder, f)
+        if f.startswith(base + ".") and os.path.getmtime(full) < cut:
+            os.remove(full)
+
+
+def snmp_summary(h):
+    """What a switch uses for SNMP, from its interface in Zabbix - never the passwords or the community."""
+    d = (h.get("_snmp") or {}).get("details") or {}
+    v = str(d.get("version", "2"))
+    if v == "3":
+        lvl = at.SEC_LEVEL.get(str(d.get("securitylevel", "0")), "?")
+        return f"v3 {lvl}, user {at.resolve(d.get('securityname'), h.get('_macros', {}))}"
+    return ("v1" if v == "1" else "v2c") + ", community from Zabbix"
 
 
 def last_error_line():
@@ -2033,9 +2098,9 @@ def rt_loop(api):
                 vals = snmp_get(auth, target, oids)
                 if not vals:
                     raise RuntimeError("no answer")
-                snmp_state[sid] = {"name": h["name"], "ok": True, "at": int(t0)}
+                snmp_state[sid] = {"name": h["name"], "ok": True, "at": int(t0), "snmp": snmp_summary(h)}
             except Exception as e:  # noqa: BLE001
-                snmp_state[sid] = {"name": h["name"], "ok": False, "at": int(t0), "error": str(e)[:200]}
+                snmp_state[sid] = {"name": h["name"], "ok": False, "at": int(t0), "error": str(e)[:200], "snmp": snmp_summary(h)}
                 print(f"{h['name']}: {e}", flush=True)
                 continue
             mono = time.monotonic()
@@ -2520,7 +2585,7 @@ if (in_array($act, ['scan', 'cancel', 'pause', 'resume', 'settings', 'import', '
   if ($act === 'scan' || $act === 'cancel') {
     write_request($act === 'scan' ? 'scan.request' : 'scan.cancel', $who);
   } else {
-    if ($act === 'pause' || $act === 'resume') $body = ['settings' => ['discovery_paused' => $act === 'pause']];
+    if ($act === 'pause' || $act === 'resume') $body = ['settings' => ['auto_scan' => $act === 'resume']];
     elseif ($act === 'settings') { if (!is_array($in['settings'] ?? null)) deny(400, 'Bad request'); $body = ['settings' => $in['settings']]; }
     elseif ($act === 'import') { if (!is_array($in['import'] ?? null)) deny(400, 'Bad request'); $body = ['import' => $in['import']]; }
     else {
@@ -2606,33 +2671,109 @@ def web_user():
 # Settings that can be changed from the map (Settings panel). One table drives the validation, the defaults and
 # the form on the page. Other keys in devices.json "settings" (port_media, aliases, ...) are kept as they are.
 # --------------------------------------------------------------------------- #
+# Each setting: key, type, default, tab, group, label, and optionally: range, unit, choices, help, preview (shown,
+# not active yet), locked (always on). Types: bool, int, choice, str, time, digits, cidrs, ips, level.
+def _S(key, typ, default, tab, group, label, **kw):
+    return {"key": key, "type": typ, "default": default, "tab": tab, "group": group, "label": label, **kw}
+
+
+_LEVEL3 = [[1, "Zabbix users"], [2, "Zabbix admins"], [3, "Zabbix Super admins"]]
 SETTINGS_SCHEMA = [
-    # key, type, default, (min, max), section, label, help
-    ("discovery_paused", "bool", False, None, "Scans", "Pause discovery",
-     "No new scans; the map keeps the last result. Traffic and status keep updating."),
-    ("scan_interval_min", "int", 5, (2, 1440), "Scans", "Full scan every (minutes)", ""),
-    ("scan_subnets", "cidrs", [], None, "Scans", "Networks to scan",
-     "One per line, e.g. 192.168.1.0/24. Empty: the /24 of each switch."),
-    ("scan_exclude", "ips", [], None, "Scans", "Never scan", "Addresses or networks, one per line."),
-    ("max_targets", "int", 1024, (16, 65536), "Scans", "Most addresses per scan",
-     "A safety limit: a scan with more addresses is refused."),
-    ("ping_timeout_ms", "int", 1000, (200, 5000), "Scans", "Ping timeout (ms)", ""),
-    ("ping_parallel", "int", 64, (1, 256), "Scans", "Pings at the same time", ""),
-    ("ping_size", "int", 56, (16, 1472), "Scans", "Ping size (bytes)", ""),
-    ("rt_interval_s", "int", 5, (5, 60), "Measurements", "Port traffic every (seconds)", ""),
-    ("live_interval_s", "int", 60, (30, 600), "Measurements", "Status refresh every (seconds)", ""),
-    ("speedtest_daily", "time", "", None, "Speed test", "Daily speed test at", "HH:MM, empty = only on request."),
-    ("speedtest_server", "digits", "", None, "Speed test", "Ookla server ID", "Empty = nearest server."),
-    ("flag_hours", "int", 24, (1, 720), "History", "Mark new and moved devices for (hours)", ""),
-    ("forget_after_days", "int", 30, (1, 365), "History", "Forget unknown devices after (days)", ""),
-    ("events_keep_days", "int", 60, (7, 365), "History", "Keep the activity feed for (days)", ""),
-    ("presence_keep_days", "int", 30, (1, 90), "History", "Keep who-was-online for (days)", ""),
-    ("permissions.view", "level", 3, (1, 3), "Access", "Who may open SpiderMap", ""),
-    ("permissions.edit", "level", 2, (2, 3), "Access", "Who may change devices", "Never below Zabbix admins."),
-    ("permissions.speedtest", "level", 2, (1, 3), "Access", "Who may start speed tests", ""),
-    ("permissions.settings", "level", 3, (2, 3), "Access", "Who may change these settings and start scans", ""),
+    # ---- General
+    _S("map_name", "str", "", "General", "General settings", "Map name", maxlen=60, help="Shown in the header and the browser tab."),
+    _S("default_view", "choice", "physical", "General", "General settings", "Default view",
+       choices=[["physical", "Physical topology"], ["l3", "Logical topology (L3)", "planned"], ["vlan", "By VLAN", "planned"]]),
+    _S("page_refresh_s", "choice", 60, "General", "General settings", "Map refresh",
+       choices=[[10, "10 seconds"], [30, "30 seconds"], [60, "1 minute"], [0, "Manually"]],
+       help="How often open pages reload the map. Live traffic keeps its own interval (Measurements)."),
+    _S("show_offline", "bool", True, "General", "General settings", "Show offline devices",
+       help="Devices that do not answer are shown in grey instead of being hidden from the map."),
+    _S("ip_labels", "bool", True, "General", "General settings", "IP labels on nodes"),
+    _S("zabbix_triggers", "bool", False, "General", "General settings", "Link with Zabbix triggers", preview="0.6",
+       help="Nodes change colour with the severity of the host's active problems."),
+    _S("flag_hours", "int", 24, "General", "Devices", "Mark new and moved devices for", range=[1, 720], unit="h"),
+    _S("forget_after_days", "int", 30, "General", "Devices", "Forget unknown devices after", range=[1, 365], unit="days"),
+    # ---- Scans
+    _S("auto_scan", "bool", True, "Scans", "Scan schedule", "Automatic scan",
+       help="When off, scans start only with the Scan now button. Traffic and status keep updating."),
+    _S("icmp_discovery", "bool", True, "Scans", "Scan schedule", "Discovery via ICMP",
+       help="Ping every address of the allowed networks to find active devices."),
+    _S("snmp_collection", "bool", True, "Scans", "Scan schedule", "SNMP collection",
+       help="Read LLDP, ARP and MAC tables from the switches. When off, the switches keep their last data."),
+    _S("scan_interval_min", "int", 5, "Scans", "Scan schedule", "Full scan", range=[2, 1440], unit="min",
+       choices=[[5, "5 minutes"], [15, "15 minutes"], [30, "30 minutes"], [60, "1 hour"], [360, "6 hours"]],
+       help="How often all allowed networks are scanned again."),
+    _S("rt_interval_s", "int", 5, "Scans", "Scan schedule", "Traffic measurements", range=[5, 300], unit="s",
+       choices=[[5, "5 seconds"], [10, "10 seconds"], [30, "30 seconds"], [60, "1 minute"], [300, "5 minutes"]],
+       help="How often the interface counters are read, for live traffic and link thickness."),
+    _S("ping_size", "int", 56, "Scans", "Scan schedule", "ICMP payload size", range=[0, 65500], unit="bytes",
+       help="Data bytes per ping packet (0-65500). Affects ICMP only, not SNMP."),
+    _S("ping_timeout_ms", "int", 1000, "Scans", "Scan schedule", "Timeout", range=[100, 10000], unit="ms",
+       help="How long to wait for each answer (100-10000 ms)."),
+    _S("ping_parallel", "int", 64, "Scans", "Scan schedule", "Parallel checks", range=[1, 128], stepper=True,
+       help="How many addresses are checked at the same time (1-128)."),
+    _S("scan_subnets", "cidrs", [], "Scans", "Scan schedule", "Allowed networks",
+       help="Networks in CIDR form, e.g. 10.0.0.0/16. Press Enter or comma to add. Empty: the /24 of each switch."),
+    _S("scan_exclude", "ips", [], "Scans", "Scan schedule", "Never scan", help="Addresses or networks that are never pinged."),
+    # ---- SNMP (the credentials stay on each host's SNMP interface in Zabbix)
+    _S("snmp_max_repetitions", "int", 1, "SNMP", "Packet size", "Max-repetitions", range=[1, 100],
+       help="How many rows each GETBULK asks for. 1 = one row per request (GETNEXT, the safest). Larger values mean "
+            "fewer requests but bigger packets. SNMPv1 always uses GETNEXT."),
+    _S("snmp_retries", "int", 1, "SNMP", "Packet size", "Retries", range=[0, 10]),
+    _S("snmp_timeout_ms", "int", 3000, "SNMP", "Packet size", "Timeout", range=[500, 10000], unit="ms"),
+    # ---- Topology
+    _S("topo_lldp", "bool", True, "Topology", "Link sources", "LLDP"),
+    _S("topo_cdp", "bool", False, "Topology", "Link sources", "CDP (Cisco)", preview="0.6"),
+    _S("topo_fdb", "bool", True, "Topology", "Link sources", "MAC tables (FDB)",
+       help="Places devices without LLDP through the MAC addresses the switches learn. When off, devices are not "
+            "placed on switch ports."),
+    _S("topo_arp", "bool", True, "Topology", "Link sources", "ARP tables",
+       help="IP addresses from the switches' and routers' ARP tables, in addition to this server's own."),
+    _S("layout", "choice", "tree", "Topology", "Layout", "Map layout",
+       choices=[["tree", "Hierarchical (tree)"], ["force", "Free (force-directed)", "planned"], ["radial", "Radial", "planned"]]),
+    _S("group_subnet", "bool", False, "Topology", "Layout", "Group by subnet", preview="0.6"),
+    _S("lock_positions", "bool", False, "Topology", "Layout", "Lock node positions", preview="0.6",
+       help="Nodes you moved by hand keep their place after a new scan."),
+    # ---- Measurements
+    _S("link_thickness", "bool", False, "Measurements", "Traffic", "Link thickness by traffic"),
+    _S("units", "choice", "bits", "Measurements", "Traffic", "Units",
+       choices=[["bits", "bits/s"], ["bytes", "bytes/s"], ["percent", "% of capacity"]]),
+    _S("load_warn", "int", 70, "Measurements", "Traffic", "Load warning", range=[1, 100], unit="%"),
+    _S("load_crit", "int", 90, "Measurements", "Traffic", "Load critical", range=[1, 100], unit="%",
+       help="Must be higher than the warning."),
+    _S("live_interval_s", "int", 60, "Measurements", "Traffic", "Status refresh", range=[30, 600], unit="s",
+       choices=[[30, "30 seconds"], [60, "1 minute"], [120, "2 minutes"], [300, "5 minutes"]]),
+    _S("events_keep_days", "int", 60, "Measurements", "History", "Keep history", range=[7, 365], unit="days",
+       choices=[[7, "7 days"], [30, "30 days"], [60, "60 days"], [90, "90 days"], [365, "1 year"]]),
+    _S("presence_keep_days", "int", 30, "Measurements", "History", "Keep who-was-online", range=[1, 90], unit="days"),
+    _S("speedtest_daily", "time", "", "Measurements", "Speed test", "Daily speed test at", help="HH:MM, empty = only on request."),
+    _S("speedtest_server", "digits", "", "Measurements", "Speed test", "Ookla server ID", help="Empty = nearest server."),
+    # ---- Security
+    _S("snmp_readonly", "bool", True, "Security", "Security", "Read-only SNMP", locked=True,
+       help="SpiderMap never sends SET, even if the community may write. Always on."),
+    _S("offpeak", "bool", False, "Security", "Security", "Scan only off-peak",
+       help="Automatic full scans only inside this window. Scan now always works."),
+    _S("offpeak_start", "time", "22:00", "Security", "Security", "Scan window from"),
+    _S("offpeak_end", "time", "06:00", "Security", "Security", "Scan window until"),
+    _S("scan_pps", "int", 500, "Security", "Security", "Packet limit", range=[10, 10000], unit="pps",
+       help="Most ping packets per second for the whole scan, so that intrusion detection is not triggered."),
+    _S("max_targets", "int", 1024, "Security", "Security", "Most addresses per scan", range=[16, 65536],
+       help="A safety limit: a scan with more addresses is refused."),
+    _S("permissions.settings", "level", 3, "Security", "Access", "Access to settings", range=[2, 3],
+       choices=[[3, "Super admins only"], [2, "Admins and Super admins"]], help="Also: Scan now, Pause."),
+    _S("permissions.view", "level", 3, "Security", "Access", "Who may open SpiderMap", range=[1, 3], choices=_LEVEL3),
+    _S("permissions.edit", "level", 2, "Security", "Access", "Who may change devices", range=[2, 3], choices=_LEVEL3[1:],
+       help="Never below Zabbix admins."),
+    _S("permissions.speedtest", "level", 2, "Security", "Access", "Who may start speed tests", range=[1, 3], choices=_LEVEL3),
+    # ---- Logging
+    _S("log_level", "choice", "info", "Logging", "Logging", "Log level",
+       choices=[["error", "Errors only"], ["warning", "Warnings"], ["info", "Information"], ["debug", "Debug"]]),
+    _S("log_keep_days", "int", 14, "Logging", "Logging", "Keep log files", range=[1, 90], unit="days",
+       choices=[[7, "7 days"], [14, "14 days"], [30, "30 days"]]),
 ]
-SETTINGS_KEYS = {k for k, *_ in SETTINGS_SCHEMA}
+SETTINGS_BY_KEY = {f["key"]: f for f in SETTINGS_SCHEMA}
+SETTINGS_KEYS = set(SETTINGS_BY_KEY)
+
 
 
 _SET_CACHE = {"mtime": None, "eff": None, "raw": {}}
@@ -2664,11 +2805,16 @@ def _get(settings, key, default=None):
 def effective_settings(settings):
     """Every schema setting with its current value (or default)."""
     out = {}
-    for key, typ, default, *_ in SETTINGS_SCHEMA:
+    for f in SETTINGS_SCHEMA:
+        key = f["key"]
         v = _get(settings, key, None)
         if key == "permissions.view" and v is None:
             v = settings.get("view_min_user_type")                     # before 0.4.0
-        out[key] = default if v is None else v
+        if key == "auto_scan" and v is None and "discovery_paused" in settings:
+            v = not settings["discovery_paused"]                       # first 0.5.0 drafts
+        if f.get("locked"):
+            v = f["default"]
+        out[key] = f["default"] if v is None else v
     return out
 
 
@@ -2681,14 +2827,26 @@ def validate_settings(new, current=None):
     unknown = sorted(k for k in new if k not in SETTINGS_KEYS)
     if unknown:
         errors.append("Unknown setting(s): " + ", ".join(unknown[:5]))
-    for key, typ, default, rng, _sec, label, _help in SETTINGS_SCHEMA:
+    for f in SETTINGS_SCHEMA:
+        key, typ, label, rng = f["key"], f["type"], f["label"], f.get("range")
         if key not in new:
             continue
         v = new[key]
         try:
+            if f.get("locked") or f.get("preview"):
+                if v != f["default"]:
+                    raise ValueError("cannot be changed" + (f" yet (planned for {f['preview']})" if f.get("preview") else ""))
             if typ == "bool":
                 if not isinstance(v, bool):
                     raise ValueError("must be on or off")
+            elif typ == "choice":
+                ok = [c[0] for c in f["choices"] if len(c) < 3]          # options marked "planned" are not accepted
+                if v not in ok:
+                    raise ValueError("is not one of the options")
+            elif typ == "str":
+                v = str(v).strip()
+                if len(v) > f.get("maxlen", 200) or re.search(r"[<>\x00-\x1f]", v):
+                    raise ValueError(f"at most {f.get('maxlen', 200)} characters, no < > or control characters")
             elif typ in ("int", "level"):
                 if isinstance(v, bool) or not isinstance(v, (int, str)) or not re.fullmatch(r"\d{1,6}", str(v).strip()):
                     raise ValueError("must be a whole number")
@@ -2733,7 +2891,13 @@ def validate_settings(new, current=None):
                                      "permissions": {**((current or {}).get("permissions") or {}), **clean.get("permissions", {})}})
         n = scan_target_count(merged["scan_subnets"], merged["scan_exclude"])
         if n > merged["max_targets"]:
-            errors.append(f"Networks to scan: {n} addresses, more than the limit of {merged['max_targets']}.")
+            errors.append(f"Allowed networks: {n} addresses, more than the limit of {merged['max_targets']} (Security).")
+        if merged["load_crit"] <= merged["load_warn"]:
+            errors.append("Load critical must be higher than Load warning.")
+        if merged["offpeak"] and merged["offpeak_start"] == merged["offpeak_end"]:
+            errors.append("The scan window needs different start and end times.")
+        if merged["offpeak"] and (not merged["offpeak_start"] or not merged["offpeak_end"]):
+            errors.append("The scan window needs a start and an end time.")
     return (clean, errors) if not errors else ({}, errors)
 
 

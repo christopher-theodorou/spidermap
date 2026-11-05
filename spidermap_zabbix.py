@@ -184,14 +184,19 @@ def resolve(value, macros):
 SNMP_CONF_DIR = os.environ.get("SPIDERMAP_SNMP_DIR", "/var/lib/spidermap/snmp")
 
 
+# Walk options, set by spidermap.py from the settings (SNMP tab): timeout, retries, GETBULK max-repetitions.
+SNMP_WALK = {"timeout_s": 3, "retries": 1, "max_rep": 1}
+
+
 class SnmpAuth(list):
     """Options for net-snmp commands. The credentials are NOT among them: they are in a private snmp.conf
     (env SNMPCONFPATH), so they never appear on the command line, where any local user could read them (ps)."""
     env = None
+    version = "2"
 
     def __add__(self, other):
         r = SnmpAuth(list(self) + list(other))
-        r.env = self.env
+        r.env, r.version = self.env, self.version
         return r
 
 
@@ -248,6 +253,7 @@ def snmp_auth(iface, macros, community_override=None):
         lines = [("defVersion", "1" if ver == "1" else "2c"), ("defCommunity", community)]
     auth = SnmpAuth()
     auth.env = _private_snmp_env(target, lines)
+    auth.version = "3" if ver == "3" else ("1" if ver == "1" else "2")
     return auth, target
 
 
@@ -262,7 +268,14 @@ def _clean(v):
 
 
 def snmpwalk(auth, target, base):
-    cmd = ["snmpwalk", "-t", "3", "-r", "1", "-On", "-Oq", *auth, target, base]
+    o = SNMP_WALK
+    timing = ["-t", f"{o['timeout_s']:g}", "-r", str(o["retries"])]
+    if o["max_rep"] > 1 and getattr(auth, "version", "2") != "1":       # GETBULK: SNMPv2c and v3 only
+        cmd = ["snmpbulkwalk", *timing, f"-Cr{o['max_rep']}", "-On", "-Oq", *auth, target, base]
+    else:
+        cmd = ["snmpwalk", *timing, "-On", "-Oq", *auth, target, base]
+    if os.environ.get("SPIDERMAP_DEBUG"):
+        print("  snmp:", " ".join(cmd), flush=True)          # no secrets: they are in the private snmp.conf
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=90, env=getattr(auth, "env", None))
     except subprocess.TimeoutExpired:

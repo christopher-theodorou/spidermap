@@ -30,6 +30,72 @@ header h1 img{width:30px;height:30px}
 .fld textarea{font-family:ui-monospace,monospace;resize:vertical}.fld small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
 .fld.chk{display:flex;gap:8px;align-items:center}.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.note{font-size:12px;margin:4px 0}
 #s-time{cursor:pointer}.okc{color:var(--ok)}.badc{color:var(--bad)}.warnc{color:var(--warn)}
+/* settings dialog - design from the "SpiderMap v0.5.0 - Settings" artifact */
+:root{--sm-accent:#5b2bd6;--sm-accent-h:#4a1fbd;--sm-soft:#efe9fe;--sm-text:#4a1fbd}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){--sm-accent:#8a63ff;--sm-accent-h:#9d7bff;--sm-soft:#2a2045;--sm-text:#b9a3ff}}
+:root[data-theme=dark]{--sm-accent:#8a63ff;--sm-accent-h:#9d7bff;--sm-soft:#2a2045;--sm-text:#b9a3ff}
+.sm-back{position:fixed;inset:0;background:rgba(10,10,40,.38);display:flex;align-items:center;justify-content:center;padding:24px;z-index:60}
+.sm-back[hidden]{display:none}
+.sm{background:var(--card);color:var(--text);border-radius:14px;box-shadow:0 24px 60px rgba(10,10,40,.28);width:min(1120px,100%);height:min(780px,100%);display:flex;flex-direction:column;overflow:hidden}
+.sm-head{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--border)}
+.sm-head h2{margin:0;font-size:20px;font-weight:700}.sm-head .ti-topology-star-3{font-size:28px;color:var(--sm-accent)}
+.sm-badge{font-size:12px;font-weight:600;padding:3px 9px;border-radius:6px;background:var(--sm-soft);color:var(--sm-text)}
+.sm-badge.ver{background:transparent;color:var(--muted);border:1px solid var(--border)}.sm-badge.new{background:var(--ok-bg);color:var(--ok)}
+.sm-x{margin-left:auto;border:0;background:none;font-size:22px;color:var(--muted);cursor:pointer;width:36px;height:36px;border-radius:8px}.sm-x:hover{background:var(--bg)}
+.sm-body{flex:1;display:grid;grid-template-columns:200px 1fr;min-height:0}
+.sm-tabs{border-right:1px solid var(--border);padding:14px 10px;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
+.sm-tab{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;border:0;background:none;cursor:pointer;font:inherit;font-size:14.5px;color:var(--text);text-align:left;position:relative}
+.sm-tab:hover{background:var(--bg)}.sm-tab i{font-size:18px;color:var(--muted)}
+.sm-tab[aria-selected=true]{background:var(--sm-soft);color:var(--sm-text);font-weight:600}.sm-tab[aria-selected=true] i{color:var(--sm-text)}
+.sm-tab[aria-selected=true]::before{content:"";position:absolute;left:-10px;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--sm-accent)}
+.sm-tab .chg{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--sm-accent);display:none}.sm-tab.dirty .chg{display:block}
+.sm-main{overflow-y:auto;padding:20px 26px 26px}
+.sm-cols{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+.sm-main h3{margin:0 0 12px;font-size:19px;font-weight:700;display:flex;align-items:center;gap:10px}
+.sm-main h4{margin:20px 0 6px;font-size:13.5px;font-weight:700;color:var(--sm-text)}
+.sm-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(0,250px);align-items:center;gap:14px;padding:6px 0}
+.sm-row.sw{grid-template-columns:1fr auto;padding:7px 0}.sm-row.dis{opacity:.55}
+.sm-row label,.sm-row .lb{display:flex;align-items:center;gap:7px;font-size:14px}
+.sm-sep{border-top:1px solid var(--border);margin:10px 0}
+.sm-err{grid-column:2;color:var(--bad);font-size:12px;margin-top:-4px}
+.sm-field,.sm-sel{height:36px;width:100%;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);padding:0 11px;font:inherit;font-size:14px;outline:none}
+.sm-field:focus,.sm-sel:focus{border-color:var(--sm-accent);box-shadow:0 0 0 3px var(--sm-soft)}.sm-field.bad,.sm-chips.bad{border-color:var(--bad)}
+.sm-unit{position:relative}.sm-unit .sm-field{padding-right:58px}.sm-unit span{position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px;pointer-events:none}
+.sm-step{display:flex}.sm-step .sm-field{border-radius:7px 0 0 7px}.sm-step div{display:flex;flex-direction:column;border:1px solid var(--border);border-left:0;border-radius:0 7px 7px 0;overflow:hidden}
+.sm-step button{border:0;background:var(--card);color:var(--muted);height:17px;width:28px;cursor:pointer;font-size:9px}.sm-step button:hover{background:var(--bg)}
+.sm-switch{position:relative;width:44px;height:26px;flex:none}.sm-switch input{opacity:0;width:0;height:0}
+.sm-switch span{position:absolute;inset:0;background:var(--border);border-radius:13px;transition:.15s;cursor:pointer}
+.sm-switch span::after{content:"";position:absolute;left:3px;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:.15s;box-shadow:0 1px 2px rgba(0,0,0,.25)}
+.sm-switch input:checked+span{background:var(--sm-accent)}.sm-switch input:checked+span::after{transform:translateX(18px)}
+.sm-switch input:disabled+span{cursor:not-allowed;opacity:.6}.sm-switch input:focus-visible+span{box-shadow:0 0 0 3px var(--sm-soft)}
+.sm-info{position:relative;display:inline-grid;place-items:center;width:17px;height:17px;border-radius:50%;border:1.5px solid var(--muted);color:var(--muted);font-size:10.5px;font-weight:700;cursor:help;flex:none}
+.sm-info .tip{position:absolute;left:50%;bottom:calc(100% + 8px);transform:translateX(-50%);width:250px;background:var(--text);color:var(--card);font-weight:400;font-size:12.5px;line-height:1.4;padding:8px 10px;border-radius:7px;opacity:0;pointer-events:none;transition:.12s;z-index:5}
+.sm-info:hover .tip,.sm-info:focus .tip{opacity:1}
+.sm-chips{min-height:40px;border:1px solid var(--border);border-radius:7px;padding:4px 6px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;background:var(--card)}
+.sm-chips:focus-within{border-color:var(--sm-accent);box-shadow:0 0 0 3px var(--sm-soft)}
+.sm-chip{display:inline-flex;align-items:center;gap:5px;background:var(--sm-soft);color:var(--sm-text);border-radius:6px;padding:3px 5px 3px 9px;font-size:13px;font-family:ui-monospace,monospace}
+.sm-chip button{border:0;background:none;cursor:pointer;color:inherit;font-size:14px;line-height:1;padding:0 3px;border-radius:4px}
+.sm-chips input{border:0;outline:0;flex:1;min-width:100px;background:none;height:28px;padding:0 4px;color:var(--text);font:inherit;font-size:13.5px}
+.sm-mini{font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:5px;background:var(--ok-bg);color:var(--ok);margin-left:6px}
+.sm-note{display:flex;gap:10px;background:var(--sm-soft);border-radius:8px;padding:11px 14px;margin-top:18px;font-size:13.5px;line-height:1.45}
+.sm-note i{color:var(--sm-text);font-size:18px}.sm-note a{color:var(--sm-text);cursor:pointer}
+.sm-card{border:1px solid var(--border);border-radius:12px;padding:16px}
+.sm-card h4{margin:0 0 12px;font-size:16px;color:var(--text);display:flex;align-items:center;gap:8px}
+.sm-pill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:7px;font-size:13.5px;background:var(--ok-bg);color:var(--ok)}
+.sm-pill.bad{background:var(--bad-bg);color:var(--bad)}.sm-pill.warn{background:var(--warn-bg);color:var(--warn)}
+.sm-kv{display:flex;align-items:center;gap:9px;padding:10px 0;border-bottom:1px solid var(--border);font-size:13.5px}.sm-kv i{color:var(--muted)}.sm-kv b{margin-left:auto}
+.sm-bar{height:7px;border-radius:4px;background:var(--bg);border:1px solid var(--border);overflow:hidden;flex:1}.sm-bar div{height:100%;background:var(--sm-accent);transition:width .4s}
+.sm-btn{display:flex;align-items:center;justify-content:center;gap:9px;height:40px;width:100%;border-radius:7px;border:1px solid var(--border);background:var(--card);color:var(--text);font:inherit;font-size:14px;cursor:pointer;margin-top:10px}
+.sm-btn:hover{background:var(--bg)}.sm-btn.primary{background:var(--sm-accent);border-color:var(--sm-accent);color:#fff;font-weight:600}.sm-btn.primary:hover{background:var(--sm-accent-h)}
+.sm-btn:disabled{opacity:.5;cursor:not-allowed}
+.sm-foot{display:flex;align-items:center;gap:12px;padding:14px 22px;border-top:1px solid var(--border)}
+.sm-foot #sm-state{margin-right:auto;font-size:13.5px;color:var(--muted);max-height:60px;overflow:auto}.sm-foot .sm-btn{width:auto;padding:0 22px;margin:0}
+.sm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.sm-cat{border:1px solid var(--border);border-radius:10px;padding:11px 12px;font-size:12.5px;color:var(--muted);opacity:.75}.sm-cat b{display:block;color:var(--text);font-size:13.5px;margin-bottom:2px}
+.sm-log{border:1px solid var(--border);border-radius:8px;font-size:12.5px}.sm-log div{display:grid;grid-template-columns:110px 60px 1fr;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border)}.sm-log div:last-child{border:0}
+@media (max-width:760px){.sm-back{padding:0}.sm{border-radius:0;height:100%}.sm-body{grid-template-columns:1fr;grid-template-rows:auto 1fr}
+.sm-tabs{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border);padding:8px}.sm-tab{white-space:nowrap;padding:7px 11px}.sm-tab[aria-selected=true]::before{display:none}
+.sm-cols{grid-template-columns:1fr}.sm-row{grid-template-columns:1fr}.sm-err{grid-column:1}}
 .btn:disabled,.btn:disabled:hover{opacity:.45;cursor:not-allowed;border-color:var(--border);color:inherit}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn i{font-size:16px}
@@ -60,6 +126,7 @@ header h1 img{width:30px;height:30px}
 svg line{transition:stroke .2s}
 .ln{stroke:var(--line);stroke-width:1.5}
 .ln.off{stroke:var(--off);stroke-dasharray:4 4}
+.ln.lw{stroke:var(--warn)}.ln.lc{stroke:var(--bad)}
 .ln.hl{stroke:var(--accent);stroke-width:2.5}
 .fl{stroke:var(--ok);stroke-width:2.2;stroke-dasharray:3 9;animation:flow linear infinite}
 @keyframes flow{to{stroke-dashoffset:-12}}
@@ -176,7 +243,7 @@ table{width:100%;border-collapse:collapse}
 </head>
 <body>
 <header>
-  <h1 title="SpiderMap · Nothing touches the web unnoticed."><img src="spidermap-assets/spidermap-favicon.svg" alt=""><b>Spider<span>Map</span></b></h1>
+  <h1 title="SpiderMap · Nothing touches the web unnoticed."><img src="spidermap-assets/spidermap-favicon.svg" alt=""><b>Spider<span>Map</span></b><span id="map-name" style="font-weight:500;color:var(--muted);margin-left:6px;font-size:.8em"></span></h1>
   <span class="stat" id="s-on"></span><span class="stat" id="s-off"></span><span class="stat" id="s-new"></span>
   <span class="stat legend">
     <span><i class="dot" style="background:var(--ok)"></i> online</span>
@@ -201,6 +268,11 @@ table{width:100%;border-collapse:collapse}
   <button class="btn" id="theme" aria-label="Theme"><i class="ti ti-sun-moon"></i></button>
 </header>
 <div id="canvas"><div id="stage"></div><div id="msg">Loading…</div></div>
+<div class="sm-back" id="smb" hidden><div class="sm" role="dialog" aria-modal="true" aria-labelledby="sm-title">
+  <div class="sm-head"><i class="ti ti-topology-star-3"></i><h2 id="sm-title">SpiderMap settings</h2><span class="sm-badge ver" id="sm-ver"></span><button class="sm-x" id="sm-close" aria-label="Close">×</button></div>
+  <div class="sm-body"><nav class="sm-tabs" id="sm-tabs" role="tablist" aria-label="Settings sections"></nav><section class="sm-main" id="sm-main" role="tabpanel"></section></div>
+  <div class="sm-foot"><span id="sm-state">All changes are saved</span><button class="sm-btn" id="sm-cancel">Cancel</button><button class="sm-btn primary" id="sm-save" disabled>Save</button></div>
+</div></div>
 <div id="gw" class="min"></div>
 <aside id="panel"></aside>
 <div id="auth" role="dialog" aria-modal="true"></div>
@@ -322,7 +394,11 @@ function portHist(ref) {
   return h ? { rows: h, live: false } : null;
 }
 function isFolded(id) { return id in folded ? folded[id] : (!!byId[id].collapsed || (kids[id] || []).length > 8); }
-function mbps(b) { const m = (b || 0) / 1e6; return m >= 1000 ? (m / 1000).toFixed(2) + " Gbps" : m >= 10 ? m.toFixed(0) + " Mbps" : m >= 0.01 ? m.toFixed(2) + " Mbps" : "0 Mbps"; }
+function mbps(b, cap) {                                // Settings > Measurements > Units
+  if (DISP.units === "percent" && cap) return ((b || 0) / cap * 100).toFixed((b || 0) / cap < .1 ? 1 : 0) + " %";
+  if (DISP.units === "bytes") { const m = (b || 0) / 8e6; return m >= 1000 ? (m / 1000).toFixed(2) + " GB/s" : m >= 10 ? m.toFixed(0) + " MB/s" : m >= 0.01 ? m.toFixed(2) + " MB/s" : "0 MB/s"; }
+  const m = (b || 0) / 1e6; return m >= 1000 ? (m / 1000).toFixed(2) + " Gbps" : m >= 10 ? m.toFixed(0) + " Mbps" : m >= 0.01 ? m.toFixed(2) + " Mbps" : "0 Mbps";
+}
 function dotColor(n) {
   const s = status(n), f = n.flags || [];
   if (s === "down") return "var(--bad)";
@@ -442,7 +518,7 @@ async function loadStatus() {
   try {
     STATUS = await getData("status"); scanPill();
     if (sel === "#health") special("health");
-    if (sel === "#settings") settingsLive();
+    applyDisplay(); if (SM.open) smLive();
   } catch (e) { /* older server, or the service has not written a status yet */ }
 }
 const svcStale = () => !STATUS || Date.now() / 1000 - STATUS.t > 60;
@@ -453,7 +529,7 @@ function scanPill() {
   let t = DATA ? "Scan " + esc((DATA.generated_text || "").slice(11, 16)) : "";
   if (STATUS && svcStale()) t += ' · <span class="badc">service stopped?</span>';
   else if (STATUS && STATUS.paused) t = '<i class="ti ti-player-pause"></i> Discovery paused';
-  else if (j && j.running) t = `<i class="ti ti-loader-2 spin"></i> Scanning… ${j.elapsed || 0} s`;
+  else if (j && j.running) t = `<i class="ti ti-loader-2 spin"></i> Scanning… ${j.pct ? j.pct + " %" : (j.elapsed || 0) + " s"}`;
   else if (j && j.last_result && j.last_result !== "ok") t += ` · <span class="warnc">last scan ${esc(j.last_result)}</span>`;
   if (DATA && DATA.partial) t += ' · <span class="warnc">partial</span>';
   el.innerHTML = t; el.title = "Collector health";
@@ -498,58 +574,11 @@ function healthHtml() {
 const LEVELS = { 1: "Zabbix users", 2: "Zabbix admins", 3: "Zabbix Super admins" };
 async function loadSettings() {
   try { SETTINGS = await getData("settings"); } catch (e) { SETTINGS = { error: e.message }; }
-  if (sel === "#settings") special("settings");
-}
-function settingsTop() {
-  const st = STATUS || {}, j = (st.jobs || {}).scan || {};
-  let h = `<div class="gr"><span>Last scan</span><span>${j.last_end ? ago(j.last_end) + " · " + esc(j.last_result || "") + (j.last_seconds ? " · " + j.last_seconds + " s" : "") : "-"}</span></div>`
-    + `<div class="gr"><span>Next scan</span><span>${st.paused ? '<span class="warnc">discovery paused</span>' : j.running ? `running ${j.elapsed || 0} s` : j.next ? inTime(j.next) : "-"}</span></div>`
-    + `<div class="btnrow">${j.running ? '<button class="btn" id="st-cancel"><i class="ti ti-player-stop"></i>Cancel scan</button>' : '<button class="btn" id="st-scan"><i class="ti ti-refresh"></i>Scan now</button>'}`
-    + `${st.paused ? '<button class="btn" id="st-resume"><i class="ti ti-player-play"></i>Resume discovery</button>' : '<button class="btn" id="st-pause"><i class="ti ti-player-pause"></i>Pause discovery</button>'}</div>`;
-  if (svcStale()) h += `<div class="note badc">The SpiderMap service is not answering: changes will wait until it runs.</div>`;
-  return h;
-}
-function settingsLive() { const b = $("#st-top"); if (b) { b.innerHTML = settingsTop(); wireScanButtons(); } }
-function settingsHtml() {
-  if (!SETTINGS) { loadSettings(); return `<p style="color:var(--muted)">Loading settings…</p>`; }
-  if (SETTINGS.error) return `<p class="badc">The settings could not be loaded (${esc(SETTINGS.error)}).</p>`;
-  const v = SETTINGS.values, eff = SETTINGS.effective_permissions || {};
-  let h = `<div class="sec">Scans</div><div id="st-top">${settingsTop()}</div>`;
-  let section = "";
-  for (const f of SETTINGS.schema) {
-    if (f.key === "discovery_paused") continue;                     // the Pause / Resume buttons above
-    if (f.section !== section) { section = f.section; if (section !== "Scans") h += `<div class="sec">${esc(section)}</div>`; }
-    const val = v[f.key], help = f.help ? `<small>${esc(f.help)}</small>` : "";
-    if (f.type === "bool") h += `<label class="fld chk"><input type="checkbox" data-k="${f.key}" ${val ? "checked" : ""}>${esc(f.label)}</label>`;
-    else if (f.type === "int") h += `<label class="fld"><span>${esc(f.label)}</span><input type="number" data-k="${f.key}" min="${f.range[0]}" max="${f.range[1]}" value="${esc(val)}">${help}</label>`;
-    else if (f.type === "cidrs" || f.type === "ips") h += `<label class="fld"><span>${esc(f.label)}</span><textarea data-k="${f.key}" rows="3" spellcheck="false">${esc((val || []).join("\n"))}</textarea>${help}</label>`;
-    else if (f.type === "level") {
-      const what = f.key.split(".")[1], raised = eff[what] && eff[what] !== val;
-      h += `<label class="fld"><span>${esc(f.label)}</span><select data-k="${f.key}">${[1, 2, 3].filter(n => n >= f.range[0] && n <= f.range[1]).map(n => `<option value="${n}" ${n === val ? "selected" : ""}>${LEVELS[n]}</option>`).join("")}</select>${raised ? `<small>In effect: ${LEVELS[eff[what]]} (nobody may do more than open SpiderMap)</small>` : help}</label>`;
-    } else h += `<label class="fld"><span>${esc(f.label)}</span><input type="text" data-k="${f.key}" value="${esc(val)}" spellcheck="false">${help}</label>`;
-  }
-  h += `<button class="btn wide" id="st-save" style="margin-top:12px"><i class="ti ti-device-floppy"></i>Save settings</button><div id="sf-msg" class="note">${setMsg}</div>`;
-  h += `<div class="sec">Backup</div><div class="btnrow"><button class="btn" id="st-exp"><i class="ti ti-download"></i>Export</button><label class="btn"><i class="ti ti-upload"></i>Import…<input type="file" id="st-imp" accept=".json,application/json" hidden></label></div><div id="imp-prev"></div>`;
-  const hist = SETTINGS.history || [];
-  if (hist.length) h += `<div class="note" style="color:var(--muted)">Saved versions (before each change):</div><table class="lst">${hist.map(x => `<tr><td>${x.saved_at ? new Date(x.saved_at * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</td><td>${esc(x.by || "")}</td><td>${esc(x.why || "")}</td><td><button class="btn" data-restore="${esc(x.id)}">Restore</button></td></tr>`).join("")}</table>`;
-  return h;
-}
-function collectSettings() {
-  const out = {};
-  document.querySelectorAll("#panel [data-k]").forEach(el => {
-    const k = el.dataset.k, f = SETTINGS.schema.find(x => x.key === k);
-    let val;
-    if (f.type === "bool") val = el.checked;
-    else if (f.type === "int" || f.type === "level") val = el.value.trim() === "" ? el.value : Number(el.value);
-    else if (f.type === "cidrs" || f.type === "ips") val = el.value.split(/[\s,]+/).filter(Boolean);
-    else val = el.value.trim();
-    if (JSON.stringify(val) !== JSON.stringify(SETTINGS.values[k])) out[k] = val;
-  });
-  return out;
+  if (SM.open) smOpen(true);
 }
 const rid = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
 async function sendToService(body, done) {
-  const id = rid(), say = (cls, html) => { setMsg = `<span class="${cls}">${html}</span>`; const m = $("#sf-msg"); if (m) m.innerHTML = setMsg; };
+  const id = rid(), say = (cls, html) => { setMsg = `<span class="${cls}">${html}</span>`; const m = $("#sm-state"); if (m) m.innerHTML = setMsg; };
   say("", "Saving…");
   let j;
   try { const r = await postApi({ ...body, rid: id }); j = await r.json().catch(() => ({ ok: false, error: "Unexpected answer (" + r.status + ")" })); }
@@ -560,25 +589,280 @@ async function sendToService(body, done) {
     try { STATUS = await getData("status"); } catch (e) { continue; }
     const res = STATUS.config && STATUS.config.result;
     if (res && res.rid === id) {
-      if (res.ok) say("okc", esc(res.message || "Saved.") + (res.changed ? " New intervals and scan settings apply from the next run." : ""));
-      else say("badc", res.errors.map(esc).join("<br>"));
-      if (res.ok) { SETTINGS = null; await loadSettings(); } else if (done) done();
+      if (res.ok) { SM.saved = true; SETTINGS = null; await loadSettings(); say("okc", esc(res.message || "Saved.") + (res.changed ? " Applies from the next run." : "")); }
+      else { say("badc", res.errors.map(esc).join("<br>")); if (done) done(); }
       return;
     }
   }
   say("warnc", "Sent, but the SpiderMap service has not answered yet. See Collector health.");
 }
-function wireScanButtons() {
-  const act = (a, msg) => async () => {
-    const r = await postApi({ action: a }); const j = await r.json().catch(() => ({}));
-    toast(j.ok ? msg : (j.error || "Refused.")); setTimeout(loadStatus, 2500);
-  };
-  const b = id => $("#" + id);
-  if (b("st-scan")) b("st-scan").onclick = act("scan", "Scan requested - it starts within a few seconds.");
-  if (b("st-cancel")) b("st-cancel").onclick = act("cancel", "Stopping the scan…");
-  if (b("st-pause")) b("st-pause").onclick = act("pause", "Pausing discovery…");
-  if (b("st-resume")) b("st-resume").onclick = act("resume", "Resuming discovery…");
+/* ---------- settings dialog (design: the "SpiderMap v0.5.0 - Settings" artifact) ---------- */
+const SM = { open: false, tab: "Scans", draft: {}, errors: {}, saved: false };
+const SM_TABS = [["General", "settings"], ["Scans", "search"], ["SNMP", "stack-2"], ["Topology", "topology-star-3"],
+  ["Wireless & WAN", "wifi", "0.6"], ["Device types", "cpu", "0.6"], ["Measurements", "chart-bar"], ["Security", "shield"], ["Logging", "file-text"]];
+const smF = k => SETTINGS.schema.find(f => f.key === k);
+const smSame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const smDirtyKeys = () => SETTINGS && SETTINGS.values ? Object.keys(SM.draft).filter(k => !smSame(SM.draft[k], SETTINGS.values[k])) : [];
+function smOpen(reload) {
+  if (!reload) {
+    if (!ME.can.settings) return toast("Only " + (LEVELS[ME.need.settings] || "Zabbix Super admins") + " can change settings.");
+    SM.open = true; $("#smb").hidden = false; setMsg = "";
+  }
+  if (!SETTINGS) { $("#sm-main").innerHTML = '<p style="color:var(--muted)">Loading settings…</p>'; loadSettings(); return; }
+  if (SETTINGS.error) { $("#sm-main").innerHTML = `<p class="badc">The settings could not be loaded (${esc(SETTINGS.error)}).</p>`; return; }
+  if (!reload || SM.saved || !smDirtyKeys().length) { SM.draft = JSON.parse(JSON.stringify(SETTINGS.values)); SM.errors = {}; SM.saved = false; }
+  smRender();
+  if (!reload) setTimeout(() => { const t = $("#sm-tabs [aria-selected=true]"); if (t) t.focus(); }, 30);
 }
+function smClose() {
+  if (smDirtyKeys().length && !confirm("Discard the unsaved changes?")) return;
+  SM.open = false; $("#smb").hidden = true;
+}
+function smInfo(t) { return t ? `<span class="sm-info" tabindex="0" aria-label="${esc(t)}">i<span class="tip">${esc(t)}</span></span>` : ""; }
+function smField(f) {
+  const v = SM.draft[f.key], dis = f.preview || f.locked, id = "smf-" + f.key.replace(/\W/g, "_");
+  const lbl = `<label for="${id}">${esc(f.label)}${smInfo(f.help)}${f.preview ? `<span class="sm-mini">v${esc(f.preview)}</span>` : ""}</label>`;
+  const err = SM.errors[f.key] ? `<div class="sm-err">${esc(SM.errors[f.key])}</div>` : "";
+  const attrs = `id="${id}" data-k="${esc(f.key)}"${dis ? " disabled" : ""}`;
+  if (f.type === "bool")
+    return `<div class="sm-row sw${dis ? " dis" : ""}">${lbl}<label class="sm-switch"><input type="checkbox" role="switch" ${attrs} ${v ? "checked" : ""}><span></span></label></div>`;
+  let ctl;
+  if (f.choices && (f.type !== "str")) {
+    const opts = f.choices.slice();
+    if (!opts.some(c => c[0] === v)) opts.push([v, `${v}${f.unit ? " " + f.unit : ""}`]);
+    ctl = `<select class="sm-sel" ${attrs}>${opts.map(c => `<option value="${esc(c[0])}" ${c[0] === v ? "selected" : ""}${c[2] ? " disabled" : ""}>${esc(c[1])}${c[2] ? " (planned)" : ""}</option>`).join("")}</select>`;
+  } else if (f.type === "cidrs" || f.type === "ips") {
+    ctl = `<div class="sm-chips${SM.errors[f.key] ? " bad" : ""}" data-chips="${esc(f.key)}">${(v || []).map((x, i) => `<span class="sm-chip">${esc(x)}<button data-rm="${i}" aria-label="Remove ${esc(x)}">×</button></span>`).join("")}<input ${attrs} placeholder="${f.type === "cidrs" ? "Add network" : "Add address"}" spellcheck="false" autocomplete="off"></div>`;
+  } else if (f.type === "int" && f.stepper) {
+    ctl = `<div class="sm-step"><input class="sm-field${SM.errors[f.key] ? " bad" : ""}" type="number" inputmode="numeric" ${attrs} min="${f.range[0]}" max="${f.range[1]}" value="${esc(v)}"><div><button data-step="1" data-for="${esc(f.key)}" aria-label="More">▲</button><button data-step="-1" data-for="${esc(f.key)}" aria-label="Less">▼</button></div></div>`;
+  } else if (f.type === "int") {
+    ctl = `<div class="sm-unit"><input class="sm-field${SM.errors[f.key] ? " bad" : ""}" type="number" inputmode="numeric" ${attrs} min="${f.range[0]}" max="${f.range[1]}" value="${esc(v)}">${f.unit ? `<span>${esc(f.unit)}</span>` : ""}</div>`;
+  } else {
+    ctl = `<input class="sm-field${SM.errors[f.key] ? " bad" : ""}" type="text" ${attrs} value="${esc(v)}" ${f.type === "time" ? 'placeholder="HH:MM"' : ""} ${f.maxlen ? `maxlength="${f.maxlen}"` : ""} spellcheck="false">`;
+  }
+  let eff = "";
+  if (f.type === "level" && SETTINGS.effective_permissions) {   // a lower level is raised: nobody may do more than open SpiderMap
+    const what = f.key.split(".")[1], e = SETTINGS.effective_permissions[what];
+    if (e && e !== v && smSame(v, SETTINGS.values[f.key])) eff = `<div class="sm-err" style="color:var(--muted)">In effect: ${esc((LEVELS[e] || "").replace("Zabbix ", ""))}, because only they may open SpiderMap.</div>`;
+  }
+  return `<div class="sm-row${dis ? " dis" : ""}">${lbl}${ctl}</div>${err || eff}`;
+}
+function smGroups(tab, skip) {
+  let h = "", group = "";
+  for (const f of SETTINGS.schema.filter(f => f.tab === tab && !(skip || []).includes(f.key))) {
+    if (f.group !== group) { group = f.group; h += group === tab || group === "Scan schedule" || group === "General settings" ? "" : `<h4>${esc(group)}</h4>`; }
+    h += smField(f);
+  }
+  return h;
+}
+function smCard() {
+  const st = STATUS || {}, j = (st.jobs || {}).scan || {}, stale = svcStale();
+  const pill = stale ? '<span class="sm-pill bad">● Not answering</span>' : st.paused ? '<span class="sm-pill warn">● Scans paused</span>' : '<span class="sm-pill">● Running</span>';
+  const next = j.next && !j.running ? new Date(j.next * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : st.paused ? "paused" : "-";
+  const pct = j.running ? (j.pct || 0) : 0;
+  return `<h4><i class="ti ti-server-2"></i>Collector status</h4><div style="text-align:center;margin-bottom:8px">${pill}</div>`
+    + `<div class="sm-kv"><i class="ti ti-clock"></i>Last scan took<b>${j.last_seconds ? Math.round(j.last_seconds) + " s" : "-"}</b></div>`
+    + `<div class="sm-kv"><i class="ti ti-calendar"></i>Next scan at<b>${esc(next)}</b></div>`
+    + (st.offpeak ? `<div class="sm-kv"><i class="ti ti-moon"></i>Scan window<b>${esc(st.offpeak[0])}–${esc(st.offpeak[1])}</b></div>` : "")
+    + `<div class="sm-kv"><i class="ti ti-loader-2${j.running ? " spin" : ""}"></i>Progress<b class="sm-badge ver">${j.running ? esc(j.phase || "running") : "Idle"}</b></div>`
+    + `<div class="sm-kv" style="border:0"><div class="sm-bar"><div style="width:${pct}%"></div></div><b>${pct}%</b></div>`
+    + (j.running ? '<button class="sm-btn" data-act="cancel"><i class="ti ti-player-stop"></i>Cancel scan</button>'
+                 : '<button class="sm-btn primary" data-act="scan"><i class="ti ti-player-play"></i>Scan now</button>')
+    + (st.paused ? '<button class="sm-btn" data-act="resume"><i class="ti ti-player-play"></i>Resume scans</button>'
+                 : '<button class="sm-btn" data-act="pause"><i class="ti ti-player-pause"></i>Pause scans</button>')
+    + (j.last_result && j.last_result !== "ok" && !j.running ? `<div class="note warnc" style="margin-top:8px">Last scan: ${esc(j.last_result)}${j.error ? " - " + esc(j.error) : ""}</div>` : "");
+}
+const SM_PREVIEW = {
+  "Wireless & WAN": [["Links between buildings (PtP / PtMP)", [["Wireless link detection", "Matches both ends of a link through the remote station's MAC in the registration table, so it does not look like a cable."],
+      ["Vendor profiles", "MikroTik, Ubiquiti, Cambium, Mimosa, Siklu, LigoWave: signal, capacity, distance and frequency from each vendor's MIB."],
+      ["Signal warning / critical", "Thresholds in dBm, and how wireless links are drawn on the map."]]],
+    ["Access points", [["Data source", "SNMP & LLDP, or the UniFi, Omada, Aruba Instant / Central and Ruckus controllers (read-only account)."],
+      ["Wireless clients and mesh links", "Clients on the map, and wireless uplinks between APs."]]],
+    ["WAN & satellite", [["Starlink", "Latency, obstruction, speeds and outages from the dish's local gRPC API (Starlink has no SNMP)."],
+      ["4G / 5G routers", "Teltonika, MikroTik LTE, Huawei, ZTE: RSRP / SINR, provider and cell."],
+      ["Active WAN in failover", "Which connection carries the traffic right now, e.g. fibre or Starlink."]]],
+    ["Unmanaged devices", [["Inferring hidden devices", "Many MACs on one switch port means an unmanaged switch or media converter: drawn as an unknown device."],
+      ["Manual links", "Fibre through media converters, links without management access."]]]],
+  "Device types": [["Firewalls & gateways", "pfSense, OPNsense, FortiGate, Sophos", "SNMP, ARP and routing tables, VPN tunnels"],
+    ["ONT / modem", "Fibre routers, VDSL, cable", "ICMP to the WAN side, TR-069 where the provider allows"],
+    ["UPS", "APC, Eaton, CyberPower, Riello", "UPS-MIB: load, battery, runtime, powered devices"],
+    ["PDU", "APC, Raritan, Eaton", "SNMP: power and state per outlet"],
+    ["IP cameras & NVR", "Hikvision, Dahua, Axis, UniView", "ONVIF discovery and the PoE port that powers them"],
+    ["IP phones & PBX", "Yealink, Grandstream, Cisco, 3CX", "LLDP-MED and voice VLAN, SIP trunk"],
+    ["Printers", "All network printers", "Printer-MIB: toner, paper, errors"],
+    ["NAS & storage", "Synology, QNAP, TrueNAS", "SNMP: disks, RAID, temperature, aggregated links"],
+    ["Hypervisors", "Proxmox, VMware ESXi, Hyper-V", "API: virtual switches and VMs behind one physical port"],
+    ["Industrial & IoT", "PLC, BMS, environment sensors", "Modbus / BACnet gateways, by MAC vendor"],
+    ["Powerline & media converters", "Managed models", "Vendor tools where available"],
+    ["Out-of-band management", "iLO, iDRAC, IPMI, console servers", "Separate management network"]] };
+function smPreview(tab) {
+  let h = `<h3>${esc(tab)}<span class="sm-badge new">New in v0.6</span></h3><div class="sm-note" style="margin:0 0 14px"><i class="ti ti-info-circle"></i><span>Planned for SpiderMap 0.6.0. Shown here so you can see what is coming; nothing in this tab is active yet.</span></div>`;
+  if (tab === "Device types")
+    return h + `<div class="sm-grid">${SM_PREVIEW[tab].map(c => `<div class="sm-cat"><b>${esc(c[0])}</b>${esc(c[1])}<div style="margin-top:6px">Detection: ${esc(c[2])}</div></div>`).join("")}</div>`;
+  for (const [g, items] of SM_PREVIEW[tab])
+    h += `<h4>${esc(g)}</h4>` + items.map(([l, d]) => `<div class="sm-row sw dis"><span class="lb">${esc(l)}${smInfo(d)}<span class="sm-mini">v0.6</span></span><label class="sm-switch"><input type="checkbox" disabled aria-label="Not available yet"><span></span></label></div>`).join("");
+  return h;
+}
+function smLogRows() {
+  const rows = [];
+  (STATUS && STATUS.history || []).forEach(x => rows.push([x.t, x.result === "ok" ? "INFO" : "ERROR",
+    `${x.job === "scan" ? "Full scan" : "Status refresh"} ${x.result === "ok" ? "finished" : x.result} in ${x.seconds} s${x.by ? " (started by " + x.by + ")" : ""}`]));
+  (EVENTS || []).filter(e => e.type === "audit").slice(-10).forEach(e => rows.push([e.t, "INFO", e.text]));
+  rows.sort((a, b) => b[0] - a[0]);
+  return rows.slice(0, 12).map(r => `<div><span>${new Date(r[0] * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span><b class="${r[1] === "ERROR" ? "badc" : ""}" style="color:${r[1] === "ERROR" ? "" : "var(--sm-text)"}">${r[1]}</b><span>${esc(r[2])}</span></div>`).join("") || '<div><span></span><span></span><span style="color:var(--muted)">Nothing yet.</span></div>';
+}
+function smTab(tab) {
+  if (tab === "Wireless & WAN" || tab === "Device types") return smPreview(tab);
+  if (tab === "Scans")
+    return `<div class="sm-cols"><div><h3>Scan schedule</h3>${smGroups("Scans")}
+      <div class="sm-note"><i class="ti ti-info-circle"></i><span><b>Note:</b> the size of SNMP packets (max-repetitions) is set separately in the <a data-go-tab="SNMP">SNMP</a> tab and does not depend on the ICMP payload.</span></div></div>
+      <div class="sm-card" id="sm-card">${smCard()}</div></div>`;
+  if (tab === "SNMP") {
+    const sws = Object.values((STATUS && STATUS.health && STATUS.health.switches) || {});
+    return `<h3>SNMP settings</h3><h4>Credentials</h4><div class="sm-note" style="margin-top:0"><i class="ti ti-key"></i><span>SpiderMap uses each switch's SNMP interface in Zabbix (version, community or v3 user), so credentials live in one place and are never stored or exported by SpiderMap. Change them in Zabbix: <em>Data collection → Hosts → the switch → Interfaces</em>.</span></div>`
+      + (sws.length ? sws.map(x => `<div class="sm-row"><span class="lb">${esc(x.name || "")}</span><span style="color:var(--muted);font-size:13.5px">${esc((x.realtime && x.realtime.snmp) || "-")}</span></div>`).join("") : "")
+      + smGroups("SNMP");
+  }
+  if (tab === "Logging") return `<h3>Logging</h3>${smGroups("Logging")}<h4>Recent events</h4><div class="sm-log" id="sm-log">${smLogRows()}</div>`;
+  const titles = { General: "General settings", Topology: "Topology discovery", Measurements: "Traffic measurements", Security: "Security" };
+  let h = `<h3>${esc(titles[tab] || tab)}</h3>${smGroups(tab)}`;
+  if (tab === "General") {
+    const hist = SETTINGS.history || [];
+    h += `<h4>Backup</h4><div class="btnrow"><button class="sm-btn" style="width:auto;padding:0 16px" id="st-exp"><i class="ti ti-download"></i>Export</button><label class="sm-btn" style="width:auto;padding:0 16px"><i class="ti ti-upload"></i>Import…<input type="file" id="st-imp" accept=".json,application/json" hidden></label></div><div id="imp-prev"></div>`
+      + (hist.length ? `<div class="note" style="color:var(--muted)">Saved versions, kept before each change:</div><table class="lst">${hist.map(x => `<tr><td>${x.saved_at ? new Date(x.saved_at * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</td><td>${esc(x.by || "")}</td><td>${esc(x.why || "")}</td><td><button class="btn" data-restore="${esc(x.id)}">Restore</button></td></tr>`).join("")}</table>` : "");
+  }
+  return h;
+}
+function smRender() {
+  const dirty = smDirtyKeys(), tabsDirty = new Set(dirty.map(k => (smF(k) || {}).tab));
+  $("#sm-ver").textContent = "v" + (STATUS && STATUS.version || PAGE_VERSION);
+  $("#sm-tabs").innerHTML = SM_TABS.map(([t, ic]) => `<button class="sm-tab${tabsDirty.has(t) ? " dirty" : ""}" role="tab" aria-selected="${SM.tab === t}" data-tab="${esc(t)}"><i class="ti ti-${ic}"></i><span>${esc(t)}</span><span class="chg" aria-label="unsaved changes"></span></button>`).join("");
+  const main = $("#sm-main"), y = main.scrollTop; main.innerHTML = smTab(SM.tab); main.scrollTop = y;
+  smFoot();
+}
+function smFoot() {
+  const dirty = smDirtyKeys(), bad = Object.keys(SM.errors).length;
+  $("#sm-save").disabled = !dirty.length || bad > 0;
+  if (dirty.length) { setMsg = ""; $("#sm-state").innerHTML = bad ? `<span class="badc">Fix ${bad} value${bad > 1 ? "s" : ""} before saving</span>` : `<span class="warnc">${dirty.length} unsaved change${dirty.length > 1 ? "s" : ""}</span>`; }
+  else $("#sm-state").innerHTML = setMsg || "All changes are saved";
+  const tabsDirty = new Set(dirty.map(k => (smF(k) || {}).tab));
+  document.querySelectorAll("#sm-tabs .sm-tab").forEach(b => b.classList.toggle("dirty", tabsDirty.has(b.dataset.tab)));
+}
+function smLive() {                                  // status updates without rebuilding the form
+  const c = $("#sm-card"); if (c) c.innerHTML = smCard();
+  const l = $("#sm-log"); if (l) l.innerHTML = smLogRows();
+}
+const SM_CIDR = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(\/(\d{1,2}))?$/;
+function smCheckNet(x, type) {
+  const m = SM_CIDR.exec(x); if (!m || [1, 2, 3, 4].some(i => +m[i] > 255)) return type === "cidrs" ? "Not a valid network. Use CIDR, e.g. 192.168.1.0/24." : "Not a valid address or network.";
+  if (type === "cidrs" && !m[5]) return "Add the prefix, e.g. 192.168.1.0/24.";
+  if (m[6] && (+m[6] > 32 || (type === "cidrs" && +m[6] < 16))) return "The prefix must be between /16 and /32.";
+  return "";
+}
+function smSet(k, raw) {
+  const f = smF(k); let v = raw, e = "";
+  if (f.type === "int" || f.type === "level") {
+    v = raw === "" ? raw : Number(raw);
+    if (raw === "" || !Number.isInteger(v)) e = "Enter a whole number.";
+    else if (v < f.range[0] || v > f.range[1]) e = `Enter a value from ${f.range[0]} to ${f.range[1]}${f.unit ? " " + f.unit : ""}.`;
+  } else if (f.type === "choice") { const c = f.choices.find(c => String(c[0]) === String(raw)); v = c ? c[0] : raw; }
+  else if (f.type === "time") { v = String(raw).trim(); if (v && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) e = "Use HH:MM, e.g. 03:30."; else if (v.length === 4) v = "0" + v; }
+  else if (f.type === "digits") { v = String(raw).trim(); if (v && !/^\d{1,8}$/.test(v)) e = "Numbers only."; }
+  else if (f.type === "str") { v = String(raw); if (/[<>]/.test(v)) e = "No < or > please."; }
+  SM.draft[k] = v;
+  if (e) SM.errors[k] = e; else delete SM.errors[k];
+  const cross = "Must be higher than the warning.", w = SM.draft.load_warn, c = SM.draft.load_crit;
+  if (SM.errors.load_crit === cross) delete SM.errors.load_crit;
+  if (!SM.errors.load_crit && !SM.errors.load_warn && Number.isInteger(w) && Number.isInteger(c) && c <= w) SM.errors.load_crit = cross;
+}
+function smWire() {
+  $("#sm-close").onclick = smClose;
+  $("#smb").onclick = e => { if (e.target.id === "smb") smClose(); };
+  $("#sm-cancel").onclick = () => { if (smDirtyKeys().length) { SM.draft = JSON.parse(JSON.stringify(SETTINGS.values)); SM.errors = {}; smRender(); } else smClose(); };
+  $("#sm-save").onclick = () => {
+    const ch = {}; smDirtyKeys().forEach(k => { ch[k] = SM.draft[k]; });
+    if (Object.keys(ch).length && !Object.keys(SM.errors).length) sendToService({ action: "settings", settings: ch }, smFoot);
+  };
+  $("#sm-tabs").onclick = e => { const b = e.target.closest("[data-tab]"); if (b) { SM.tab = b.dataset.tab; smRender(); } };
+  $("#sm-tabs").onkeydown = e => {
+    if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft"].includes(e.key)) return;
+    const i = SM_TABS.findIndex(t => t[0] === SM.tab), d = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : -1;
+    SM.tab = SM_TABS[(i + d + SM_TABS.length) % SM_TABS.length][0]; smRender(); $("#sm-tabs [aria-selected=true]").focus(); e.preventDefault();
+  };
+  const main = $("#sm-main");
+  main.addEventListener("change", e => {
+    const el = e.target, k = el.dataset.k; if (!k) return;
+    if (el.id === "st-imp") return;
+    const f = smF(k); if (f.type === "cidrs" || f.type === "ips") return;
+    smSet(k, el.type === "checkbox" ? el.checked : el.value);
+    if (f.type === "bool" || f.choices || SM.errors[k] || el.classList.contains("bad")) smRender(); else smFoot();
+  });
+  main.addEventListener("input", e => {
+    const el = e.target, k = el.dataset.k; if (!k || el.type === "checkbox" || el.tagName === "SELECT") return;
+    const f = smF(k); if (f.type === "cidrs" || f.type === "ips") return;
+    smSet(k, el.value); el.classList.toggle("bad", !!SM.errors[k]); smFoot();
+  });
+  main.addEventListener("keydown", e => {
+    const el = e.target, box = el.closest && el.closest("[data-chips]"); if (!box) return;
+    const k = box.dataset.chips, f = smF(k);
+    if ((e.key === "Enter" || e.key === ",") && el.value.trim()) {
+      e.preventDefault();
+      const val = el.value.trim().replace(/,$/, ""), err = smCheckNet(val, f.type);
+      if (err) { SM.errors[k] = err; smRender(); const i = $(`[data-chips="${CSS.escape(k)}"] input`); if (i) { i.value = val; i.focus(); } return; }
+      if (!SM.draft[k].includes(val)) SM.draft[k] = [...SM.draft[k], val];
+      delete SM.errors[k]; smRender(); const i = $(`[data-chips="${CSS.escape(k)}"] input`); if (i) i.focus();
+    } else if (e.key === "Backspace" && !el.value && SM.draft[k].length) { SM.draft[k] = SM.draft[k].slice(0, -1); smRender(); const i = $(`[data-chips="${CSS.escape(k)}"] input`); if (i) i.focus(); }
+  });
+  main.addEventListener("click", async e => {
+    const rm = e.target.closest("[data-rm]");
+    if (rm) { const k = rm.closest("[data-chips]").dataset.chips; SM.draft[k] = SM.draft[k].filter((_, i) => i !== +rm.dataset.rm); delete SM.errors[k]; smRender(); return; }
+    const st = e.target.closest("[data-step]");
+    if (st) { const k = st.dataset.for, f = smF(k), cur = Number.isInteger(SM.draft[k]) ? SM.draft[k] : f.default; smSet(k, String(Math.min(f.range[1], Math.max(f.range[0], cur + +st.dataset.step)))); smRender(); return; }
+    const go = e.target.closest("[data-go-tab]"); if (go) { SM.tab = go.dataset.goTab; smRender(); return; }
+    const act = e.target.closest("[data-act]");
+    if (act) {
+      act.disabled = true;
+      const r = await postApi({ action: act.dataset.act }); const j = await r.json().catch(() => ({}));
+      toast(j.ok ? { scan: "Scan requested: it starts within a few seconds.", cancel: "Stopping the scan…", pause: "Pausing scans…", resume: "Resuming scans…" }[act.dataset.act] : (j.error || "Refused."));
+      setTimeout(loadStatus, 2500); return;
+    }
+    const rs = e.target.closest("[data-restore]");
+    if (rs && confirm("Restore this saved version of the settings and devices? The current version is kept too.")) sendToService({ action: "restore", restore: rs.dataset.restore });
+    if (e.target.closest("#st-exp")) exportSettings();
+  });
+  main.addEventListener("change", e => { if (e.target.id === "st-imp" && e.target.files[0]) { previewImport(e.target.files[0]); e.target.value = ""; } });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && SM.open) smClose(); });
+}
+
+/* ---------- display settings for everyone (Settings > General / Measurements) ---------- */
+let DISP = { map_name: "", page_refresh_s: 60, show_offline: true, ip_labels: true, link_thickness: false, units: "bits", load_warn: 70, load_crit: 90 };
+let mapTimer = null, liveTimer = null;
+function setRefresh(sec) {
+  clearInterval(mapTimer); clearInterval(liveTimer);
+  if (sec > 0) { mapTimer = setInterval(() => { if (!document.hidden) load(); }, Math.max(sec, 10) * 1000); liveTimer = setInterval(() => { if (!document.hidden) loadLive(); }, Math.max(sec, 10) * 1000); }
+}
+function applyDisplay() {
+  const d = STATUS && STATUS.display; if (!d) return;
+  const before = JSON.stringify(DISP); DISP = { ...DISP, ...d };
+  if (JSON.stringify(DISP) === before) return;
+  document.title = DISP.map_name ? `${DISP.map_name} · SpiderMap` : "SpiderMap";
+  const mn = $("#map-name"); if (mn) mn.textContent = DISP.map_name ? "· " + DISP.map_name : "";
+  if (JSON.parse(before).page_refresh_s !== DISP.page_refresh_s) setRefresh(DISP.page_refresh_s);
+  if (DATA) { render(); gwCard(); }
+}
+function portSpeed(ref) {
+  if (!ref || !DATA || !DATA.switches[ref[0]]) return 0;
+  const p = DATA.switches[ref[0]].ports.find(x => pidOf(x) === String(ref[1]));
+  return p && p.speed_mbps ? p.speed_mbps * 1e6 : 0;
+}
+function linkLook(lv, ref) {                         // thickness by traffic, colour by load (Settings > Measurements)
+  if (!lv || lv.st === 2) return { w: 0, cls: "" };
+  const rate = Math.max(lv.rx || 0, lv.tx || 0), cap = portSpeed(ref), load = cap ? rate / cap * 100 : 0;
+  const cls = cap && load >= DISP.load_crit ? "lc" : cap && load >= DISP.load_warn ? "lw" : "";
+  const w = DISP.link_thickness ? Math.min(8, 1.5 + Math.log10(1 + rate / 1e6) * 2.2) : 0;
+  return { w, cls, load };
+}
+
 function exportSettings() {
   const flat = SETTINGS.values, st = { ...(SETTINGS.advanced || {}) };
   for (const [k, val] of Object.entries(flat)) {
@@ -602,20 +886,6 @@ function previewImport(file) {
   };
   rd.readAsText(file);
 }
-function wireSettings() {
-  wireScanButtons();
-  const sv = $("#st-save"); if (sv) sv.onclick = () => {
-    const ch = collectSettings();
-    if (!Object.keys(ch).length) { setMsg = '<span style="color:var(--muted)">Nothing changed.</span>'; $("#sf-msg").innerHTML = setMsg; return; }
-    sendToService({ action: "settings", settings: ch });
-  };
-  const ex = $("#st-exp"); if (ex) ex.onclick = exportSettings;
-  const im = $("#st-imp"); if (im) im.onchange = () => { if (im.files[0]) previewImport(im.files[0]); im.value = ""; };
-  document.querySelectorAll("#panel [data-restore]").forEach(b => b.onclick = () => {
-    if (confirm("Restore this saved version of the settings and devices? The current version is kept too.")) sendToService({ action: "restore", restore: b.dataset.restore });
-  });
-}
-
 /* ---------- speed test panel ---------- */
 function speedHtml() {
   const SP = rtFresh() ? RT.speedtest : null;
@@ -691,7 +961,7 @@ function render() {
   const stage = $("#stage"), seen = new Set();
   let svg = "", extra = "", maxd = 0, left = 0;
   const flowDur = l => { if (!l || l.st === 2) return 0; const m = ((l.rx || 0) + (l.tx || 0)) / 1e6; return m > 50 ? .35 : m > 5 ? .7 : m > .5 ? 1.3 : m > .005 ? 2.6 : 0; };
-  function line(x1, y1, x2, y2, cls, child) { svg += `<line class="ln ${cls}" data-c="${esc(child || "")}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`; }
+  function line(x1, y1, x2, y2, cls, child, w) { svg += `<line class="ln ${cls}" data-c="${esc(child || "")}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"${w ? ` style="stroke-width:${w.toFixed(1)}"` : ""}/>`; }
   function place(id, l, d) {
     const n = byId[id], x = l + W(id) * COL / 2, y = d * ROW + 10;
     pos[id] = { x, y }; maxd = Math.max(maxd, d); seen.add(id);
@@ -703,11 +973,12 @@ function render() {
     }
     const s = status(n), f = n.flags || [];
     e.className = "tn" + (s === "off" || s === "asleep" ? " off" : "") + (s === "down" ? " down" : "") + (f.includes("new") ? " new" : "") + (sel === id ? " sel" : "");
-    const inner = `<div class="ic">${iconHtml(n)}<span class="st" style="background:${dotColor(n)}"></span></div><div class="nm" title="${esc(n.name)}">${esc(n.name)}</div><div class="sb">${esc(n.sub)}</div>${tags(n)}`;
+    const subTxt = DISP.ip_labels || !/^\.?\d{1,3}(\.\d{1,3}){0,3}$/.test(n.sub || "") ? n.sub : "";
+    const inner = `<div class="ic">${iconHtml(n)}<span class="st" style="background:${dotColor(n)}"></span></div><div class="nm" title="${esc(n.name)}">${esc(n.name)}</div><div class="sb">${esc(subTxt)}</div>${tags(n)}`;
     if (e._h !== inner) { e.innerHTML = inner; e._h = inner; }
     e.style.left = (x - 52) + "px"; e.style.top = y + "px"; e.style.opacity = 1;
-    const c = kids[id];
-    if (c) {
+    const c = (kids[id] || []).filter(k => DISP.show_offline || !(byId[k].kind === "device" && ["off", "asleep"].includes(status(byId[k])) && !(kids[k] || []).length));
+    if (c.length) {
       const by = y + ROW - 36, top = y + (tags(n) ? 104 : 90);
       line(x, top, x, by - 10, s === "up" || n.kind !== "device" ? "" : "off", "p:" + id);
       if (!isFolded(id)) {
@@ -715,7 +986,8 @@ function render() {
         c.forEach(k => {
           const cx = cl + W(k) * COL / 2, ch = byId[k], cs = status(ch), lv = portLive(ch.port_ref);
           const off = (cs === "off" || cs === "down" || cs === "asleep") && !(lv && lv.st === 1) || (lv && lv.st === 2);
-          xs.push(cx); line(cx, by, cx, by + 36, off ? "off" : "", k);
+          const lk = off ? { w: 0, cls: "" } : linkLook(lv, ch.port_ref);
+          xs.push(cx); line(cx, by, cx, by + 36, off ? "off" : lk.cls, k, lk.w);
           const dur = off ? 0 : flowDur(lv);
           if (dur) svg += `<line class="fl" style="animation-duration:${dur}s" x1="${cx}" y1="${by}" x2="${cx}" y2="${by + 36}"/>`;
           if (ch.port) extra += `<div class="pt" style="left:${cx}px;top:${by + 12}px">${esc(ch.port)}</div>`;
@@ -838,7 +1110,7 @@ function panel(id, quiet) {
       + `<div style="margin-top:8px"><span class="spd"><i style="background:var(--warn)"></i>10/100 Mbps</span><span class="spd"><i style="background:var(--ok)"></i>1 Gbps</span><span class="spd"><i style="background:var(--accent)"></i>2.5 Gbps</span><span class="spd"><i style="background:var(--pur)"></i>10 Gbps</span></div>`;
     h += `<div class="sec">Port clients</div><table class="lst"><tr class="h"><td>Port</td><td>Client</td><td>Speed</td><td>Traffic</td></tr>${sw.ports.filter(p => st(p) === "up" || p.clients.length).map(p => {
       const l = live[pidOf(p)];
-      return `<tr class="${selPort === pidOf(p) ? "on" : ""}" data-pr="${esc(pidOf(p))}"><td>${esc(p.label)}</td><td>${esc(p.clients.join(", ") || (p.alias || "—"))}${ci(p) ? `<div style="color:var(--warn);font-size:11px">cable? ${esc(ci(p).join("; "))}</div>` : ""}</td><td>${esc(p.speed || (st(p) === "up" ? "" : "down"))}</td><td style="white-space:nowrap">${l ? "↓" + mbps(l.tx) + " ↑" + mbps(l.rx) : ""}</td></tr>`;
+      return `<tr class="${selPort === pidOf(p) ? "on" : ""}" data-pr="${esc(pidOf(p))}"><td>${esc(p.label)}</td><td>${esc(p.clients.join(", ") || (p.alias || "—"))}${ci(p) ? `<div style="color:var(--warn);font-size:11px">cable? ${esc(ci(p).join("; "))}</div>` : ""}</td><td>${esc(p.speed || (st(p) === "up" ? "" : "down"))}</td><td style="white-space:nowrap">${l ? "↓" + mbps(l.tx, (p.speed_mbps || 0) * 1e6) + " ↑" + mbps(l.rx, (p.speed_mbps || 0) * 1e6) : ""}</td></tr>`;
     }).join("")}</table>`;
   }
   if (kids[id] && kids[id].length) h += `<div class="sec">${n.kind === "switch" ? "Connected" : "Clients"} · ${kids[id].length}</div>` + rowsTable(kids[id]);
@@ -978,8 +1250,7 @@ function internetHtml() {
 
 /* ---------- special panels (activity, people, top talkers) ---------- */
 const SPECIAL = { activity: ["Activity", "bell", activityHtml], people: ["Who's online", "users", peopleHtml], top: ["Top talkers", "chart-bar", topHtml],
-                  speed: ["ISP Speed Test", "gauge", speedHtml], health: ["Collector health", "heart-rate-monitor", healthHtml],
-                  settings: ["Settings", "settings", settingsHtml] };
+                  speed: ["ISP Speed Test", "gauge", speedHtml], health: ["Collector health", "heart-rate-monitor", healthHtml] };
 function special(kind) {
   const [title, icon, fn] = SPECIAL[kind], P = $("#panel");
   sel = "#" + kind;
@@ -992,7 +1263,6 @@ function special(kind) {
   P.querySelectorAll("[data-tp]").forEach(c => c.onclick = () => { topPer = c.dataset.tp; special("top"); });
   if (kind === "activity") { store("nm-seen", Date.now() / 1000); actBadge(); }
   const s2 = $("#spt2"); if (s2) s2.onclick = () => startSpeedtest($("#spm2"));
-  if (kind === "settings") wireSettings();
   if (DATA) render();
 }
 $("#b-act").onclick = () => special("activity");
@@ -1044,10 +1314,11 @@ if (window.ResizeObserver) new ResizeObserver(headerHeight).observe($("header"))
 window.addEventListener("resize", () => { headerHeight(); fit(false); });
 load(); loadLive(); loadRT(); loadEvents(); loadPresence(); loadMe(); loadStatus();
 const every = (fn, ms) => setInterval(() => { if (!document.hidden) fn(); }, ms);   // nothing while the tab is hidden
-every(load, 60000); every(loadLive, 30000); every(loadRT, 5000); every(loadEvents, 20000); every(loadPresence, 300000); every(loadStatus, 10000);
+setRefresh(60); every(loadRT, 5000); every(loadEvents, 20000); every(loadPresence, 300000); every(loadStatus, 10000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { load(); loadLive(); loadRT(); loadStatus(); } });
 $("#b-hlt").onclick = () => special("health");
-$("#b-set").onclick = () => special("settings");
+smWire();
+$("#b-set").onclick = () => smOpen();
 $("#s-time").onclick = () => special("health");
 </script>
 </body>

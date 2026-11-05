@@ -83,11 +83,21 @@ Then open **Dashboards → SpiderMap**, or the page directly at `http://<zabbix>
 
 ## Settings
 
-Zabbix Super admins (by default) find a **Settings** button on the map: scan interval and networks, addresses never
-to scan, a safety limit, ping parameters, how often traffic and status are measured, the daily speed test, how long
-history is kept, and who may do what. **Scan now**, **Cancel** and **Pause discovery** are there too. Every change is
-checked on the server, recorded in the audit log, and the previous version is kept: **Restore** brings it back.
-**Export** and **Import** move your settings and devices to another installation.
+Zabbix Super admins (by default) find a **Settings** button (the gear) on the map. The dialog has these tabs:
+
+| Tab | What you set |
+|---|---|
+| General | Map name, map refresh, offline devices, IP labels; backup (export, import, restore an earlier version) |
+| Scans | Automatic scan, ICMP discovery, SNMP collection, intervals, ICMP payload, timeout, parallel checks, allowed networks, addresses never to scan; **Scan now / Cancel / Pause** with the scan's progress |
+| SNMP | GETBULK max-repetitions, retries, timeout (the credentials come from each switch's interface in Zabbix) |
+| Topology | Link sources: LLDP, MAC tables, ARP tables |
+| Measurements | Link thickness by traffic, units, load warning / critical, status refresh, history, daily speed test |
+| Security | Off-peak scan window, packet limit, address limit, who may open, edit, test and change settings |
+| Logging | Log level and retention, recent events |
+| Wireless & WAN, Device types | A preview of SpiderMap 0.6.0 |
+
+Every change is checked in the browser and on the server, recorded in the audit log, and the previous version is
+kept, so a mistake is one click away from being undone.
 
 **Collector health** (the heart icon, for everyone who may open the map) shows the service, the last scans, the
 Zabbix API, every switch (answering or not, and its error), the age of the data and the free disk space.
