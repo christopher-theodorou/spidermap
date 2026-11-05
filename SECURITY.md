@@ -10,7 +10,8 @@ cd /opt/spidermap && git pull && bash install.sh --update
 
 | Version | Supported |
 |---|---|
-| 0.4.0 and newer | ✅ |
+| 0.5.0 and newer | ✅ |
+| 0.4.0 | ⚠ runs as root; please upgrade |
 | 0.2.2 - 0.3.1 | ⚠ please upgrade: SNMP passwords visible in the process list |
 | 0.2.0 and older | ❌ the map data or the page could be reached without a Zabbix login - please upgrade |
 
@@ -28,7 +29,9 @@ version you run. You will get an answer as soon as possible, and credit in the r
 - Changes (device edits, speed tests) need a Zabbix admin (configurable, never lower) and are protected against
   cross-site request forgery. Every change is recorded in an audit log with the Zabbix user.
 - SNMP passwords never appear on a command line; Proxmox's certificate can be pinned by its fingerprint.
-- The Zabbix API token stays in `zabbix.env` (root only) and never reaches the browser.
+- The Zabbix API token stays in `/etc/spidermap/zabbix.env` and never reaches the browser.
+- SpiderMap runs as its own system user, with only the permission ping needs, and cannot write outside its folders.
+- Settings changes are validated twice (web and service), audited, and the previous version is always kept.
 - SpiderMap only reads from your network; it never changes device configuration.
 
 What SpiderMap does **not** do for you: encrypt the connection (enable HTTPS on Zabbix), or protect a Zabbix that is

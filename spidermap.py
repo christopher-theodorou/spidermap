@@ -20,7 +20,9 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import time
 
 import requests
@@ -28,11 +30,12 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.4.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.5.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DEVICES_FILE = os.path.join(HERE, "devices.json")
-STATE_FILE = os.path.join(HERE, "spidermap_state.json")
+HERE = os.path.dirname(os.path.abspath(__file__))          # the code
+CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
+DEVICES_FILE = os.path.join(CONF_DIR, "devices.json")
+STATE_FILE = os.path.join(STATE_DIR, "spidermap_state.json")
 DATA_DIR = "/var/lib/spidermap/www"   # topology data: NOT in the web folder, served only to logged-in Zabbix users
 PAGE, DATA, LIVE, ASSETS = "spidermap.html", "spidermap.json", "spidermap_live.json", "spidermap-assets"
 DASHBOARD_NAME = "SpiderMap"
@@ -167,11 +170,11 @@ def save_json(path, data):
     os.replace(tmp, path)
 
 
-EVENTS_FILE = os.path.join(HERE, "spidermap_events_all.json")
-PRESENCE_FILE = os.path.join(HERE, "spidermap_presence_all.json")
-INET_FILE = os.path.join(HERE, "spidermap_inet.json")
-USAGE_FILE = os.path.join(HERE, "spidermap_usage.json")
-LOCK_FILE = os.path.join(HERE, ".spidermap.lock")
+EVENTS_FILE = os.path.join(STATE_DIR, "spidermap_events_all.json")
+PRESENCE_FILE = os.path.join(STATE_DIR, "spidermap_presence_all.json")
+INET_FILE = os.path.join(STATE_DIR, "spidermap_inet.json")
+USAGE_FILE = os.path.join(STATE_DIR, "spidermap_usage.json")
+LOCK_FILE = os.path.join(STATE_DIR, ".spidermap.lock")
 
 
 def ev(kind, sev, text, node=None, t=None):
@@ -199,8 +202,10 @@ def add_events(evs):
     with open(LOCK_FILE, "w") as lf:
         fcntl.flock(lf, fcntl.LOCK_EX)
         allv = load_json(EVENTS_FILE, [])
+        if not isinstance(allv, list):          # a damaged file: start a new history rather than stop
+            allv = []
         allv.extend(evs)
-        cut = now() - 60 * 86400
+        cut = now() - setting("events_keep_days") * 86400
         allv = [e for e in allv if e["t"] >= cut][-3000:]
         save_json(EVENTS_FILE, allv)
         ensure_data_dir()
@@ -212,15 +217,100 @@ def mbps_txt(bps):
     return f"{m / 1000:.2f} Gbps" if m >= 1000 else f"{m:.0f} Mbps" if m >= 10 else f"{m:.2f} Mbps"
 
 
+RUN_AS_FILE = os.path.join(CONF_DIR, "run-as")       # written by install.sh: "spidermap", or "root" as a fallback
+
+
+def service_user():
+    """pwd entry of the user the service runs as (None = root / not set up yet)."""
+    import pwd
+    try:
+        name = open(RUN_AS_FILE, encoding="utf-8").read().strip()
+    except OSError:
+        return None
+    if not name or name == "root":
+        return None
+    try:
+        return pwd.getpwnam(name)
+    except KeyError:
+        return None
+
+
+def drop_privileges():
+    """Root running a SpiderMap command becomes the service user, so it never leaves files the service cannot
+    write. Only installation commands keep root."""
+    if os.geteuid() != 0:
+        return
+    u = service_user()
+    if not u:
+        return
+    os.initgroups(u.pw_name, u.pw_gid)
+    os.setgid(u.pw_gid)
+    os.setuid(u.pw_uid)
+    os.environ["HOME"] = u.pw_dir
+    os.umask(0o027)
+
+
 def ensure_data_dir():
     os.makedirs(DATA_DIR, exist_ok=True)
-    os.chmod(DATA_DIR, 0o750)
+    if os.geteuid() != 0:
+        return                                  # created and owned by the installer
+    os.chmod(DATA_DIR, 0o2750)                  # setgid: new files belong to the web server's group
     gid = _web_gid()
-    if gid is not None:
+    u = service_user()
+    try:
+        os.chown(DATA_DIR, u.pw_uid if u else 0, gid if gid is not None else -1)
+    except OSError:
+        pass
+
+
+def fix_ownership():
+    """After root installed or migrated something: everything the service writes belongs to the service user.
+    The web server keeps its inbox; the page data stays readable by the web server's group only."""
+    if os.geteuid() != 0:
+        return
+    u, wu, wgid = service_user(), web_user(), _web_gid()
+    uid, gid = (u.pw_uid, u.pw_gid) if u else (0, 0)
+
+    def own(path, o, g, mode=None):
         try:
-            os.chown(DATA_DIR, 0, gid)
+            os.chown(path, o, g)
+            if mode is not None:
+                os.chmod(path, mode)
         except OSError:
             pass
+    os.makedirs(STATE_DIR, exist_ok=True)
+    os.makedirs(EDITS_DIR, exist_ok=True)
+    own(EDITS_DIR, uid, gid, 0o755)
+    for root_dir, mode in ((STATE_DIR, 0o700), (os.path.join(EDITS_DIR, "snmp"), 0o700), (CONF_HIST_DIR, 0o700)):
+        if os.path.isdir(root_dir):
+            for r, dirs, files in os.walk(root_dir):
+                own(r, uid, gid, mode if r == root_dir else None)
+                for f in files:
+                    own(os.path.join(r, f), uid, gid)
+    for f in os.listdir(EDITS_DIR):
+        full = os.path.join(EDITS_DIR, f)
+        if os.path.isfile(full):
+            own(full, uid, gid, 0o600 if f.startswith(("audit.log", "spidermap.log")) else None)
+    if os.path.isdir(DATA_DIR):
+        own(DATA_DIR, uid, wgid if wgid is not None else gid, 0o2750)
+        for f in os.listdir(DATA_DIR):
+            own(os.path.join(DATA_DIR, f), uid, wgid if wgid is not None else gid, 0o640)
+    if os.path.isdir(INBOX) and wu:                     # written by the web server, read and cleared by the service
+        own(INBOX, wu.pw_uid, gid, 0o2770)
+        for f in os.listdir(INBOX):
+            full = os.path.join(INBOX, f)
+            if os.path.isfile(full):
+                own(full, wu.pw_uid, gid, 0o660)
+        sess = os.path.join(INBOX, "sess")
+        if os.path.isdir(sess):
+            own(sess, wu.pw_uid, wu.pw_gid, 0o700)
+    if CONF_DIR != HERE and os.path.isdir(CONF_DIR):
+        own(CONF_DIR, uid, gid, 0o750)
+        own(os.path.join(CONF_DIR, "zabbix.env"), 0, gid, 0o640)       # root may change it, the service only reads
+        for f in ("devices.json", "run-as"):
+            p_ = os.path.join(CONF_DIR, f)
+            if os.path.exists(p_):
+                own(p_, uid if f == "devices.json" else 0, gid, 0o640)
 
 
 def webdir():
@@ -455,24 +545,48 @@ def full_scan(api, community=None, quiet=False):
     baseline = bool(state.get("baseline"))
     sdev = state["devices"]
     webd = webdir()
+    report = {"started": t0, "switches": {}, "warnings": [], "partial": False}
 
     hosts = at.load_hosts(api)
     switches = [h for h in hosts if h["_snmp"] and str(h["status"]) == "0"]
     host_by_ip = {ip: h for h in hosts for ip in h["_ips"]}
 
-    nets = zp.SCAN_SUBNETS or sorted({str(ipaddress.ip_network(f"{h['_snmp']['ip']}/24", strict=False))
-                                      for h in switches if h["_snmp"].get("ip")})
-    say(f"Ping sweep {', '.join(nets)}...")
-    zp.sweep(nets)
+    S = effective_settings(cfg.get("settings", {}))
+    nets = S["scan_subnets"] or sorted({str(ipaddress.ip_network(f"{h['_snmp']['ip']}/24", strict=False))
+                                        for h in switches if h["_snmp"].get("ip")})
+    targets = list(scan_targets(nets, S["scan_exclude"]))
+    if len(targets) > S["max_targets"]:
+        say(f"Ping sweep skipped: {len(targets)} addresses, more than the limit of {S['max_targets']} (Settings > Scans)")
+        report["warnings"].append(f"Ping sweep skipped: {len(targets)} addresses > limit {S['max_targets']}")
+    else:
+        say(f"Ping sweep {', '.join(nets)} ({len(targets)} addresses)...")
+        zp.sweep_ips(targets, S["ping_timeout_ms"], S["ping_parallel"], S["ping_size"])
     arp = arp_table()
 
     sw = {}
+    cache = state.setdefault("switch_cache", {})
     for h in switches:
+        t_sw = now()
         try:
             ports, sarp = zp.scan_switch(h, community, hosts)
+            # a plain-JSON copy (sets become sorted lists), so the cache can always be saved with the state
+            cache[h["hostid"]] = {"t": t_sw, "ports": json.loads(json.dumps(ports, default=sorted)), "sarp": dict(sarp)}
+            report["switches"][h["hostid"]] = {"name": h["name"], "ok": True, "ports": len(ports), "seconds": now() - t_sw}
         except Exception as e:  # noqa: BLE001
-            say(f"  ! {h['name']}: {e}")
-            continue
+            # one switch not answering must not make its devices look offline: use its last good data for 30 min
+            old = cache.get(h["hostid"])
+            msg = str(e)[:200] or type(e).__name__
+            if old and t0 - old["t"] <= 1800:
+                ports, sarp = old["ports"], old["sarp"]
+                report["partial"] = True
+                report["switches"][h["hostid"]] = {"name": h["name"], "ok": False, "error": msg,
+                                                   "used_from": old["t"], "ports": len(ports)}
+                say(f"  ! {h['name']}: {msg} - using its data from {iso(old['t'])}")
+            else:
+                report["switches"][h["hostid"]] = {"name": h["name"], "ok": False, "error": msg}
+                report["partial"] = True                 # a switch is missing from the map
+                say(f"  ! {h['name']}: {msg}")
+                continue
         sw[h["hostid"]] = {"host": h, "ports": ports}
         for mac, ip in sarp.items():
             arp.setdefault(mac, (ip, "STALE"))
@@ -557,6 +671,12 @@ def full_scan(api, community=None, quiet=False):
                 return {"k": "behind", "of": hmac}
         return {"k": "port", "sw": sid, "port": pname}
 
+    def dname(mac):                      # defined before loc_text, which uses it
+        d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
+        h = host_by_ip.get(d.get("ip", ""))
+        return (c.get("name") or (g and g["name"]) or (h and h["name"])
+                or (d.get("dns", "").split(".")[0] if d.get("dns") else "") or d.get("ip") or mac)
+
     def loc_text(loc):
         if not loc:
             return "unknown"
@@ -634,12 +754,6 @@ def full_scan(api, community=None, quiet=False):
 
     # ---------------- build nodes
     nodes, by_mac = {}, {}
-
-    def dname(mac):
-        d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
-        h = host_by_ip.get(d.get("ip", ""))
-        return (c.get("name") or (g and g["name"]) or (h and h["name"])
-                or (d.get("dns", "").split(".")[0] if d.get("dns") else "") or d.get("ip") or mac)
 
     def add(nid, parent, **kw):
         nodes[nid] = {"id": nid, "parent": parent, "flags": [], "details": [], **kw}
@@ -902,7 +1016,7 @@ def full_scan(api, community=None, quiet=False):
         else:
             iv.append([t, t])
     for mac in list(pres):
-        pres[mac] = [x for x in pres[mac] if x[1] >= t - 30 * 86400]
+        pres[mac] = [x for x in pres[mac] if x[1] >= t - setting("presence_keep_days") * 86400]
         if not pres[mac]:
             del pres[mac]
     save_json(PRESENCE_FILE, pres)
@@ -919,11 +1033,13 @@ def full_scan(api, community=None, quiet=False):
         pv = ""
     data = {"generated": t, "generated_text": iso(t), "page_version": pv, "conflicts": conflicts,
             "public_ip_history": state.get("public_ip_history", []), "scan_seconds": now() - t0, "nodes": list(nodes.values()),
-            "switches": switches_out, "zabbix_url": "zabbix.php"}
-    if webd:
-        install_page(webd)
-    ensure_data_dir()
+            "switches": switches_out, "zabbix_url": "zabbix.php",
+            "partial": report["partial"], "scan_warnings": report["warnings"]}
+    install_data_page()                   # a new page version reaches the browsers; the web folder is install.sh's job
     save_json(os.path.join(DATA_DIR, DATA), data)
+    report.update(finished=now(), nodes=len(nodes), online=len(online), new=len(events["new"]),
+                  changed=len(events["changed"]), down=len(down), targets=len(targets) if targets else 0)
+    save_json(SCAN_REPORT, report)
     say(f"{len(nodes)} nodes, {len(online)} devices online, {len(events['new'])} new, "
         f"{len(events['changed'])} changed, {len(down)} important down")
     if not baseline:
@@ -938,7 +1054,7 @@ EDITS_DIR = "/var/lib/spidermap"                         # root only
 AUDIT_FILE = os.path.join(EDITS_DIR, "audit.log")     # who changed what from the map, one JSON line each
 INBOX = os.path.join(EDITS_DIR, "inbox")                  # the only place the web server may write
 EDITS_FILE = os.path.join(INBOX, "edits.json")
-HIST_FILE = os.path.join(HERE, "spidermap_hist.json")
+HIST_FILE = os.path.join(STATE_DIR, "spidermap_hist.json")
 HIST_LEN = 90                                     # minutes of history kept for the small graphs
 LAT_TARGETS = [("Cloudflare", "1.1.1.1"), ("Google", "8.8.8.8"), ("Quad9", "9.9.9.9")]
 GUEST_RX = r"(?i)(qemu|lxc|vm)\s*\["
@@ -1315,7 +1431,8 @@ SPEED_ITEMS = [("autotopo.speed.down", "Speed test: download", "bps"),
                ("autotopo.speed.up", "Speed test: upload", "bps"),
                ("autotopo.speed.ping", "Speed test: ping", "ms"),
                ("autotopo.speed.load", "Speed test: latency under load", "ms")]
-SERVICE = "/etc/systemd/system/spidermap-rt.service"
+SERVICE = "/etc/systemd/system/spidermap.service"
+OLD_SERVICE = "spidermap-rt.service"                     # before 0.5.0 (scans then ran from cron)
 
 
 def snmp_get(auth, target, oids):
@@ -1457,7 +1574,8 @@ def month_uptime(inet, t):
     return round(100 * (1 - down / (t - since)), 3), outs
 
 
-SCHED_FILE = os.path.join(HERE, "spidermap_schedule.json")   # last scheduled speed test (survives restarts)
+SCHED_FILE = os.path.join(STATE_DIR, "spidermap_schedule.json")         # last scheduled speed test (survives restarts)
+SCAN_REPORT = os.path.join(STATE_DIR, "spidermap_scan_report.json")      # last full scan: per switch, warnings
 
 
 def gateway_step(fails, answered):
@@ -1475,6 +1593,351 @@ def speedtest_due(daily, now_dt, last_day):
     if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
         return False
     return now_dt.strftime("%Y-%m-%d") != last_day and (now_dt.hour, now_dt.minute) >= (int(m.group(1)), int(m.group(2)))
+
+
+# --------------------------------------------------------------------------- #
+# The service: scheduler for scans, requests from the page, settings, status and health
+# --------------------------------------------------------------------------- #
+JOBS_FILE = os.path.join(STATE_DIR, "spidermap_jobs.json")              # job history (survives restarts)
+CONF_HIST_DIR = os.path.join(STATE_DIR, "config-history")               # earlier versions of devices.json
+JOB_LOG = os.path.join(EDITS_DIR, "spidermap.log")
+STATUS = "spidermap_status.json"          # in DATA_DIR, for every viewer: jobs, pause, health
+SETTINGS_OUT = "spidermap_settings.json"  # in DATA_DIR, for users with the settings permission
+ACCESS = "access.json"                    # in DATA_DIR, read by spidermap.php at every request
+SCAN_REQ, CANCEL_REQ, SETTINGS_REQ = (os.path.join(INBOX, f) for f in ("scan.request", "scan.cancel", "settings.request"))
+JOB_TIMEOUT = {"scan": 900, "live": 180}
+DEVICE_FIELDS = {"name": str, "type": str, "url": str, "pin": str, "important": bool}
+ADVANCED_SETTINGS = {"port_media": dict, "aliases": dict, "manual_links": list, "core_switch": str, "speedtest_server": str}
+
+
+def take_request(path):
+    """Read and remove a request file written by spidermap.php. None if there is none.
+    Always removed, also when unreadable, so that a bad file cannot repeat forever."""
+    if not os.path.exists(path):
+        return None
+    req = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            req = json.loads(f.read() or "{}")
+    except (OSError, ValueError):
+        pass
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    return req if isinstance(req, dict) else {}
+
+
+def validate_devices(devs):
+    """Devices from an import: MAC address keys, known fields with the right types, safe web addresses."""
+    if not isinstance(devs, dict) or len(devs) > 5000:
+        return None, ["devices must be an object (at most 5000)"]
+    out, errors = {}, []
+    for mac, d in devs.items():
+        m = str(mac).lower()
+        if not MAC_RX.match(m) or not isinstance(d, dict):
+            errors.append(f"device {str(mac)[:20]}: not a MAC address")
+            continue
+        clean = {}
+        for k, v in d.items():
+            if k not in DEVICE_FIELDS or not isinstance(v, DEVICE_FIELDS[k]) or (isinstance(v, str) and len(v) > 200):
+                continue
+            if k == "url" and v and not re.match(r"^https?://", v, re.I):
+                errors.append(f"device {m}: web address must start with http:// or https://")
+                continue
+            clean[k] = v
+        out[m] = clean
+        if len(errors) > 10:
+            break
+    return (out, []) if not errors else (None, errors)
+
+
+def config_backup(cfg, by, why):
+    os.makedirs(CONF_HIST_DIR, exist_ok=True)
+    os.chmod(CONF_HIST_DIR, 0o700)
+    stamp = time.time_ns()                                   # unique even for several saves in one second
+    while os.path.exists(os.path.join(CONF_HIST_DIR, f"devices-{stamp}.json")):
+        stamp += 1
+    name = f"devices-{stamp}.json"
+    save_json(os.path.join(CONF_HIST_DIR, name), {"saved_at": now(), "by": by, "why": why, "config": cfg})
+    for old in sorted((f for f in os.listdir(CONF_HIST_DIR) if f.startswith("devices-")),
+                      key=lambda f: int(re.sub(r"\D", "", f) or 0))[:-10]:                  # keep 10
+        os.remove(os.path.join(CONF_HIST_DIR, old))
+    return name
+
+
+def config_history():
+    try:
+        files = sorted((f for f in os.listdir(CONF_HIST_DIR) if f.startswith("devices-")),
+                       key=lambda f: int(re.sub(r"\D", "", f) or 0), reverse=True)
+    except FileNotFoundError:
+        return []
+    out = []
+    for f in files:
+        h = load_json(os.path.join(CONF_HIST_DIR, f), {})
+        out.append({"id": f, "saved_at": h.get("saved_at"), "by": h.get("by"), "why": h.get("why")})
+    return out
+
+
+def apply_settings_request(req):
+    """A change from the Settings panel: {"by", "settings": {...}} or {"by", "import": {...}} or {"by", "restore": id}.
+    Returns the result shown on the page. devices.json is only written when everything is valid, and the previous
+    version is kept (Settings > Backup > Restore)."""
+    by = str(req.get("by") or "?")[:64]
+    cfg = load_json(DEVICES_FILE, DEFAULT_DEVICES)
+    cur = cfg.setdefault("settings", {})
+    res = {"at": now(), "by": by, "ok": False, "errors": [], "rid": str(req.get("rid") or "")[:24]}
+    if "settings" in req:
+        clean, errors = validate_settings(req["settings"], cur)
+        if errors:
+            res["errors"] = errors
+            return res
+        old = effective_settings(cur)
+        new_cfg = json.loads(json.dumps(cfg))
+        ns = new_cfg["settings"]
+        for k, v in clean.items():
+            if k == "permissions":
+                ns.setdefault("permissions", {}).update(v)
+                ns.pop("view_min_user_type", None)
+            else:
+                ns[k] = v
+        changed = {k: [old[k], v] for k, v in effective_settings(ns).items() if old[k] != v}
+        if not changed:
+            res.update(ok=True, message="Nothing changed.")
+            return res
+        config_backup(cfg, by, "before settings change")
+        save_json(DEVICES_FILE, new_cfg)
+        audit("settings", by, {"changes": changed})
+        add_events([ev("audit", "info", f"{by} changed settings: " + ", ".join(sorted(changed))[:300])])
+        res.update(ok=True, changed=sorted(changed), message="Saved.")
+        return res
+    if "import" in req:
+        imp = req["import"] if isinstance(req["import"], dict) else {}
+        s_in = dict(imp.get("settings") or {})
+        flat = {}
+        for key in SETTINGS_KEYS:                            # schema settings, as stored in devices.json
+            v = _get(s_in, key, None)
+            if v is not None:
+                flat[key] = v
+        clean, errors = validate_settings(flat, cur)
+        adv = {}
+        for k, typ in ADVANCED_SETTINGS.items():
+            if k in s_in:
+                if isinstance(s_in[k], typ):
+                    adv[k] = s_in[k]
+                else:
+                    errors.append(f"{k}: wrong type")
+        devs, derr = validate_devices(imp.get("devices", cfg.get("devices", {})))
+        errors += derr
+        if errors:
+            res["errors"] = errors[:12]
+            return res
+        new_cfg = {"settings": {**cur, **adv}, "devices": devs}
+        for k, v in clean.items():
+            if k == "permissions":
+                new_cfg["settings"].setdefault("permissions", {}).update(v)
+            else:
+                new_cfg["settings"][k] = v
+        config_backup(cfg, by, "before import")
+        save_json(DEVICES_FILE, new_cfg)
+        audit("import", by, {"devices": len(devs), "settings": sorted(clean) + sorted(adv)})
+        add_events([ev("audit", "info", f"{by} imported settings and {len(devs)} devices")])
+        res.update(ok=True, message=f"Imported {len(devs)} devices and the settings.")
+        return res
+    if "restore" in req:
+        rid = str(req["restore"])
+        if not re.fullmatch(r"devices-\d+\.json", rid) or not os.path.isfile(os.path.join(CONF_HIST_DIR, rid)):
+            res["errors"] = ["That saved version does not exist."]
+            return res
+        old = load_json(os.path.join(CONF_HIST_DIR, rid), {}).get("config")
+        if not isinstance(old, dict) or not isinstance(old.get("devices", {}), dict):
+            res["errors"] = ["That saved version cannot be read."]
+            return res
+        config_backup(cfg, by, "before restore")
+        save_json(DEVICES_FILE, old)
+        audit("restore", by, {"version": rid})
+        saved = load_json(os.path.join(CONF_HIST_DIR, rid), {}).get("saved_at")
+        add_events([ev("audit", "info", f"{by} restored the settings saved {iso(saved) if saved else 'earlier'}")])
+        res.update(ok=True, message="Restored.")
+        return res
+    res["errors"] = ["Unknown request."]
+    return res
+
+
+def publish_settings():
+    """What the Settings panel shows (settings permission only), and the permissions spidermap.php enforces."""
+    cfg = load_json(DEVICES_FILE, DEFAULT_DEVICES)
+    st = cfg.get("settings", {})
+    save_json(os.path.join(DATA_DIR, SETTINGS_OUT), {
+        "schema": [{"key": k, "type": t, "default": d, "range": r, "section": sec, "label": lab, "help": hlp}
+                   for k, t, d, r, sec, lab, hlp in SETTINGS_SCHEMA],
+        "values": effective_settings(st), "effective_permissions": permissions(st),
+        "advanced": {k: st[k] for k in ADVANCED_SETTINGS if k in st},
+        "devices": cfg.get("devices", {}), "history": config_history()})
+    save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
+
+
+class Scheduler:
+    """Runs the full scan and the status refresh as separate processes (like cron did), one at a time each,
+    with timeouts; handles scan / cancel / settings requests from the page; remembers its history."""
+
+    def __init__(self):
+        st = load_json(JOBS_FILE, {})
+        self.jobs = {k: dict(st.get("jobs", {}).get(k, {})) for k in ("scan", "live")}
+        for j in self.jobs.values():
+            if j.get("running"):                    # the service stopped while a job ran
+                j.update(running=False, last_result="interrupted")
+        self.history = st.get("history", [])[-30:]
+        self.config_result = st.get("config_result")
+        self.proc = {}
+        self.finished = set()                       # jobs that ended since the last check (the loop reloads data)
+        self.started_at = now()
+
+    @staticmethod
+    def command(name):
+        return [sys.executable, os.path.join(HERE, "spidermap.py"), "--quiet" if name == "scan" else "--live"]
+
+    def save(self):
+        save_json(JOBS_FILE, {"jobs": self.jobs, "history": self.history[-30:], "config_result": self.config_result})
+
+    def due(self, name, t, S):
+        if name in self.proc:
+            return False
+        if name == "scan" and S["discovery_paused"]:
+            return False
+        every = S["scan_interval_min"] * 60 if name == "scan" else S["live_interval_s"]
+        return t - self.jobs[name].get("last_start", 0) >= every
+
+    def start(self, name, reason, by=None):
+        if name in self.proc:
+            return False
+        os.makedirs(os.path.dirname(JOB_LOG), exist_ok=True)
+        if os.path.exists(JOB_LOG) and os.path.getsize(JOB_LOG) > 2_000_000:
+            os.replace(JOB_LOG, JOB_LOG + ".1")
+        log = open(JOB_LOG, "a", encoding="utf-8")
+        log.write(f"--- {iso(now())} {name} ({reason}{', by ' + by if by else ''})\n")
+        log.flush()
+        try:
+            p = subprocess.Popen(self.command(name), stdout=log, stderr=subprocess.STDOUT, cwd=HERE, start_new_session=True)
+        finally:
+            log.close()
+        self.proc[name] = {"p": p, "t": now(), "mono": time.monotonic(), "reason": reason, "by": by}
+        self.jobs[name].update(running=True, last_start=now(), reason=reason, by=by)
+        self.save()
+        return True
+
+    def cancel(self, name, why="cancelled"):
+        r = self.proc.get(name)
+        if not r:
+            return False
+        r["cancel"] = why
+        try:
+            os.killpg(r["p"].pid, signal.SIGTERM)
+            try:
+                r["p"].wait(5)
+            except subprocess.TimeoutExpired:
+                os.killpg(r["p"].pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        return True
+
+    def poll(self):
+        for name, r in list(self.proc.items()):
+            rc = r["p"].poll()
+            if rc is None:
+                if time.monotonic() - r["mono"] > JOB_TIMEOUT[name]:
+                    self.cancel(name, "timeout")
+                continue
+            secs = round(time.monotonic() - r["mono"], 1)
+            result = "ok" if rc == 0 else (r.get("cancel") or f"failed (exit {rc})")
+            j = self.jobs[name]
+            j.update(running=False, last_end=now(), last_result=result, last_seconds=secs)
+            if rc == 0:
+                j["last_ok"] = now()
+                j.pop("error", None)
+            else:
+                j["last_error"], j["error"] = now(), last_error_line()
+            if name == "scan" or rc != 0:           # every scan, and refreshes only when they fail
+                self.history.append({"job": name, "t": r["t"], "seconds": secs, "result": result,
+                                     "reason": r["reason"], "by": r["by"]})
+            del self.proc[name]
+            self.finished.add(name)
+            self.save()
+
+    def tick(self, t, S):
+        self.poll()
+        req = take_request(SCAN_REQ)
+        if req is not None:
+            by = str(req.get("by") or "?")[:64]
+            if self.start("scan", "manual", by):
+                audit("scan", by, {})
+        req = take_request(CANCEL_REQ)
+        if req is not None and self.cancel("scan"):
+            audit("scan-cancel", str(req.get("by") or "?")[:64], {})
+        req = take_request(SETTINGS_REQ)
+        if req is not None:
+            self.config_result = apply_settings_request(req)
+            publish_settings()
+            self.save()
+        for name in ("live", "scan"):
+            if self.due(name, t, S):
+                self.start(name, "scheduled")
+
+    def status(self, t, S, health):
+        jobs = {}
+        for name, j in self.jobs.items():
+            jj = dict(j)
+            if name in self.proc:
+                jj["elapsed"] = round(time.monotonic() - self.proc[name]["mono"])
+            every = S["scan_interval_min"] * 60 if name == "scan" else S["live_interval_s"]
+            jj["next"] = None if (name == "scan" and S["discovery_paused"]) else j.get("last_start", t) + every
+            jobs[name] = jj
+        return {"t": t, "version": __version__, "user": _run_user(), "service_since": self.started_at,
+                "paused": S["discovery_paused"], "jobs": jobs, "history": self.history[-15:],
+                "config": {"result": self.config_result, "saved_at": int(os.path.getmtime(DEVICES_FILE))
+                           if os.path.exists(DEVICES_FILE) else None}, "health": health}
+
+
+def last_error_line():
+    """The last meaningful line of the job log, shown as the error of a failed job."""
+    try:
+        with open(JOB_LOG, "rb") as f:
+            f.seek(max(0, os.path.getsize(JOB_LOG) - 4000))
+            lines = [x.strip() for x in f.read().decode("utf-8", "ignore").splitlines() if x.strip()]
+    except OSError:
+        return ""
+    lines = [x for x in lines if not x.startswith("---")]
+    return lines[-1][:300] if lines else ""
+
+
+def _run_user():
+    import pwd
+    try:
+        return pwd.getpwuid(os.geteuid()).pw_name
+    except KeyError:
+        return str(os.geteuid())
+
+
+def health_report(api_state, snmp_state):
+    """Collector health: Zabbix API, SNMP per switch, disk space, age of the data, last scan per switch."""
+    t = now()
+    rep = load_json(SCAN_REPORT, {})
+    disk = shutil.disk_usage(EDITS_DIR if os.path.isdir(EDITS_DIR) else "/")
+    ages = {}
+    for k, f in (("map", DATA), ("live", LIVE), ("realtime", RT)):
+        try:
+            ages[k] = t - int(os.path.getmtime(os.path.join(DATA_DIR, f)))
+        except OSError:
+            ages[k] = None
+    switches = {}
+    for sid, x in (rep.get("switches") or {}).items():
+        switches[sid] = dict(x)
+    for sid, x in snmp_state.items():
+        switches.setdefault(sid, {"name": x.get("name", sid)})["realtime"] = x
+    return {"api": api_state, "switches": switches, "scan": {k: rep.get(k) for k in
+            ("started", "finished", "partial", "warnings", "nodes", "online", "targets")},
+            "disk": {"path": EDITS_DIR, "free": disk.free, "total": disk.total}, "data_age": ages,
+            "speedtest": "ookla" if os.path.isfile(OOKLA) else ("speedtest-cli" if shutil.which("speedtest-cli") else None)}
 
 
 def rt_loop(api):
@@ -1502,17 +1965,38 @@ def rt_loop(api):
                                               "(backup kept as spidermap_usage.before-0.3.0.json)")])
         usage = {"schema": 2, "since": now()}
         save_json(USAGE_FILE, usage)
+    sched = Scheduler()
+    api_state, snmp_state, health, last_health = {}, {}, {}, 0
+    try:
+        publish_settings()
+    except Exception as e:  # noqa: BLE001
+        print("settings:", e, flush=True)
     while True:
         t0 = time.time()
+        S = current_settings()[0]
+        every = S["rt_interval_s"]
+        try:                                         # scans, refreshes, requests from the page - also before any data
+            sched.tick(int(t0), S)
+        except Exception as e:  # noqa: BLE001
+            print("scheduler:", e, flush=True)
+        if "scan" in sched.finished:                 # a new map: use it right away
+            sched.finished.discard("scan")
+            last_cfg = 0
+        sched.finished.discard("live")
+        if t0 - last_health > 30:
+            health, last_health = health_report(api_state, snmp_state), t0
+        save_json(os.path.join(DATA_DIR, STATUS), sched.status(int(t0), S, health))
         if t0 - last_cfg > 300 or data is None:
             try:
                 hosts = at.load_hosts(api)
+                api_state = {"ok": True, "at": int(t0)}
                 data = load_json(os.path.join(DATA_DIR, DATA), None)
             except Exception as e:  # noqa: BLE001
+                api_state = {"ok": False, "at": int(t0), "error": str(e)[:200]}
                 print("config reload failed:", e, flush=True)
             last_cfg = t0
         if not data:
-            time.sleep(RT_EVERY)
+            time.sleep(every)
             continue
         t = int(t0)
         evs = []
@@ -1547,7 +2031,11 @@ def rt_loop(api):
             try:
                 auth, target = at.snmp_auth(h["_snmp"], h["_macros"])
                 vals = snmp_get(auth, target, oids)
+                if not vals:
+                    raise RuntimeError("no answer")
+                snmp_state[sid] = {"name": h["name"], "ok": True, "at": int(t0)}
             except Exception as e:  # noqa: BLE001
+                snmp_state[sid] = {"name": h["name"], "ok": False, "at": int(t0), "error": str(e)[:200]}
                 print(f"{h['name']}: {e}", flush=True)
                 continue
             mono = time.monotonic()
@@ -1686,7 +2174,7 @@ def rt_loop(api):
         sh = load_json(SPEED_FILE, [])
         upt, outs = month_uptime(inet, t)
         save_json(os.path.join(DATA_DIR, RT), {
-            "t": t, "every": RT_EVERY, "ports": ports, "flaps": flaps,
+            "t": t, "every": every, "ports": ports, "flaps": flaps,
             "wan": {"down": wan["rx"], "up": wan["tx"]} if wan else None,
             "latency": {k: v["ms"] for k, v in targets.items() if k != "Gateway"}, "targets": targets,
             "inet": {"up": not inet.get("down_since"), "down_since": inet.get("down_since"),
@@ -1699,30 +2187,65 @@ def rt_loop(api):
             "hist": hist, "speedtest": {"running": speed["running"], "started": speed.get("started"),
                                         "error": speed.get("error", ""), "last": sh[-1] if sh else None,
                                         "history": sh[-12:]}})
-        time.sleep(max(0.5, RT_EVERY - (time.time() - t0)))
+        time.sleep(max(0.5, every - (time.time() - t0)))
 
 
-def install_service():
-    unit = f"""[Unit]
-Description=SpiderMap real-time collector (port traffic every {RT_EVERY}s, speed tests)
+def service_unit(u, hardened=True):
+    """systemd unit for the SpiderMap service. u: pwd entry of the service user, or None for root."""
+    who = f"User={u.pw_name}\nGroup={u.pw_name}\nEnvironment=HOME={u.pw_dir}\n" if u else "Environment=HOME=/root\n"
+    caps = ("# only what ping needs\nAmbientCapabilities=CAP_NET_RAW\nCapabilityBoundingSet=CAP_NET_RAW\n"
+            "NoNewPrivileges=yes\n") if u else ""
+    fs = ("ProtectSystem=strict\nReadWritePaths=/var/lib/spidermap /etc/spidermap\nProtectHome=yes\nPrivateTmp=yes\n"
+          if hardened else "")
+    return f"""[Unit]
+Description=SpiderMap network map (scans, live traffic, speed tests)
 After=network-online.target
+Wants=network-online.target
 
 [Service]
-WorkingDirectory={HERE}
-Environment=HOME=/root
-ExecStart=/bin/bash -c '. ./zabbix.env && exec python3 spidermap.py --rt'
+{who}WorkingDirectory={HERE}
+ExecStart={sys.executable} {os.path.join(HERE, "spidermap.py")} --service
 Restart=always
 RestartSec=10
-
+UMask=0027
+{caps}{fs}
 [Install]
 WantedBy=multi-user.target
 """
-    with open(SERVICE, "w", encoding="utf-8") as f:
-        f.write(unit)
-    subprocess.run(["systemctl", "daemon-reload"])
-    subprocess.run(["systemctl", "enable", "--now", "spidermap-rt.service"])
-    subprocess.run(["systemctl", "restart", "spidermap-rt.service"])
-    print("Real-time service installed and started (systemctl status spidermap-rt)")
+
+
+def _systemctl(*a):
+    return subprocess.run(["systemctl", *a], capture_output=True, text=True)
+
+
+def install_service():
+    """Install or update the service (root). Removes the older spidermap-rt service; falls back to a unit without
+    file-system protection if this container does not support it."""
+    u = service_user()
+    if _systemctl("list-unit-files", OLD_SERVICE).stdout.count(OLD_SERVICE):
+        _systemctl("disable", "--now", OLD_SERVICE)
+        for f in ("/etc/systemd/system/" + OLD_SERVICE,):
+            try:
+                os.remove(f)
+            except FileNotFoundError:
+                pass
+        shutil.rmtree("/etc/systemd/system/" + OLD_SERVICE + ".d", ignore_errors=True)
+        print("  old spidermap-rt service replaced by spidermap")
+    for hardened in (True, False):
+        with open(SERVICE, "w", encoding="utf-8") as f:
+            f.write(service_unit(u, hardened))
+        _systemctl("daemon-reload")
+        _systemctl("enable", "spidermap.service")
+        _systemctl("restart", "spidermap.service")
+        time.sleep(6)
+        if _systemctl("is-active", "spidermap.service").stdout.strip() == "active":
+            print(f"SpiderMap service running as {u.pw_name if u else 'root'}"
+                  + ("" if hardened else " (without file-system protection: not supported in this container)"))
+            return True
+        if hardened:
+            print("  the service did not start with file-system protection - trying without")
+    print("!! The SpiderMap service does not start. See: journalctl -u spidermap -n 30")
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -1810,11 +2333,34 @@ const STATE_DIR = '/var/lib/spidermap/inbox';      // the only folder the web se
 const VIEW_MIN_TYPE = __VIEW_MIN_TYPE__;            // 1 = Zabbix user, 2 = admin, 3 = super admin
 const EDIT_MIN_TYPE = __EDIT_MIN_TYPE__;            // who may rename devices, set types, pins, web addresses (2 or 3)
 const SPEED_MIN_TYPE = __SPEED_MIN_TYPE__;          // who may start a speed test (1, 2 or 3)
+const SETTINGS_MIN_TYPE = __SETTINGS_MIN_TYPE__;    // who may change settings and start scans (2 or 3)
 // set in devices.json: "permissions": {"view": 3, "edit": 2, "speedtest": 2}
 const ZBX_API = '__API_URL__';                      // checked by the installer from this server
 const CACHE_TTL = 10;                               // seconds a session check is reused
 const FILES = ['map' => 'spidermap.json', 'live' => 'spidermap_live.json', 'rt' => 'spidermap_rt.json',
-               'events' => 'spidermap_events.json', 'presence' => 'spidermap_presence.json'];
+               'events' => 'spidermap_events.json', 'presence' => 'spidermap_presence.json',
+               'status' => 'spidermap_status.json', 'settings' => 'spidermap_settings.json'];
+
+// Permissions changed in the Settings panel apply at once: the SpiderMap service writes them to access.json.
+// The values above are the defaults; the lower limits are enforced here again.
+function perm($what) {
+  static $acc = null;
+  if ($acc === null) {
+    $j = @json_decode((string)@file_get_contents(DATA_DIR . '/access.json'), true);
+    $acc = is_array($j) ? $j : [];
+  }
+  $def = ['view' => VIEW_MIN_TYPE, 'edit' => EDIT_MIN_TYPE, 'speedtest' => SPEED_MIN_TYPE, 'settings' => SETTINGS_MIN_TYPE];
+  $lo = ['view' => 1, 'edit' => 2, 'speedtest' => 1, 'settings' => 2];
+  $v = isset($acc[$what]) && is_numeric($acc[$what]) ? (int)$acc[$what] : $def[$what];
+  return max($lo[$what], min(3, $v));
+}
+
+// A request for the SpiderMap service, readable by its group (0660).
+function write_request($file, $body) {
+  $path = STATE_DIR . '/' . $file;
+  if (@file_put_contents($path, json_encode($body), LOCK_EX) === false) deny(500, 'Cannot write ' . STATE_DIR);
+  @chmod($path, 0660);
+}
 
 $IS_PAGE = ($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && !isset($_GET['data']);
 
@@ -1910,8 +2456,8 @@ function zabbix_user() {
 
 $user = zabbix_user();
 if (strtolower($user['name']) === 'guest') deny(403, 'The Zabbix guest account cannot open SpiderMap. Log in with your own user.');
-if ($user['type'] < VIEW_MIN_TYPE)
-  deny(403, VIEW_MIN_TYPE >= 3 ? 'SpiderMap is available to Zabbix Super admins only.' : 'Your Zabbix user is not allowed to open SpiderMap.');
+if ($user['type'] < perm('view'))
+  deny(403, perm('view') >= 3 ? 'SpiderMap is available to Zabbix Super admins only.' : 'Your Zabbix user is not allowed to open SpiderMap.');
 
 // ---- the page
 if ($IS_PAGE) {
@@ -1929,10 +2475,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   header('Content-Type: application/json');
   if ((string)$_GET['data'] === 'me') {                // what this user may do, so the page can grey out buttons
     echo json_encode(['name' => $user['name'], 'type' => $user['type'],
-                      'can' => ['edit' => $user['type'] >= EDIT_MIN_TYPE, 'speedtest' => $user['type'] >= SPEED_MIN_TYPE],
-                      'need' => ['edit' => EDIT_MIN_TYPE, 'speedtest' => SPEED_MIN_TYPE]]);
+                      'can' => ['edit' => $user['type'] >= perm('edit'), 'speedtest' => $user['type'] >= perm('speedtest'),
+                                'settings' => $user['type'] >= perm('settings')],
+                      'need' => ['edit' => perm('edit'), 'speedtest' => perm('speedtest'), 'settings' => perm('settings')]]);
     exit;
   }
+  if ((string)$_GET['data'] === 'settings' && $user['type'] < perm('settings'))
+    deny(403, 'You may not see the settings.');
   $f = FILES[(string)$_GET['data']] ?? null;
   if (!$f) deny(400, 'Unknown data set');
   $path = DATA_DIR . '/' . $f;
@@ -1948,19 +2497,43 @@ if (($_SERVER['HTTP_X_SPIDERMAP'] ?? '') !== '1') deny(403, 'Missing request hea
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== parse_url('//' . ($_SERVER['HTTP_HOST'] ?? ''), PHP_URL_HOST))
   deny(403, 'Cross-site request refused');
-$in = json_decode((string)file_get_contents('php://input'), true);
+$raw = (string)file_get_contents('php://input', false, null, 0, 4194305);
+if (strlen($raw) > 4194304) deny(413, 'Request too large');
+$in = json_decode($raw, true);
 if (!is_array($in)) deny(400, 'Bad request');
 $ROLE = [1 => 'Zabbix users', 2 => 'Zabbix admins', 3 => 'Zabbix Super admins'];
 
-if (($in['action'] ?? '') === 'speedtest') {
-  if ($user['type'] < SPEED_MIN_TYPE) deny(403, 'Only ' . $ROLE[SPEED_MIN_TYPE] . ' can start a speed test.');
+$act = (string)($in['action'] ?? '');
+if ($act === 'speedtest') {
+  if ($user['type'] < perm('speedtest')) deny(403, 'Only ' . $ROLE[perm('speedtest')] . ' can start a speed test.');
   // who asked is recorded in the activity feed and the audit log
-  if (@file_put_contents(STATE_DIR . '/speedtest.request', json_encode(['by' => $user['name'], 'at' => time()]), LOCK_EX) === false)
-    deny(500, 'Cannot write ' . STATE_DIR);
+  write_request('speedtest.request', ['by' => $user['name'], 'at' => time()]);
   echo json_encode(['ok' => true]); exit;
 }
 
-if ($user['type'] < EDIT_MIN_TYPE) deny(403, 'Only ' . $ROLE[EDIT_MIN_TYPE] . ' can make changes.');
+// scans and settings: carried out by the SpiderMap service, which validates everything again
+if (in_array($act, ['scan', 'cancel', 'pause', 'resume', 'settings', 'import', 'restore'], true)) {
+  if ($user['type'] < perm('settings')) deny(403, 'Only ' . $ROLE[perm('settings')] . ' can change settings or start scans.');
+  $who = ['by' => $user['name'], 'at' => time()];
+  $rid = (string)($in['rid'] ?? '');                 // lets the page find the answer to its own request
+  if (preg_match('/^[a-z0-9]{6,24}$/', $rid)) $who['rid'] = $rid;
+  if ($act === 'scan' || $act === 'cancel') {
+    write_request($act === 'scan' ? 'scan.request' : 'scan.cancel', $who);
+  } else {
+    if ($act === 'pause' || $act === 'resume') $body = ['settings' => ['discovery_paused' => $act === 'pause']];
+    elseif ($act === 'settings') { if (!is_array($in['settings'] ?? null)) deny(400, 'Bad request'); $body = ['settings' => $in['settings']]; }
+    elseif ($act === 'import') { if (!is_array($in['import'] ?? null)) deny(400, 'Bad request'); $body = ['import' => $in['import']]; }
+    else {
+      $r = (string)($in['restore'] ?? '');
+      if (!preg_match('/^devices-[0-9]+\.json$/', $r)) deny(400, 'Bad request');
+      $body = ['restore' => $r];
+    }
+    write_request('settings.request', $body + $who);
+  }
+  echo json_encode(['ok' => true, 'queued' => $act]); exit;
+}
+
+if ($user['type'] < perm('edit')) deny(403, 'Only ' . $ROLE[perm('edit')] . ' can make changes.');
 
 $mac = strtolower((string)($in['mac'] ?? ''));
 if (!preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $mac)) deny(400, 'Bad MAC address');
@@ -1979,6 +2552,7 @@ $cur = json_decode((string)stream_get_contents($fh), true) ?: [];
 $cur[$mac] = array_merge($cur[$mac] ?? [], $e, ['by' => $user['name'], 'at' => time()]);
 ftruncate($fh, 0); rewind($fh); fwrite($fh, json_encode($cur, JSON_PRETTY_PRINT)); fflush($fh);
 flock($fh, LOCK_UN); fclose($fh);
+@chmod(STATE_DIR . '/edits.json', 0660);
 echo json_encode(['ok' => true, 'by' => $user['name']]);
 """
 
@@ -2028,6 +2602,156 @@ def web_user():
     return None
 
 
+# --------------------------------------------------------------------------- #
+# Settings that can be changed from the map (Settings panel). One table drives the validation, the defaults and
+# the form on the page. Other keys in devices.json "settings" (port_media, aliases, ...) are kept as they are.
+# --------------------------------------------------------------------------- #
+SETTINGS_SCHEMA = [
+    # key, type, default, (min, max), section, label, help
+    ("discovery_paused", "bool", False, None, "Scans", "Pause discovery",
+     "No new scans; the map keeps the last result. Traffic and status keep updating."),
+    ("scan_interval_min", "int", 5, (2, 1440), "Scans", "Full scan every (minutes)", ""),
+    ("scan_subnets", "cidrs", [], None, "Scans", "Networks to scan",
+     "One per line, e.g. 192.168.1.0/24. Empty: the /24 of each switch."),
+    ("scan_exclude", "ips", [], None, "Scans", "Never scan", "Addresses or networks, one per line."),
+    ("max_targets", "int", 1024, (16, 65536), "Scans", "Most addresses per scan",
+     "A safety limit: a scan with more addresses is refused."),
+    ("ping_timeout_ms", "int", 1000, (200, 5000), "Scans", "Ping timeout (ms)", ""),
+    ("ping_parallel", "int", 64, (1, 256), "Scans", "Pings at the same time", ""),
+    ("ping_size", "int", 56, (16, 1472), "Scans", "Ping size (bytes)", ""),
+    ("rt_interval_s", "int", 5, (5, 60), "Measurements", "Port traffic every (seconds)", ""),
+    ("live_interval_s", "int", 60, (30, 600), "Measurements", "Status refresh every (seconds)", ""),
+    ("speedtest_daily", "time", "", None, "Speed test", "Daily speed test at", "HH:MM, empty = only on request."),
+    ("speedtest_server", "digits", "", None, "Speed test", "Ookla server ID", "Empty = nearest server."),
+    ("flag_hours", "int", 24, (1, 720), "History", "Mark new and moved devices for (hours)", ""),
+    ("forget_after_days", "int", 30, (1, 365), "History", "Forget unknown devices after (days)", ""),
+    ("events_keep_days", "int", 60, (7, 365), "History", "Keep the activity feed for (days)", ""),
+    ("presence_keep_days", "int", 30, (1, 90), "History", "Keep who-was-online for (days)", ""),
+    ("permissions.view", "level", 3, (1, 3), "Access", "Who may open SpiderMap", ""),
+    ("permissions.edit", "level", 2, (2, 3), "Access", "Who may change devices", "Never below Zabbix admins."),
+    ("permissions.speedtest", "level", 2, (1, 3), "Access", "Who may start speed tests", ""),
+    ("permissions.settings", "level", 3, (2, 3), "Access", "Who may change these settings and start scans", ""),
+]
+SETTINGS_KEYS = {k for k, *_ in SETTINGS_SCHEMA}
+
+
+_SET_CACHE = {"mtime": None, "eff": None, "raw": {}}
+
+
+def current_settings():
+    """(effective schema settings, raw settings) from devices.json, re-read only when the file changed."""
+    try:
+        mt = os.path.getmtime(DEVICES_FILE)
+    except OSError:
+        mt = None
+    if _SET_CACHE["eff"] is None or mt != _SET_CACHE["mtime"]:
+        raw = load_json(DEVICES_FILE, {}).get("settings", {}) or {}
+        _SET_CACHE.update(mtime=mt, raw=raw, eff=effective_settings(raw))
+    return _SET_CACHE["eff"], _SET_CACHE["raw"]
+
+
+def setting(key):
+    return current_settings()[0][key]
+
+
+def _get(settings, key, default=None):
+    if "." in key:
+        a, b = key.split(".", 1)
+        return (settings.get(a) or {}).get(b, default)
+    return settings.get(key, default)
+
+
+def effective_settings(settings):
+    """Every schema setting with its current value (or default)."""
+    out = {}
+    for key, typ, default, *_ in SETTINGS_SCHEMA:
+        v = _get(settings, key, None)
+        if key == "permissions.view" and v is None:
+            v = settings.get("view_min_user_type")                     # before 0.4.0
+        out[key] = default if v is None else v
+    return out
+
+
+def validate_settings(new, current=None):
+    """Check settings sent from the page. Returns (clean dict in devices.json shape, errors).
+    Only schema keys are accepted; nothing is written when there is an error."""
+    errors, clean = [], {}
+    if not isinstance(new, dict):
+        return {}, ["Settings must be an object."]
+    unknown = sorted(k for k in new if k not in SETTINGS_KEYS)
+    if unknown:
+        errors.append("Unknown setting(s): " + ", ".join(unknown[:5]))
+    for key, typ, default, rng, _sec, label, _help in SETTINGS_SCHEMA:
+        if key not in new:
+            continue
+        v = new[key]
+        try:
+            if typ == "bool":
+                if not isinstance(v, bool):
+                    raise ValueError("must be on or off")
+            elif typ in ("int", "level"):
+                if isinstance(v, bool) or not isinstance(v, (int, str)) or not re.fullmatch(r"\d{1,6}", str(v).strip()):
+                    raise ValueError("must be a whole number")
+                v = int(str(v).strip())
+                if not rng[0] <= v <= rng[1]:
+                    raise ValueError(f"must be between {rng[0]} and {rng[1]}")
+            elif typ in ("cidrs", "ips"):
+                if isinstance(v, str):
+                    v = [x for x in re.split(r"[\s,]+", v) if x]
+                if not isinstance(v, list) or len(v) > 256:
+                    raise ValueError("must be a list (at most 256 entries)")
+                out = []
+                for x in v:
+                    net = ipaddress.ip_network(str(x).strip(), strict=False)
+                    if net.version != 4:
+                        raise ValueError(f"{x}: only IPv4 is scanned")
+                    if typ == "cidrs" and net.prefixlen < 16:
+                        raise ValueError(f"{x}: too large (at most /16)")
+                    out.append(str(net) if "/" in str(x) or typ == "cidrs" else str(net.network_address))
+                v = out
+            elif typ == "time":
+                v = str(v).strip()
+                m = re.fullmatch(r"(\d{1,2}):(\d{2})", v)
+                if v and not (m and int(m.group(1)) < 24 and int(m.group(2)) < 60):
+                    raise ValueError("must be HH:MM, e.g. 03:30, or empty")
+                if m:
+                    v = f"{int(m.group(1)):02d}:{m.group(2)}"
+            elif typ == "digits":
+                v = str(v).strip()
+                if v and not re.fullmatch(r"\d{1,8}", v):
+                    raise ValueError("must be a number, or empty")
+        except ValueError as e:
+            errors.append(f"{label}: {e}")
+            continue
+        if "." in key:
+            a, b = key.split(".", 1)
+            clean.setdefault(a, {})[b] = v
+        else:
+            clean[key] = v
+    if not errors:
+        merged = effective_settings({**(current or {}), **clean,
+                                     "permissions": {**((current or {}).get("permissions") or {}), **clean.get("permissions", {})}})
+        n = scan_target_count(merged["scan_subnets"], merged["scan_exclude"])
+        if n > merged["max_targets"]:
+            errors.append(f"Networks to scan: {n} addresses, more than the limit of {merged['max_targets']}.")
+    return (clean, errors) if not errors else ({}, errors)
+
+
+def scan_targets(subnets, exclude):
+    """The addresses a scan will ping (without network and broadcast addresses)."""
+    ex = [ipaddress.ip_network(x, strict=False) for x in exclude or []]
+    for n in subnets:
+        for ip in ipaddress.ip_network(n, strict=False).hosts():
+            if not any(ip in e for e in ex):
+                yield str(ip)
+
+
+def scan_target_count(subnets, exclude):
+    if not exclude:
+        return sum(max(ipaddress.ip_network(n, strict=False).num_addresses - 2, 1) for n in subnets)
+    return sum(1 for _ in scan_targets(subnets, exclude))
+
+
 def permissions(settings):
     """Minimum Zabbix user type per action: 1 = user, 2 = admin, 3 = super admin.
     "permissions": {"view": 3, "edit": 2, "speedtest": 2}; the older "view_min_user_type" still works."""
@@ -2039,24 +2763,38 @@ def permissions(settings):
         except (TypeError, ValueError):
             return default
     view = lvl("view", settings.get("view_min_user_type", 3) or 3, 1)
-    # changes never below admin; nobody may do more than they may see
-    return {"view": view, "edit": max(view, lvl("edit", 2, 2)), "speedtest": max(view, lvl("speedtest", 2, 1))}
+    # changes never below admin; nobody may do more than they may see (lower values are raised, not refused)
+    return {"view": view, "edit": max(view, lvl("edit", 2, 2)), "speedtest": max(view, lvl("speedtest", 2, 1)),
+            "settings": max(view, lvl("settings", 3, 2))}
 
 
 def gateway_code(settings, api_url):
     """spidermap.php as installed, from the settings in devices.json."""
     pm = permissions(settings)
     return (GATEWAY_PHP.replace("__VIEW_MIN_TYPE__", str(pm["view"])).replace("__EDIT_MIN_TYPE__", str(pm["edit"]))
-            .replace("__SPEED_MIN_TYPE__", str(pm["speedtest"]))
+            .replace("__SPEED_MIN_TYPE__", str(pm["speedtest"])).replace("__SETTINGS_MIN_TYPE__", str(pm["settings"]))
             .replace("__API_URL__", api_url.replace("'", "") if api_url else ""))
 
 
-def install_page(webd):
+def install_data_page():
+    """The page itself, in the protected data folder (served by spidermap.php). The service can do this."""
     ensure_data_dir()
     src = os.path.join(HERE, PAGE)
-    if os.path.isfile(src):                                   # the page itself: protected, served by spidermap.php
+    if os.path.isfile(src):
         with open(src, encoding="utf-8") as f:
-            save_json_text(os.path.join(DATA_DIR, PAGE), f.read())
+            text = f.read()
+        try:
+            with open(os.path.join(DATA_DIR, PAGE), encoding="utf-8") as f:
+                if f.read() == text:
+                    return
+        except OSError:
+            pass
+        save_json_text(os.path.join(DATA_DIR, PAGE), text)
+
+
+def install_page(webd):
+    """Everything in the Zabbix web folder (root, from install.sh): spidermap.php, icons, redirects."""
+    install_data_page()
     adir = os.path.join(webd, ASSETS)                         # icons only - nothing about your network
     os.makedirs(adir, exist_ok=True)
     os.chmod(adir, 0o755)
@@ -2086,8 +2824,6 @@ def install_page(webd):
             pass
     ensure_data_dir()
     os.makedirs(EDITS_DIR, exist_ok=True)
-    os.chown(EDITS_DIR, 0, 0)
-    os.chmod(EDITS_DIR, 0o755)
     os.makedirs(os.path.join(INBOX, "sess"), exist_ok=True)
     old = os.path.join(EDITS_DIR, "edits.json")              # earlier versions kept edits one folder up
     if os.path.isfile(old) and not os.path.isfile(EDITS_FILE):
@@ -2095,14 +2831,8 @@ def install_page(webd):
     if not os.path.isfile(EDITS_FILE):
         with open(EDITS_FILE, "w", encoding="utf-8") as f:
             f.write("{}")
-    wu = web_user()
-    for path in (INBOX, EDITS_FILE, os.path.join(INBOX, "sess")):
-        try:
-            if wu:
-                os.chown(path, wu.pw_uid, wu.pw_gid)
-            os.chmod(path, 0o700 if os.path.isdir(path) else 0o600)
-        except OSError:
-            pass
+    publish_settings()                    # permissions for spidermap.php, the Settings panel
+    fix_ownership()
 
 
 def migrate_old_install(api, webd):
@@ -2161,8 +2891,9 @@ def setup(api):
         print(f"Dashboard created: {DASHBOARD_NAME}")
     if not os.path.isfile(OOKLA) and not shutil.which("speedtest-cli"):
         print("For speed tests: bash install.sh --update (installs a speed test program)")
+    fix_ownership()
     install_service()
-    print("\nSetup done. install.sh adds the scheduled jobs (or see README.md to add them by hand).")
+    print("\nSetup done. The service runs the first scan now; the map appears within a few minutes.")
 
 
 OPER = {"1": "up", "2": "down", "3": "testing", "5": "dormant", "6": "not present", "7": "lower layer down"}
@@ -2227,7 +2958,7 @@ def check_ports(api, community=None):
 def job_lock(name, wait):
     """One job of each kind at a time. wait=False: return None if it is already running."""
     import fcntl
-    fh = open(os.path.join(HERE, f".spidermap-{name}.lock"), "w")
+    fh = open(os.path.join(STATE_DIR, f".spidermap-{name}.lock"), "w")
     try:
         fcntl.flock(fh, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
     except BlockingIOError:
@@ -2240,7 +2971,8 @@ def main():
     ap = argparse.ArgumentParser(description="UniFi-style live network topology for Zabbix")
     ap.add_argument("--setup", action="store_true", help="install page, icons, Zabbix items, dashboard")
     ap.add_argument("--live", action="store_true", help="refresh live status and traffic only")
-    ap.add_argument("--rt", action="store_true", help="run the real-time collector (used by the service)")
+    ap.add_argument("--service", "--rt", dest="rt", action="store_true", help="run the service (scheduler, live traffic)")
+    ap.add_argument("--install-web", action="store_true", help="install spidermap.php and icons in the web folder (root)")
     ap.add_argument("--version", action="version", version=f"SpiderMap {__version__}")
     ap.add_argument("--check-ports", action="store_true", help="show how SpiderMap sees every switch port (read-only)")
     ap.add_argument("--install-service", action="store_true", help="install/restart the real-time service")
@@ -2248,19 +2980,27 @@ def main():
     ap.add_argument("--community", help="SNMP v1/v2c community override")
     args = ap.parse_args()
     if not at.ZABBIX_TOKEN:
-        raise SystemExit("Run '. ./zabbix.env' first.")
+        raise SystemExit(f"No Zabbix API token: check {os.path.join(CONF_DIR, 'zabbix.env')}")
+    if args.install_web:
+        webd = webdir()
+        if not webd:
+            raise SystemExit("Zabbix web folder not found.")
+        install_page(webd)
+        print(f"Web files installed in {webd}")
+        return
+    if args.install_service:
+        install_service()
+        return
     api = at.Zabbix(at.ZABBIX_URL, at.ZABBIX_TOKEN, at.VERIFY_TLS)
     if args.setup:
         setup(api)
-        args.quiet = False
+        return
+    drop_privileges()                    # everything below runs as the service user
     if args.check_ports:
         check_ports(api, args.community)
         return
     if args.rt:
         rt_loop(api)
-        return
-    if args.install_service:
-        install_service()
         return
     if args.live:
         lock = job_lock("live", wait=False)

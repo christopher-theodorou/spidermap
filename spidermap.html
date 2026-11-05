@@ -25,6 +25,11 @@ header h1 img{width:30px;height:30px}
 .sp{flex:1}
 .search{height:30px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);padding:0 10px;width:200px;font:inherit}
 .btn{height:30px;min-width:30px;padding:0 9px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;font:inherit;text-decoration:none}
+.fld{display:block;margin:8px 0}.fld>span{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+.fld input[type=number],.fld input[type=text],.fld select,.fld textarea{width:100%;box-sizing:border-box;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)}
+.fld textarea{font-family:ui-monospace,monospace;resize:vertical}.fld small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.fld.chk{display:flex;gap:8px;align-items:center}.btnrow{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.note{font-size:12px;margin:4px 0}
+#s-time{cursor:pointer}.okc{color:var(--ok)}.badc{color:var(--bad)}.warnc{color:var(--warn)}
 .btn:disabled,.btn:disabled:hover{opacity:.45;cursor:not-allowed;border-color:var(--border);color:inherit}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn i{font-size:16px}
@@ -188,6 +193,8 @@ table{width:100%;border-collapse:collapse}
   <button class="btn" id="b-top" title="Top talkers" aria-label="Top talkers"><i class="ti ti-chart-bar"></i></button>
   <button class="btn" id="b-spd" title="Run speed test" aria-label="Run speed test"><i class="ti ti-gauge"></i></button>
   <button class="btn" id="b-csv" title="Export device list (CSV)" aria-label="Export device list"><i class="ti ti-download"></i></button>
+  <button class="btn" id="b-hlt" title="Collector health" aria-label="Collector health"><i class="ti ti-heart-rate-monitor"></i></button>
+  <button class="btn" id="b-set" title="Settings" aria-label="Settings" style="display:none"><i class="ti ti-settings"></i></button>
   <button class="btn" id="zin" aria-label="Zoom in"><i class="ti ti-plus"></i></button>
   <button class="btn" id="zout" aria-label="Zoom out"><i class="ti ti-minus"></i></button>
   <button class="btn" id="zfit" aria-label="Fit to screen"><i class="ti ti-arrows-maximize"></i></button>
@@ -200,7 +207,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.4.0";
+const PAGE_VERSION = "0.5.0";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -231,7 +238,7 @@ const denied = what => `Only ${ROLE[ME.need[what]] || "Zabbix admins"} can ${wha
 async function loadMe() {
   try {
     const j = await getData("me");
-    if (j && j.can) { ME = j; if (DATA) { gwCard(); if (sel === "#speed") special("speed"); } }
+    if (j && j.can) { ME = j; $("#b-set").style.display = ME.can.settings ? "" : "none"; if (DATA) { gwCard(); if (sel === "#speed") special("speed"); } }
   } catch (e) { /* older server without "me": keep the defaults */ }
 }
 function postApi(body) {
@@ -261,12 +268,18 @@ async function load() {
     }
     index(); render(); gwCard();
     if (!fitted) { fit(false); fitted = true; }
-    if (sel && sel[0] === "#") special(sel.slice(1)); else if (sel && byId[sel]) panel(sel); else if (sel) closePanel();
-  } catch (e) { $("#msg").textContent = e.message === "auth" ? "" : "No topology data yet. Run spidermap.py on the Zabbix server."; }
+    if (sel && sel[0] === "#") { if (sel !== "#settings") special(sel.slice(1)); } else if (sel && byId[sel]) panel(sel); else if (sel) closePanel();
+  } catch (e) {
+    if (e.message === "auth" || DATA) return;
+    $("#msg").innerHTML = e.message === "404"
+      ? 'No map yet: the first scan is still running, or it failed.<br><a href="#" id="msg-h" style="color:var(--accent)">Collector health</a>'
+      : "The map data could not be loaded (" + esc(e.message) + "). Retrying every minute.";
+    const mh = $("#msg-h"); if (mh) mh.onclick = ev => { ev.preventDefault(); special("health"); };
+  }
 }
 async function loadLive() {
   try {
-    LIVE = await getData("live"); { if (DATA) { render(); gwCard(); if (sel && sel[0] === "#") special(sel.slice(1)); else if (sel && byId[sel] && !($("#ef") && $("#ef").style.display === "block")) panel(sel, true); } }
+    LIVE = await getData("live"); { if (DATA) { render(); gwCard(); if (sel && sel[0] === "#") { if (sel !== "#settings") special(sel.slice(1)); } else if (sel && byId[sel] && !($("#ef") && $("#ef").style.display === "block")) panel(sel, true); } }
   } catch (e) {}
 }
 async function loadRT() {
@@ -293,7 +306,7 @@ function index() {
   $("#s-off").innerHTML = `<i class="dot" style="background:var(--off)"></i>${all.length - on} offline`;
   const nw = all.filter(n => n.flags.includes("new") || n.flags.includes("unknown")).length;
   $("#s-new").innerHTML = nw ? `<i class="dot" style="background:var(--accent)"></i>${nw} new / unknown` : "";
-  $("#s-time").textContent = "Scan " + (DATA.generated_text || "").slice(11);
+  scanPill();
 }
 function status(n) { return (LIVE.nodes && LIVE.nodes[n.id]) || n.status; }
 function portLive(ref) {
@@ -355,7 +368,7 @@ function spark(rows, a, b, max) {
   const one = (i, c) => { const p = pts(i); return `<path d="${path(p)} L${Wd} ${H} L0 ${H} Z" fill="${c}" fill-opacity=".13"/><path d="${path(p)}" fill="none" stroke="${c}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`; };
   return `<svg class="spark" viewBox="0 0 ${Wd} ${H}" preserveAspectRatio="none">${b != null ? one(b, "var(--pur)") : ""}${one(a, "var(--accent)")}</svg>`;
 }
-function ago(ts) { if (!ts) return ""; const s = Date.now() / 1000 - ts; return s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago"; }
+function ago(ts) { if (!ts) return ""; const s = Date.now() / 1000 - ts; return s < 10 ? "just now" : s < 60 ? Math.round(s) + " s ago" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " d ago"; }
 function bytes(v) { const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (v >= 1024 && i < 4) { v /= 1024; i++; } return (i ? v.toFixed(1) : v.toFixed(0)) + " " + u[i]; }
 
 /* ---------- gateway card ---------- */
@@ -421,6 +434,186 @@ function gwCard() {
   const sb = $("#spt"); if (sb) sb.onclick = () => special("speed");
   const gi = $("#gw-inet"); if (gi) gi.onclick = () => select("inet", true);
   const gwW = $("#gw-warn"); if (gwW) gwW.onclick = () => { evFilter = "warnings"; special("activity"); };
+}
+
+/* ---------- scan status, collector health, settings ---------- */
+let STATUS = null, SETTINGS = null, setMsg = "";
+async function loadStatus() {
+  try {
+    STATUS = await getData("status"); scanPill();
+    if (sel === "#health") special("health");
+    if (sel === "#settings") settingsLive();
+  } catch (e) { /* older server, or the service has not written a status yet */ }
+}
+const svcStale = () => !STATUS || Date.now() / 1000 - STATUS.t > 60;
+function inTime(t) { const s = Math.round(t - Date.now() / 1000); return s <= 0 ? "now" : s < 90 ? `in ${s} s` : `in ${Math.round(s / 60)} min`; }
+function scanPill() {
+  const el = $("#s-time"); if (!el) return;
+  const j = STATUS && STATUS.jobs && STATUS.jobs.scan;
+  let t = DATA ? "Scan " + esc((DATA.generated_text || "").slice(11, 16)) : "";
+  if (STATUS && svcStale()) t += ' · <span class="badc">service stopped?</span>';
+  else if (STATUS && STATUS.paused) t = '<i class="ti ti-player-pause"></i> Discovery paused';
+  else if (j && j.running) t = `<i class="ti ti-loader-2 spin"></i> Scanning… ${j.elapsed || 0} s`;
+  else if (j && j.last_result && j.last_result !== "ok") t += ` · <span class="warnc">last scan ${esc(j.last_result)}</span>`;
+  if (DATA && DATA.partial) t += ' · <span class="warnc">partial</span>';
+  el.innerHTML = t; el.title = "Collector health";
+}
+function healthHtml() {
+  const st = STATUS;
+  if (!st) { loadStatus(); return `<p style="color:var(--muted)">Waiting for the SpiderMap service…</p>`; }
+  const H = st.health || {}, J = st.jobs || {};
+  const row = (k, v) => `<div class="gr"><span>${k}</span><span>${v}</span></div>`;
+  const okb = (ok, txt) => `<span class="${ok ? "okc" : "badc"}">${txt}</span>`;
+  let h = "";
+  if (svcStale()) h += `<div class="warnb"><i class="ti ti-alert-triangle"></i>The SpiderMap service has not reported for ${ago(st.t).replace(" ago", "")}. On the server: systemctl status spidermap</div>`;
+  h += row("Service", `${esc(st.user)} · version ${esc(st.version)} · since ${ago(st.service_since).replace(" ago", "")}`);
+  h += row("Discovery", st.paused ? '<span class="warnc">paused</span>' : "on");
+  h += `<div class="sec">Jobs</div>`;
+  for (const [k, name] of [["scan", "Full scan"], ["live", "Status refresh"]]) {
+    const j = J[k] || {};
+    h += row(name, j.running ? `<i class="ti ti-loader-2 spin"></i> running ${j.elapsed || 0} s`
+      : `${j.last_result ? okb(j.last_result === "ok", esc(j.last_result)) : "-"}${j.last_end ? " · " + ago(j.last_end) : ""}${j.last_seconds ? " · " + j.last_seconds + " s" : ""}${j.next && !j.running ? " · next " + inTime(j.next) : ""}`);
+    if (j.error && j.last_result !== "ok") h += `<div class="note badc" style="margin-top:-4px">${esc(j.error)}</div>`;
+  }
+  const A = H.api || {};
+  h += `<div class="sec">Connections</div>` + row("Zabbix API", A.at ? okb(A.ok, A.ok ? "ok" : "error") + " · " + ago(A.at) : "-");
+  if (A.error) h += `<div class="note badc">${esc(A.error)}</div>`;
+  for (const [id, x] of Object.entries(H.switches || {})) {
+    const scan = x.ok === undefined ? "" : x.ok ? okb(true, `scan ok · ${x.ports} ports`) : x.used_from ? `<span class="warnc">no answer · shown from ${ago(x.used_from)}</span>` : okb(false, "no answer");
+    const rt = x.realtime ? (x.realtime.ok ? okb(true, "live ok") : okb(false, "live: no answer")) : "";
+    h += row(esc(x.name || id), [scan, rt].filter(Boolean).join(" · "));
+    const err = (x.ok === false && x.error) || (x.realtime && !x.realtime.ok && x.realtime.error);
+    if (err) h += `<div class="note badc" style="margin-top:-4px">${esc(err)}</div>`;
+  }
+  const S = H.scan || {};
+  if (S.warnings && S.warnings.length) h += S.warnings.map(w => `<div class="note warnc">${esc(w)}</div>`).join("");
+  const D = H.data_age || {}, age = s => s == null ? "-" : s < 90 ? s + " s" : Math.round(s / 60) + " min";
+  h += `<div class="sec">Data</div>` + row("Map", age(D.map) + (S.targets ? ` · ${S.targets} addresses scanned` : "")) + row("Status", age(D.live)) + row("Live traffic", age(D.realtime));
+  if (H.disk) { const pct = H.disk.free / H.disk.total * 100; h += row("Free disk space", `<span class="${pct < 5 ? "badc" : pct < 15 ? "warnc" : ""}">${bytes(H.disk.free)} (${pct.toFixed(0)} %)</span>`); }
+  h += row("Speed test", H.speedtest ? esc(H.speedtest) : '<span class="warnc">not installed</span>');
+  const hist = (st.history || []).slice().reverse();
+  if (hist.length) h += `<div class="sec">Recent scans</div><table class="lst">${hist.map(x => `<tr><td>${new Date(x.t * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td><td>${x.job === "scan" ? "scan" : "refresh"}${x.by ? " · " + esc(x.by) : ""}</td><td>${okb(x.result === "ok", esc(x.result))}</td><td>${x.seconds} s</td></tr>`).join("")}</table>`;
+  return h;
+}
+const LEVELS = { 1: "Zabbix users", 2: "Zabbix admins", 3: "Zabbix Super admins" };
+async function loadSettings() {
+  try { SETTINGS = await getData("settings"); } catch (e) { SETTINGS = { error: e.message }; }
+  if (sel === "#settings") special("settings");
+}
+function settingsTop() {
+  const st = STATUS || {}, j = (st.jobs || {}).scan || {};
+  let h = `<div class="gr"><span>Last scan</span><span>${j.last_end ? ago(j.last_end) + " · " + esc(j.last_result || "") + (j.last_seconds ? " · " + j.last_seconds + " s" : "") : "-"}</span></div>`
+    + `<div class="gr"><span>Next scan</span><span>${st.paused ? '<span class="warnc">discovery paused</span>' : j.running ? `running ${j.elapsed || 0} s` : j.next ? inTime(j.next) : "-"}</span></div>`
+    + `<div class="btnrow">${j.running ? '<button class="btn" id="st-cancel"><i class="ti ti-player-stop"></i>Cancel scan</button>' : '<button class="btn" id="st-scan"><i class="ti ti-refresh"></i>Scan now</button>'}`
+    + `${st.paused ? '<button class="btn" id="st-resume"><i class="ti ti-player-play"></i>Resume discovery</button>' : '<button class="btn" id="st-pause"><i class="ti ti-player-pause"></i>Pause discovery</button>'}</div>`;
+  if (svcStale()) h += `<div class="note badc">The SpiderMap service is not answering: changes will wait until it runs.</div>`;
+  return h;
+}
+function settingsLive() { const b = $("#st-top"); if (b) { b.innerHTML = settingsTop(); wireScanButtons(); } }
+function settingsHtml() {
+  if (!SETTINGS) { loadSettings(); return `<p style="color:var(--muted)">Loading settings…</p>`; }
+  if (SETTINGS.error) return `<p class="badc">The settings could not be loaded (${esc(SETTINGS.error)}).</p>`;
+  const v = SETTINGS.values, eff = SETTINGS.effective_permissions || {};
+  let h = `<div class="sec">Scans</div><div id="st-top">${settingsTop()}</div>`;
+  let section = "";
+  for (const f of SETTINGS.schema) {
+    if (f.key === "discovery_paused") continue;                     // the Pause / Resume buttons above
+    if (f.section !== section) { section = f.section; if (section !== "Scans") h += `<div class="sec">${esc(section)}</div>`; }
+    const val = v[f.key], help = f.help ? `<small>${esc(f.help)}</small>` : "";
+    if (f.type === "bool") h += `<label class="fld chk"><input type="checkbox" data-k="${f.key}" ${val ? "checked" : ""}>${esc(f.label)}</label>`;
+    else if (f.type === "int") h += `<label class="fld"><span>${esc(f.label)}</span><input type="number" data-k="${f.key}" min="${f.range[0]}" max="${f.range[1]}" value="${esc(val)}">${help}</label>`;
+    else if (f.type === "cidrs" || f.type === "ips") h += `<label class="fld"><span>${esc(f.label)}</span><textarea data-k="${f.key}" rows="3" spellcheck="false">${esc((val || []).join("\n"))}</textarea>${help}</label>`;
+    else if (f.type === "level") {
+      const what = f.key.split(".")[1], raised = eff[what] && eff[what] !== val;
+      h += `<label class="fld"><span>${esc(f.label)}</span><select data-k="${f.key}">${[1, 2, 3].filter(n => n >= f.range[0] && n <= f.range[1]).map(n => `<option value="${n}" ${n === val ? "selected" : ""}>${LEVELS[n]}</option>`).join("")}</select>${raised ? `<small>In effect: ${LEVELS[eff[what]]} (nobody may do more than open SpiderMap)</small>` : help}</label>`;
+    } else h += `<label class="fld"><span>${esc(f.label)}</span><input type="text" data-k="${f.key}" value="${esc(val)}" spellcheck="false">${help}</label>`;
+  }
+  h += `<button class="btn wide" id="st-save" style="margin-top:12px"><i class="ti ti-device-floppy"></i>Save settings</button><div id="sf-msg" class="note">${setMsg}</div>`;
+  h += `<div class="sec">Backup</div><div class="btnrow"><button class="btn" id="st-exp"><i class="ti ti-download"></i>Export</button><label class="btn"><i class="ti ti-upload"></i>Import…<input type="file" id="st-imp" accept=".json,application/json" hidden></label></div><div id="imp-prev"></div>`;
+  const hist = SETTINGS.history || [];
+  if (hist.length) h += `<div class="note" style="color:var(--muted)">Saved versions (before each change):</div><table class="lst">${hist.map(x => `<tr><td>${x.saved_at ? new Date(x.saved_at * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</td><td>${esc(x.by || "")}</td><td>${esc(x.why || "")}</td><td><button class="btn" data-restore="${esc(x.id)}">Restore</button></td></tr>`).join("")}</table>`;
+  return h;
+}
+function collectSettings() {
+  const out = {};
+  document.querySelectorAll("#panel [data-k]").forEach(el => {
+    const k = el.dataset.k, f = SETTINGS.schema.find(x => x.key === k);
+    let val;
+    if (f.type === "bool") val = el.checked;
+    else if (f.type === "int" || f.type === "level") val = el.value.trim() === "" ? el.value : Number(el.value);
+    else if (f.type === "cidrs" || f.type === "ips") val = el.value.split(/[\s,]+/).filter(Boolean);
+    else val = el.value.trim();
+    if (JSON.stringify(val) !== JSON.stringify(SETTINGS.values[k])) out[k] = val;
+  });
+  return out;
+}
+const rid = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+async function sendToService(body, done) {
+  const id = rid(), say = (cls, html) => { setMsg = `<span class="${cls}">${html}</span>`; const m = $("#sf-msg"); if (m) m.innerHTML = setMsg; };
+  say("", "Saving…");
+  let j;
+  try { const r = await postApi({ ...body, rid: id }); j = await r.json().catch(() => ({ ok: false, error: "Unexpected answer (" + r.status + ")" })); }
+  catch (e) { return say("badc", "Couldn't reach the server."); }
+  if (!j.ok) return say("badc", esc(j.error || "Refused."));
+  for (let i = 0; i < 24; i++) {                       // the service picks requests up within a few seconds
+    await new Promise(res => setTimeout(res, 1500));
+    try { STATUS = await getData("status"); } catch (e) { continue; }
+    const res = STATUS.config && STATUS.config.result;
+    if (res && res.rid === id) {
+      if (res.ok) say("okc", esc(res.message || "Saved.") + (res.changed ? " New intervals and scan settings apply from the next run." : ""));
+      else say("badc", res.errors.map(esc).join("<br>"));
+      if (res.ok) { SETTINGS = null; await loadSettings(); } else if (done) done();
+      return;
+    }
+  }
+  say("warnc", "Sent, but the SpiderMap service has not answered yet. See Collector health.");
+}
+function wireScanButtons() {
+  const act = (a, msg) => async () => {
+    const r = await postApi({ action: a }); const j = await r.json().catch(() => ({}));
+    toast(j.ok ? msg : (j.error || "Refused.")); setTimeout(loadStatus, 2500);
+  };
+  const b = id => $("#" + id);
+  if (b("st-scan")) b("st-scan").onclick = act("scan", "Scan requested - it starts within a few seconds.");
+  if (b("st-cancel")) b("st-cancel").onclick = act("cancel", "Stopping the scan…");
+  if (b("st-pause")) b("st-pause").onclick = act("pause", "Pausing discovery…");
+  if (b("st-resume")) b("st-resume").onclick = act("resume", "Resuming discovery…");
+}
+function exportSettings() {
+  const flat = SETTINGS.values, st = { ...(SETTINGS.advanced || {}) };
+  for (const [k, val] of Object.entries(flat)) {
+    if (k.includes(".")) { const [a, b] = k.split("."); (st[a] = st[a] || {})[b] = val; } else st[k] = val;
+  }
+  const blob = new Blob([JSON.stringify({ spidermap_export: 1, exported: new Date().toISOString(), settings: st, devices: SETTINGS.devices }, null, 1)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `spidermap-settings-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function previewImport(file) {
+  const box = $("#imp-prev"), rd = new FileReader();
+  rd.onload = () => {
+    let j;
+    try { j = JSON.parse(rd.result); } catch (e) { box.innerHTML = '<div class="note badc">That is not a JSON file.</div>'; return; }
+    if (!j || typeof j !== "object" || typeof j.devices !== "object" || typeof j.settings !== "object") { box.innerHTML = '<div class="note badc">That is not a SpiderMap settings file.</div>'; return; }
+    const now = SETTINGS.devices || {}, nd = Object.keys(j.devices).length;
+    const added = Object.keys(j.devices).filter(m => !now[m.toLowerCase()]).length, removed = Object.keys(now).filter(m => !(m in j.devices) && !(m.toUpperCase() in j.devices)).length;
+    box.innerHTML = `<div class="note">${nd} devices (${added} new, ${removed} no longer listed) and the settings in this file will <b>replace</b> the current ones. The current version is kept and can be restored.</div><div class="btnrow"><button class="btn" id="imp-go"><i class="ti ti-check"></i>Import</button><button class="btn" id="imp-no">Cancel</button></div>`;
+    $("#imp-go").onclick = () => { box.innerHTML = ""; sendToService({ action: "import", import: { settings: j.settings, devices: j.devices } }); };
+    $("#imp-no").onclick = () => { box.innerHTML = ""; };
+  };
+  rd.readAsText(file);
+}
+function wireSettings() {
+  wireScanButtons();
+  const sv = $("#st-save"); if (sv) sv.onclick = () => {
+    const ch = collectSettings();
+    if (!Object.keys(ch).length) { setMsg = '<span style="color:var(--muted)">Nothing changed.</span>'; $("#sf-msg").innerHTML = setMsg; return; }
+    sendToService({ action: "settings", settings: ch });
+  };
+  const ex = $("#st-exp"); if (ex) ex.onclick = exportSettings;
+  const im = $("#st-imp"); if (im) im.onchange = () => { if (im.files[0]) previewImport(im.files[0]); im.value = ""; };
+  document.querySelectorAll("#panel [data-restore]").forEach(b => b.onclick = () => {
+    if (confirm("Restore this saved version of the settings and devices? The current version is kept too.")) sendToService({ action: "restore", restore: b.dataset.restore });
+  });
 }
 
 /* ---------- speed test panel ---------- */
@@ -785,7 +978,8 @@ function internetHtml() {
 
 /* ---------- special panels (activity, people, top talkers) ---------- */
 const SPECIAL = { activity: ["Activity", "bell", activityHtml], people: ["Who's online", "users", peopleHtml], top: ["Top talkers", "chart-bar", topHtml],
-                  speed: ["ISP Speed Test", "gauge", speedHtml] };
+                  speed: ["ISP Speed Test", "gauge", speedHtml], health: ["Collector health", "heart-rate-monitor", healthHtml],
+                  settings: ["Settings", "settings", settingsHtml] };
 function special(kind) {
   const [title, icon, fn] = SPECIAL[kind], P = $("#panel");
   sel = "#" + kind;
@@ -798,6 +992,7 @@ function special(kind) {
   P.querySelectorAll("[data-tp]").forEach(c => c.onclick = () => { topPer = c.dataset.tp; special("top"); });
   if (kind === "activity") { store("nm-seen", Date.now() / 1000); actBadge(); }
   const s2 = $("#spt2"); if (s2) s2.onclick = () => startSpeedtest($("#spm2"));
+  if (kind === "settings") wireSettings();
   if (DATA) render();
 }
 $("#b-act").onclick = () => special("activity");
@@ -847,8 +1042,13 @@ function headerHeight() { document.documentElement.style.setProperty("--hh", $("
 headerHeight();
 if (window.ResizeObserver) new ResizeObserver(headerHeight).observe($("header"));
 window.addEventListener("resize", () => { headerHeight(); fit(false); });
-load(); loadLive(); loadRT(); loadEvents(); loadPresence(); loadMe();
-setInterval(load, 60000); setInterval(loadLive, 30000); setInterval(loadRT, 5000); setInterval(loadEvents, 20000); setInterval(loadPresence, 300000);
+load(); loadLive(); loadRT(); loadEvents(); loadPresence(); loadMe(); loadStatus();
+const every = (fn, ms) => setInterval(() => { if (!document.hidden) fn(); }, ms);   // nothing while the tab is hidden
+every(load, 60000); every(loadLive, 30000); every(loadRT, 5000); every(loadEvents, 20000); every(loadPresence, 300000); every(loadStatus, 10000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { load(); loadLive(); loadRT(); loadStatus(); } });
+$("#b-hlt").onclick = () => special("health");
+$("#b-set").onclick = () => special("settings");
+$("#s-time").onclick = () => special("health");
 </script>
 </body>
 </html>

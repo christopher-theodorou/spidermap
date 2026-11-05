@@ -10,13 +10,15 @@ extend it. Read this before larger changes.
         │                       │                       │                           │
         └──────────────┬────────┴───────────────────────┴───────────────────────────┘
                        ▼
-        spidermap.py  (runs as root on the Zabbix server / container)
-          ├── full scan      cron, every 5 min    topology, devices, changes, presence
-          ├── live refresh   cron, every minute   port status, stats, cable / traffic checks, warnings
-          └── real time      spidermap-rt service port counters every 5 s, latency every 15 s, speed tests
+        spidermap.service  (systemd, user "spidermap", only CAP_NET_RAW for ping)
+          ├── scheduler      starts the full scan and the status refresh as separate processes
+          │     ├── full scan      every 5 min (Settings)   topology, devices, changes, presence
+          │     └── status refresh every 60 s (Settings)    port status, stats, cable / traffic checks, warnings
+          ├── real time      every 5 s (Settings)        port counters, latency every 15 s, speed tests
+          └── requests       from the page               Scan now, Cancel, Pause, settings, import, restore
                        │
                        ▼  JSON files
-        /var/lib/spidermap/www/          (root + web server group only, NOT in the web folder)
+        /var/lib/spidermap/www/          (service user + web server group only, NOT in the web folder)
                        │
                        ▼
         spidermap.php  (Zabbix web folder)  ── checks the Zabbix login through the public Zabbix API
@@ -32,59 +34,95 @@ creates only its own items, triggers and dashboard (see *Zabbix integration*).
 
 | File | Role |
 |---|---|
-| `spidermap.py` | Everything that collects and decides: full scan, live refresh, real-time loop, speed tests, events, Zabbix integration, installation of the page and the gateway. Also contains the PHP gateway source (`GATEWAY_PHP`). |
+| `spidermap.py` | Everything that collects and decides: the service and its scheduler, full scan, status refresh, real-time loop, speed tests, events, settings, Zabbix integration, installation. Also contains the PHP gateway source (`GATEWAY_PHP`). |
 | `spidermap_ports.py` | Reads each switch over SNMP: interfaces, status, speed, LLDP neighbours, MAC tables, ARP. Ping sweep, reverse DNS, default gateway. |
-| `spidermap_zabbix.py` | Zabbix API client, host loading, SNMP credentials from Zabbix, LLDP helpers, dashboard builder. Also the *classic* Zabbix map (`python3 spidermap_zabbix.py`). |
-| `spidermap.html` | The whole user interface in one file: tree layout, panels, gateway card, activity feed, editing. No build step. |
-| `install.sh` | Installer and updater (`--update`). Packages, Ookla CLI, migration from older installs, cron jobs, checks. |
+| `spidermap_zabbix.py` | Where files live (`CONF_DIR`, `STATE_DIR`), reading `zabbix.env`, Zabbix API client, host loading, SNMP credentials, LLDP helpers, dashboard builder. Also the *classic* Zabbix map. |
+| `spidermap.html` | The whole user interface in one file: tree layout, panels, gateway card, activity feed, editing, Settings, Collector health. No build step. |
+| `install.sh` | Installer and updater (`--update`): packages, Ookla CLI, service user, moving files to their places, the service, checks. |
 | `tests/test_gateway.py` | Security tests for `spidermap.php` (needs `php-cli`). |
-| `tests/test_core.py` | Tests for scheduling, edits and job locking. |
+| `tests/test_core.py` | Tests for the scheduler, settings, edits, audit, SNMP credentials, permissions. |
 | `tests/test_ports.py` | Tests for port names and traffic counters with real switch tables. |
 
 ## What runs when
 
-| Job | Started by | Interval | Does |
-|---|---|---|---|
-| Full scan | cron | 5 min | Ping sweep, reads all switches, builds the topology, tracks devices (new / moved / IP changes / conflicts), presence, public IP, writes `spidermap.json`, installs the page and the gateway, sends Zabbix events |
-| Live refresh | cron (`--live`) | 1 min | Port status / traffic / errors from Zabbix, CPU / memory / disk stats, pings important devices, cable and unusual-traffic checks, warnings to Zabbix, writes `spidermap_live.json` |
-| Real time | systemd `spidermap-rt` (`--rt`) | 5 s | SNMP port counters → live traffic, port up/down and flap counting, data usage per port, latency / loss / jitter (every 15 s), outages, speed test requests, writes `spidermap_rt.json` |
+Everything runs in one systemd service, **`spidermap`** (`spidermap.py --service`). Its scheduler starts the jobs as
+separate processes, one of each kind at a time, with a time limit:
 
-Cron output goes to `/var/log/spidermap.log`; the service logs to the journal (`journalctl -u spidermap-rt`).
-Only one full scan and one live refresh run at a time: cron skips a turn if the previous run is still busy.
+| Job | Interval (Settings) | Time limit | Does |
+|---|---|---|---|
+| Full scan (`--quiet`) | 5 min; not while discovery is paused | 15 min | Ping sweep, reads all switches, builds the topology, tracks devices (new / moved / IP changes / conflicts), presence, public IP, writes `spidermap.json`, sends Zabbix events |
+| Status refresh (`--live`) | 60 s | 3 min | Port status / traffic / errors from Zabbix, CPU / memory / disk stats, pings important devices, cable and unusual-traffic checks, warnings to Zabbix, writes `spidermap_live.json` |
+| Real time (in the service) | 5 s | - | SNMP port counters → live traffic, port up/down and flap counting, data usage per port, latency / loss / jitter (every 15 s), outages, speed tests, writes `spidermap_rt.json` |
+
+The scheduler remembers its jobs in `spidermap_jobs.json`: after a restart nothing runs again before its interval,
+and a job that was running is marked *interrupted*. It writes `spidermap_status.json` every cycle (jobs, pause,
+health) for the page. Job output goes to `/var/lib/spidermap/spidermap.log` (2 MB + one older file); the service
+itself logs to the journal (`journalctl -u spidermap`).
+
+**A switch that does not answer** keeps its last good data for 30 minutes (from `switch_cache` in the state), so its
+devices do not look offline; the map is marked *partial* and Collector health names the switch and its error.
+
+## Running without root
+
+The installer creates the system user `spidermap` and runs everything as that user if `ping` works for it (`ping`
+has the file capability `cap_net_raw` on Debian; the service also gets `CAP_NET_RAW` as its only capability).
+Otherwise it stays on root and says why. The choice is in `/etc/spidermap/run-as`.
+
+When root runs a SpiderMap command (a scan, `--live`, `--check-ports`), `drop_privileges()` switches to the service
+user first, so root never leaves files the service cannot write. Only `--setup`, `--install-web` and
+`--install-service` keep root: they write the Zabbix web folder and the systemd unit. `fix_ownership()` sets every
+owner and mode after them.
+
+The unit also uses `ProtectSystem=strict` (only `/var/lib/spidermap` and `/etc/spidermap` writable),
+`ProtectHome`, `PrivateTmp`, `NoNewPrivileges` and `UMask=0027`. If a container does not support these, the
+installer restarts the service without the file-system protection and says so.
 
 ## Where files live
 
-**Repository folder** (`/opt/spidermap`, root only): the code, plus private files that are never committed
-(see `.gitignore`):
+**Code** (`/opt/spidermap`, a git checkout, root): the program. `zabbix.env` and `devices.json` there are links to
+`/etc/spidermap`, so `cd /opt/spidermap && nano devices.json` keeps working. (Before the installer has moved them,
+everything is read from the code folder; `SPIDERMAP_CONF` / `SPIDERMAP_STATE` override both.)
+
+**Configuration** (`/etc/spidermap`, service user, 750):
+
+| File | Owner / mode | Contents |
+|---|---|---|
+| `zabbix.env` | root:spidermap 640 | Zabbix API address and token, optional Proxmox token and certificate fingerprint. Read automatically |
+| `devices.json` | spidermap 640 | Your names, types, pins, web addresses, important devices, settings (also changed from the Settings panel) |
+| `run-as` | root:spidermap 640 | `spidermap` or `root` |
+
+**History** (`/var/lib/spidermap/state`, service user, 700):
 
 | File | Contents |
 |---|---|
-| `zabbix.env` | Zabbix API address and token, optional Proxmox token (mode 600) |
-| `devices.json` | Your names, types, pins, web addresses, important devices, settings |
-| `spidermap_state.json` | Device memory: first/last seen, location, IP history, flags, port speeds, public IP |
+| `spidermap_state.json` | Device memory: first/last seen, location, IP history, flags, port speeds, public IP, last good data per switch |
 | `spidermap_hist.json` | Minute history for graphs, cable / traffic baselines and previous warnings |
-| `spidermap_events_all.json` | Activity feed, 60 days |
-| `spidermap_presence_all.json` | Online intervals per device, 30 days |
+| `spidermap_events_all.json` | Activity feed (60 days, Settings) |
+| `spidermap_presence_all.json` | Online intervals per device (30 days, Settings) |
 | `spidermap_inet.json` | Outages, packet-loss state |
 | `spidermap_usage.json` | Bytes per port, today and this month, and since when it counts (`since`) |
 | `spidermap_schedule.json` | Date of the last scheduled speed test |
-| `.spidermap-scan.lock`, `.spidermap-live.lock` | Make sure only one scan and one live refresh run at a time |
+| `spidermap_jobs.json` | The scheduler's jobs and the last 30 runs |
+| `spidermap_scan_report.json` | The last full scan: each switch answered or not, warnings |
+| `config-history/` | The last 10 versions of `devices.json`, saved before each change from the page (Restore) |
+| `.spidermap-*.lock` | Only one scan and one refresh at a time, also when run by hand |
 
-**`/var/lib/spidermap/`** (root, mode 755):
+**`/var/lib/spidermap/`** (service user, 755):
 
 | Path | Owner / mode | Contents |
 |---|---|---|
-| `www/` | root:www-data 750, files 640 | What the browser gets: `spidermap.html`, `spidermap.json`, `spidermap_live.json`, `spidermap_rt.json`, `spidermap_events.json`, `spidermap_presence.json` |
-| `inbox/` | www-data 700 | The only place the web server can write: `edits.json`, `speedtest.request`, `sess/` (login check cache) |
-| `speedtest.json` | root | Speed test history |
+| `www/` | spidermap:www-data 2750, files 640 | What the browser gets: the page, `spidermap.json`, `_live`, `_rt`, `_events`, `_presence`, `_status`, `_settings`, and `access.json` (permissions read by `spidermap.php`) |
+| `inbox/` | www-data:spidermap 2770, files 660 | The only place the web server can write: `edits.json`, `speedtest.request`, `scan.request`, `scan.cancel`, `settings.request`, `sess/` (login check cache, 700) |
+| `speedtest.json` | spidermap | Speed test history |
+| `spidermap.log` | spidermap, 600 | Output of the scans and refreshes |
 | `backup/` | root | Files replaced during upgrades (e.g. an old `spider-secure.php`) |
-| `audit.log` | root, 600 | Who changed what from the map, and who started speed tests (JSON lines, ~1 MB + one older file) |
-| `snmp/<id>/snmp.conf` | root, 700 / 600 | SNMP credentials per switch, given to net-snmp via `SNMPCONFPATH` instead of the command line |
+| `audit.log` | spidermap, 600 | Who changed what from the map, settings, scans and speed tests (JSON lines, ~1 MB + one older file) |
+| `snmp/<id>/snmp.conf` | spidermap, 700 / 600 | SNMP credentials per switch, given to net-snmp via `SNMPCONFPATH` instead of the command line |
 
 **Zabbix web folder** (e.g. `/usr/share/zabbix/ui`): `spidermap.php`, `spidermap-assets/` (icons only), and
 redirects from old addresses (`spidermap.html`, `netmap.html`, `spider-secure.php`).
 
-**Elsewhere:** `/etc/systemd/system/spidermap-rt.service`, `/usr/local/bin/ookla-speedtest`, root's crontab.
+**Elsewhere:** `/etc/systemd/system/spidermap.service`, `/usr/local/bin/ookla-speedtest`. No cron jobs since 0.5.0.
 
 ## How the page gets its data
 
@@ -92,13 +130,30 @@ redirects from old addresses (`spidermap.html`, `netmap.html`, `spider-secure.ph
 
 | Request | Who | Returns |
 |---|---|---|
-| `GET spidermap.php` | `view_min_user_type` or higher | The page |
+| `GET spidermap.php` | `permissions.view` or higher | The page |
 | `GET spidermap.php?data=map\|live\|rt\|events\|presence` | same | One JSON file from `/var/lib/spidermap/www` |
-| `GET spidermap.php?data=me` | same | The user's name and what they may do (`can.edit`, `can.speedtest`), to grey out buttons |
-| `POST spidermap.php` | `permissions.edit` / `permissions.speedtest`, same-origin, header `X-SpiderMap: 1` | Device edits (`{mac, name, type, url, pin, important}`) or `{action: "speedtest"}` (written with the user's name) |
+| `GET spidermap.php?data=me` | same | The user's name and what they may do (`can.edit`, `can.speedtest`, `can.settings`), to grey out buttons |
+| `GET spidermap.php?data=status` | same | Jobs, pause, Collector health |
+| `GET spidermap.php?data=settings` | `permissions.settings` | The settings form (schema and values), devices, saved versions |
+| `POST spidermap.php` | `permissions.edit` / `.speedtest` / `.settings`, same-origin, header `X-SpiderMap: 1`, at most 4 MB | Device edits (`{mac, name, type, url, pin, important}`), or `{action}`: `speedtest`, `scan`, `cancel`, `pause`, `resume`, `settings` (`{settings}`), `import` (`{import: {settings, devices}}`), `restore` (`{restore: id}`), with an optional `rid` |
 
-The minimum Zabbix user types are written into `spidermap.php` by `gateway_code()` from `"permissions"` in
-`devices.json` (`permissions()`); the tests build the gateway with the same function.
+The minimum Zabbix user types come from `"permissions"` in `devices.json` (`permissions()`): written into
+`spidermap.php` as defaults by `gateway_code()`, and into `www/access.json` by the service whenever they change, which
+`spidermap.php` reads at every request (so a change applies at once, without root). The lower limits are enforced in
+both places. The tests build the gateway with the same function.
+
+**Changes go through the service.** `spidermap.php` only writes a request file (with the Zabbix user and the page's
+`rid`) into the inbox; the service validates it again (`validate_settings()`, `validate_devices()`), keeps the previous
+`devices.json` in `config-history/`, writes the audit log and puts the result in `spidermap_status.json`
+(`config.result`, matched by `rid`), which the page shows.
+
+## Settings
+
+`SETTINGS_SCHEMA` in `spidermap.py` is the one list of settings that can be changed from the page: key, type,
+default, limits, section, label and help. It drives the validation, the defaults (`effective_settings()`) and the form
+on the page. To add a setting: add a row there, use it with `setting("key")` (or `current_settings()`), and add a test.
+Other keys in `devices.json` (`port_media`, `aliases`, `manual_links`, `core_switch`) are kept as they are; an import
+may set them, with a type check.
 
 The login check reads the Zabbix session cookie and asks the Zabbix API (`user.checkAuthentication`, with
 `extend: false`). The answer is cached for 10 seconds per session in `inbox/sess/`. Edits are written to
@@ -185,7 +240,7 @@ Rules that keep SpiderMap safe:
 |---|---|
 | Zabbix | 7.0+ required (uses `history.push`, map link indicators). Tested on 7.4. The gateway itself also understands older session cookies. |
 | PHP | 7.4+ (tested with 8.2 and 8.3) |
-| OS | Debian / Ubuntu with systemd and cron (incl. Proxmox LXC) |
+| OS | Debian / Ubuntu with systemd (incl. Proxmox LXC) |
 | Web server | Apache tested; nginx should work (no special rules needed) |
 | Switches | Huawei VRP in use; port tables of MikroTik RouterOS, TP-Link Omada and Cisco tested; standard IF-MIB, BRIDGE-MIB / Q-BRIDGE-MIB and LLDP-MIB expected |
 

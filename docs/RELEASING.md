@@ -56,11 +56,11 @@ The version lives in **two** places, keep them equal:
 ```bash
 cd /opt/spidermap && git pull && bash install.sh --update
 python3 spidermap.py --version                                              # new version
-systemctl is-active spidermap-rt                                            # active
+systemctl is-active spidermap                                               # active
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1/zabbix/spidermap.php     # 401
 curl -s http://127.0.0.1/zabbix/spidermap.php?data=map                       # {"ok":false,"error":"login"}
 curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1/zabbix/spidermap.json    # 403 or 404
-tail -n 5 /var/log/spidermap.log                                             # no errors
+tail -n 5 /var/lib/spidermap/spidermap.log                                   # no errors
 ```
 
 In the browser: logged in as Super admin the map loads; in a private window you get the login screen.

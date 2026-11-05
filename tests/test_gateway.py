@@ -51,6 +51,7 @@ def main():
     shutil.copy(os.path.join(ROOT, "tests", "fake_zabbix_api.php"), os.path.join(web, "api_jsonrpc.php"))
     shutil.copy(os.path.join(ROOT, "spidermap.html"), os.path.join(data, "spidermap.html"))
     json.dump({"nodes": [{"id": "inet"}]}, open(os.path.join(data, "spidermap.json"), "w"))
+    json.dump({"schema": [], "values": {}}, open(os.path.join(data, "spidermap_settings.json"), "w"))
     open(os.path.join(inbox, "edits.json"), "w").write("{}")
     env = dict(os.environ, PHP_CLI_SERVER_WORKERS="4", SM_TEST_DIR=tmp)
     srv = subprocess.Popen(["php", "-S", f"127.0.0.1:{port}", "-t", web], env=env,
@@ -62,7 +63,7 @@ def main():
                 break
             except OSError:
                 time.sleep(0.1)
-        ok, total = run(base, inbox), 0
+        ok, total = run(base, inbox, data), 0
         total = ok[1]
         print(f"\n{ok[0]}/{total} passed")
         return 0 if ok[0] == total else 1
@@ -71,7 +72,7 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def run(base, inbox):
+def run(base, inbox, data):
     G, O = base + "/spidermap.php", base + "/open.php"
 
     def cookie(sid, old=False):
@@ -118,6 +119,17 @@ def run(base, inbox):
         ("permissions: Admin may not start a test", req(O, AD, '{"action":"speedtest"}', H), 403),
         ("permissions: guest still refused", req(O, GU), 403),
         ("'me' without login", req(G + "?data=me"), 401),
+        # scans and settings (default: Zabbix Super admins)
+        ("settings: Admin may not start a scan", req(O, AD, '{"action":"scan"}', H), 403),
+        ("settings: Admin may not read settings", req(O + "?data=settings", AD), 403),
+        ("settings: Super admin may read them", req(G + "?data=settings", SA), 200),
+        ("settings: status for every viewer", req(O + "?data=status", US), 404),
+        ("settings: Super admin starts a scan", req(G, SA, '{"action":"scan"}', H), 200),
+        ("settings: change, with a request id", req(G, SA, '{"action":"settings","settings":{"scan_interval_min":10},"rid":"abc123def"}', H), 200),
+        ("settings: not an object", req(G, SA, '{"action":"settings","settings":"x"}', H), 400),
+        ("settings: restore a path", req(G, SA, '{"action":"restore","restore":"../../etc/passwd"}', H), 400),
+        ("settings: request too large", req(G, SA, '{"action":"import","import":{"x":"' + "a" * 4300000 + '"}}', H), 413),
+        ("settings: without the header (CSRF)", req(G, SA, '{"action":"scan"}', {"Content-Type": "text/plain"}), 403),
     ]
     passed = 0
     for name, (code, _), want in cases:
@@ -139,7 +151,7 @@ def run(base, inbox):
         with urllib.request.urlopen(r, timeout=10) as resp:
             return json.loads(resp.read())
     me = getj(O + "?data=me", AD)
-    good = me.get("name") == "netadmin" and me["can"] == {"edit": True, "speedtest": False} and me["need"]["speedtest"] == 3
+    good = me.get("name") == "netadmin" and me["can"] == {"edit": True, "speedtest": False, "settings": False} and me["need"]["speedtest"] == 3
     passed += good
     extra += 1
     print(f"{'OK ' if good else 'BAD'} {"'me' tells the page what Admin may do":38} {me.get('can')}")
@@ -151,6 +163,29 @@ def run(base, inbox):
     passed += good
     extra += 1
     print(f"{'OK ' if good else 'BAD'} {'speed test request says who asked':38} {got}")
+    import stat
+    def chk(name, good, detail=""):
+        print(f"{'OK ' if good else 'BAD'} {name:38} {detail if not good else ''}")
+        return int(bool(good))
+    sreq = os.path.join(inbox, "scan.request")
+    got = json.load(open(sreq)) if os.path.exists(sreq) else {}
+    passed += chk("scan request: who asked, readable by the service group",
+                  got.get("by") == "Admin" and oct(stat.S_IMODE(os.stat(sreq).st_mode)) == "0o660", (got, os.path.exists(sreq)))
+    st = json.load(open(os.path.join(inbox, "settings.request")))
+    passed += chk("settings request: values, user and request id",
+                  st.get("settings") == {"scan_interval_min": 10} and st.get("by") == "Admin" and st.get("rid") == "abc123def", st)
+    # a permission change from the Settings panel applies at once (access.json), without reinstalling spidermap.php
+    json.dump({"view": 1, "edit": 2, "speedtest": 2, "settings": 3}, open(os.path.join(data, "access.json"), "w"))
+    code, _ = req(G, US)
+    passed += chk("access.json: normal user may now look", code == 200, code)
+    json.dump({"view": 0, "edit": 1, "speedtest": 0, "settings": 1}, open(os.path.join(data, "access.json"), "w"))
+    code_edit, _ = req(G, US, edit, H)
+    code_set, _ = req(G, AD, '{"action":"scan"}', H)
+    passed += chk("access.json: limits enforced (edit, settings >= admin)", code_edit == 403 and code_set == 200, (code_edit, code_set))
+    os.remove(os.path.join(data, "access.json"))
+    code, _ = req(G, US)
+    passed += chk("access.json removed: defaults again", code == 403, code)
+    extra += 5
     return passed, len(cases) + extra
 
 

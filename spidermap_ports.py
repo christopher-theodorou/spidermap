@@ -71,14 +71,20 @@ def norm(p):
 # Who is on the LAN: ping sweep + ARP + reverse DNS
 # --------------------------------------------------------------------------- #
 def sweep(nets):
-    ips = [str(ip) for n in nets for ip in ipaddress.ip_network(n, strict=False).hosts()]
+    sweep_ips([str(ip) for n in nets for ip in ipaddress.ip_network(n, strict=False).hosts()])
+
+
+def sweep_ips(ips, timeout_ms=1000, parallel=64, size=56):
+    """Ping every address once, so that live devices show up in the ARP and MAC tables."""
+    wait = f"{max(timeout_ms, 200) / 1000:g}"
+
     def ping(ip):
         try:
-            subprocess.run(["ping", "-c", "1", "-W", "1", ip],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+            subprocess.run(["ping", "-n", "-c", "1", "-W", wait, "-s", str(int(size)), ip],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout_ms / 1000 + 3)
         except Exception:  # noqa: BLE001
             pass
-    with cf.ThreadPoolExecutor(64) as ex:
+    with cf.ThreadPoolExecutor(max(1, min(int(parallel), 256))) as ex:
         list(ex.map(ping, ips))
 
 

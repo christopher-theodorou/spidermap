@@ -65,8 +65,10 @@ cd /opt/spidermap
 bash install.sh
 ```
 
-The installer sets up the packages it needs, asks for your Zabbix API address and token, runs the first scan,
-starts the real-time service (`spidermap-rt`) and schedules the scans. Upgrading from the earlier
+The installer sets up the packages it needs, asks for your Zabbix API address and token, creates the system user
+`spidermap` and starts the **`spidermap` service**, which runs the scans (no cron jobs) and the first scan right away.
+Configuration goes to `/etc/spidermap`, data to `/var/lib/spidermap`; `zabbix.env` and `devices.json` in
+`/opt/spidermap` are links there. Upgrading from the earlier
 *zabbix-netmap* version? The installer finds it and moves your devices, settings and history over.
 
 **One manual step in Zabbix**, for the dashboard widget:
@@ -79,10 +81,21 @@ allow-scripts allow-same-origin allow-popups allow-downloads
 Then open **Dashboards → SpiderMap**, or the page directly at `http://<zabbix>/zabbix/spidermap.php`
 (Zabbix Super admins by default, see [Security](#security)).
 
-## Your settings: `devices.json`
+## Settings
+
+Zabbix Super admins (by default) find a **Settings** button on the map: scan interval and networks, addresses never
+to scan, a safety limit, ping parameters, how often traffic and status are measured, the daily speed test, how long
+history is kept, and who may do what. **Scan now**, **Cancel** and **Pause discovery** are there too. Every change is
+checked on the server, recorded in the audit log, and the previous version is kept: **Restore** brings it back.
+**Export** and **Import** move your settings and devices to another installation.
+
+**Collector health** (the heart icon, for everyone who may open the map) shows the service, the last scans, the
+Zabbix API, every switch (answering or not, and its error), the age of the data and the free disk space.
+
+## Your devices: `devices.json`
 
 Created on first install and **never committed to git**. `devices.example.json` shows every option.
-Most of it can also be changed from the map with the **Edit** button (Zabbix admins only).
+Devices can also be changed from the map with the **Edit** button, and most settings from the **Settings** panel.
 
 | Device option | What it does |
 |---|---|
@@ -160,7 +173,9 @@ through the public Zabbix API before it shows anything, so it keeps working acro
 - **Session checks** are reused for at most 10 seconds and never extend an expired Zabbix session.
 - **Browser hardening**: no caching, no framing by other sites (`X-Frame-Options`, `frame-ancestors`), and a
   Content-Security-Policy that only allows SpiderMap's own resources.
-- Your Zabbix API token stays in `zabbix.env` (root only) and never reaches the browser.
+- Your Zabbix API token stays in `/etc/spidermap/zabbix.env` (root and the service, 640) and never reaches the browser.
+- **SpiderMap runs as its own user** `spidermap`, not root, with only the permission `ping` needs and read-only
+  access to the rest of the system (the installer checks that this works, otherwise it stays on root and tells you).
 
 ### A dedicated Zabbix account for SpiderMap
 
@@ -199,18 +214,19 @@ authentication for Zabbix users (*Users → Authentication → MFA settings*, Za
 ## Troubleshooting
 
 ```bash
-systemctl status spidermap-rt                      # real-time service
-journalctl -u spidermap-rt -n 30                   # its log
-tail -n 30 /var/log/spidermap.log                  # scans
-cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py   # run a scan by hand
-cd /opt/spidermap && . ./zabbix.env && python3 spidermap.py --check-ports   # how every switch port is seen
+systemctl status spidermap                         # the service (scans, live traffic, speed tests)
+journalctl -u spidermap -n 30                      # its log
+tail -n 30 /var/lib/spidermap/spidermap.log        # output of the scans
+cd /opt/spidermap && python3 spidermap.py          # run a scan by hand (as the spidermap user)
+cd /opt/spidermap && python3 spidermap.py --check-ports   # how every switch port is seen
+tail -n 5 /var/lib/spidermap/audit.log             # recent changes from the map
 ```
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `spidermap.py` | Scans, live refresh, real-time service, Zabbix integration |
+| `spidermap.py` | The service and its scheduler, scans, live refresh, settings, Zabbix integration |
 | `spidermap.html` | The map page (installed in the protected folder, served by `spidermap.php`) |
 | `spidermap_ports.py` | Switch port scanner (also usable alone: port report and HTML table) |
 | `spidermap_zabbix.py` | Zabbix API and SNMP helpers, plus the classic Zabbix map and dashboard |

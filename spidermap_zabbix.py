@@ -33,6 +33,51 @@ import requests
 # --------------------------------------------------------------------------- #
 # Settings
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# Where things live. Since 0.5.0 the installer moves configuration to /etc/spidermap and runtime data to
+# /var/lib/spidermap/state (owned by the "spidermap" user); until then everything stays next to the code.
+# SPIDERMAP_CONF / SPIDERMAP_STATE override both (tests, development).
+# --------------------------------------------------------------------------- #
+CODE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _pick(env, new, markers):
+    if os.environ.get(env):
+        return os.environ[env]
+    return new if any(os.path.exists(os.path.join(new, m)) for m in markers) else CODE_DIR
+
+
+CONF_DIR = _pick("SPIDERMAP_CONF", "/etc/spidermap", ("zabbix.env", "devices.json"))
+STATE_DIR = _pick("SPIDERMAP_STATE", "/var/lib/spidermap/state", (".",))
+
+
+def _load_env_file(path):
+    """Read export KEY="value" lines (zabbix.env) into os.environ, without overriding what is already set.
+    So 'python3 spidermap.py ...' works without '. ./zabbix.env' first."""
+    import shlex
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        k, sep, v = line.partition("=")
+        if not sep or not re.fullmatch(r"[A-Z_][A-Z0-9_]*", k.strip()):
+            continue
+        try:
+            parts = shlex.split(v, comments=True)
+        except ValueError:
+            continue
+        os.environ.setdefault(k.strip(), parts[0] if parts else "")
+
+
+_load_env_file(os.path.join(CONF_DIR, "zabbix.env"))
+
 ZABBIX_URL = os.environ.get("ZABBIX_URL", "http://127.0.0.1/zabbix/api_jsonrpc.php")
 ZABBIX_TOKEN = os.environ.get("ZABBIX_TOKEN", "")
 VERIFY_TLS = os.environ.get("ZABBIX_VERIFY_TLS", "1") != "0"
@@ -43,7 +88,7 @@ VERIFY_TLS = os.environ.get("ZABBIX_VERIFY_TLS", "1") != "0"
 #   "core_switch":  "SW-Core"                                  switch drawn at the top of the Zabbix map
 def _local_settings():
     try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "devices.json"), encoding="utf-8") as f:
+        with open(os.path.join(CONF_DIR, "devices.json"), encoding="utf-8") as f:
             return json.load(f).get("settings", {})
     except Exception:  # noqa: BLE001
         return {}

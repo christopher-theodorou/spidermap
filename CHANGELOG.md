@@ -4,7 +4,58 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.5.0] - 2026-11-05
+
+**Settings on the map, a scheduler instead of cron, and SpiderMap no longer runs as root** (review phases 2 and 3;
+this includes what was planned as 0.4.1).
+
+### Added
+- **Settings panel** (Zabbix Super admins by default, `permissions.settings`): scan interval, networks to scan,
+  addresses never to scan, a safety limit on the number of addresses, ping timeout / parallel pings / size, how often
+  traffic and status are measured, the daily speed test, how long history is kept, and who may do what. Everything is
+  checked on the server; nothing is written when a value is wrong. Permission changes apply at once.
+- **Scan now, Cancel, Pause discovery.** A second click does not start a second scan; a paused discovery keeps the
+  last map (traffic and status keep updating).
+- **Restore, Export, Import:** the last 10 versions of the settings and devices are kept, one click brings one back;
+  export to a file and import it elsewhere, with a preview before anything changes.
+- **Collector health:** the service, the last scans and their errors, the Zabbix API, every switch (answering or not),
+  the age of the data, free disk space, the speed test program. The header shows "Scanning… 34 s", "Discovery paused",
+  or a failed last scan.
+- Every settings change, scan start and cancel is in the audit log and the activity feed.
+
+### Changed
+- **One service, `spidermap`, runs everything** - no more cron jobs and no `spidermap-rt`. Its scheduler starts the
+  scan and the status refresh as separate processes, with time limits (15 and 3 min), and remembers them across
+  restarts (nothing runs twice after a restart).
+- **SpiderMap runs as the system user `spidermap`**, with only the capability ping needs (`CAP_NET_RAW`), read-only
+  access to the rest of the system, and `NoNewPrivileges`. The installer checks that ping works for that user first;
+  otherwise it stays on root and says why. Root running a SpiderMap command switches to that user automatically.
+- **Files have their own places:** configuration in `/etc/spidermap` (links remain in `/opt/spidermap`), history in
+  `/var/lib/spidermap/state`, the scan log in `/var/lib/spidermap/spidermap.log`. `zabbix.env` is read automatically
+  (`. ./zabbix.env` is no longer needed).
+- **A switch that does not answer keeps its last good data for 30 minutes**, so its devices do not look offline; the
+  map is marked *partial* and Collector health names the switch and its error.
+- The page asks for nothing while its browser tab is hidden, and explains what is wrong instead of "Loading…".
+
+### Fixed
+- **A scan stopped with an error** when a device moved from a place behind another device (for example a Proxmox
+  guest, or every device behind a switch that stopped answering). Present since 0.1.0.
+- The installer could, in rare cases, empty root's crontab while removing its own lines; it now reads first, then
+  writes, and keeps every other job.
+- A damaged activity history no longer stops SpiderMap; it starts a new one.
+
+### Upgrade notes
+- `bash install.sh --update` does everything: creates the user, moves your files (nothing is deleted; old files that
+  were already in the new place are kept as `*.old-<time>`), removes SpiderMap's cron lines and the `spidermap-rt`
+  service, and starts `spidermap`. Check with `systemctl status spidermap` and the new **Collector health** panel.
+- Commands change: `systemctl status spidermap`, `journalctl -u spidermap`; the scan log is
+  `/var/lib/spidermap/spidermap.log`.
+- To keep SpiderMap on root: `SPIDERMAP_RUN_AS=root bash install.sh --update`.
+
 ## [0.4.0] - 2026-11-05
+
+**Hardening**, from the review by Nikolaos Karanikolas (phase 2). Nothing changes for you unless you set the new
+options; defaults behave as before.
 
 ### Added
 - **Separate permissions** for viewing, editing devices and starting speed tests: `"permissions": {"view": 3,
@@ -169,6 +220,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.5.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.0
 [0.4.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.0
