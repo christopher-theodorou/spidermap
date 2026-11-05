@@ -78,6 +78,8 @@ Only one full scan and one live refresh run at a time: cron skips a turn if the 
 | `inbox/` | www-data 700 | The only place the web server can write: `edits.json`, `speedtest.request`, `sess/` (login check cache) |
 | `speedtest.json` | root | Speed test history |
 | `backup/` | root | Files replaced during upgrades (e.g. an old `spider-secure.php`) |
+| `audit.log` | root, 600 | Who changed what from the map, and who started speed tests (JSON lines, ~1 MB + one older file) |
+| `snmp/<id>/snmp.conf` | root, 700 / 600 | SNMP credentials per switch, given to net-snmp via `SNMPCONFPATH` instead of the command line |
 
 **Zabbix web folder** (e.g. `/usr/share/zabbix/ui`): `spidermap.php`, `spidermap-assets/` (icons only), and
 redirects from old addresses (`spidermap.html`, `netmap.html`, `spider-secure.php`).
@@ -92,7 +94,11 @@ redirects from old addresses (`spidermap.html`, `netmap.html`, `spider-secure.ph
 |---|---|---|
 | `GET spidermap.php` | `view_min_user_type` or higher | The page |
 | `GET spidermap.php?data=map\|live\|rt\|events\|presence` | same | One JSON file from `/var/lib/spidermap/www` |
-| `POST spidermap.php` | Zabbix admins, same-origin, header `X-SpiderMap: 1` | Device edits (`{mac, name, type, url, pin, important}`) or `{action: "speedtest"}` |
+| `GET spidermap.php?data=me` | same | The user's name and what they may do (`can.edit`, `can.speedtest`), to grey out buttons |
+| `POST spidermap.php` | `permissions.edit` / `permissions.speedtest`, same-origin, header `X-SpiderMap: 1` | Device edits (`{mac, name, type, url, pin, important}`) or `{action: "speedtest"}` (written with the user's name) |
+
+The minimum Zabbix user types are written into `spidermap.php` by `gateway_code()` from `"permissions"` in
+`devices.json` (`permissions()`); the tests build the gateway with the same function.
 
 The login check reads the Zabbix session cookie and asks the Zabbix API (`user.checkAuthentication`, with
 `extend: false`). The answer is cached for 10 seconds per session in `inbox/sess/`. Edits are written to
@@ -171,6 +177,7 @@ Rules that keep SpiderMap safe:
 - Everything the page shows is escaped (`esc()` in `spidermap.html`). Never build HTML from data without it.
 - Every new POST action: admins only, validated input, covered by a test.
 - Read-only towards the network: no SNMP writes, no configuration changes on devices.
+- Never put a secret on a command line: SNMP credentials go through `snmp_auth()` (private snmp.conf).
 
 ## Compatibility
 

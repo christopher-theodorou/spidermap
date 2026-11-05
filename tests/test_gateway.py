@@ -42,9 +42,12 @@ def main():
         os.makedirs(d)
     port = free_port()
     base = f"http://127.0.0.1:{port}"
-    code = (sm.GATEWAY_PHP.replace("__VIEW_MIN_TYPE__", "3").replace("__API_URL__", base + "/api_jsonrpc.php")
-            .replace("'/var/lib/spidermap/www'", repr(data)).replace("'/var/lib/spidermap/inbox'", repr(inbox)))
-    open(os.path.join(web, "spidermap.php"), "w").write(code)
+    def gateway(settings):          # exactly what the installer writes, pointed at the test folders
+        return (sm.gateway_code(settings, base + "/api_jsonrpc.php")
+                .replace("'/var/lib/spidermap/www'", repr(data)).replace("'/var/lib/spidermap/inbox'", repr(inbox)))
+    open(os.path.join(web, "spidermap.php"), "w").write(gateway({}))
+    # a second gateway with other permissions: everybody may look, admins edit, Super admins start speed tests
+    open(os.path.join(web, "open.php"), "w").write(gateway({"permissions": {"view": 1, "edit": 2, "speedtest": 3}}))
     shutil.copy(os.path.join(ROOT, "tests", "fake_zabbix_api.php"), os.path.join(web, "api_jsonrpc.php"))
     shutil.copy(os.path.join(ROOT, "spidermap.html"), os.path.join(data, "spidermap.html"))
     json.dump({"nodes": [{"id": "inet"}]}, open(os.path.join(data, "spidermap.json"), "w"))
@@ -59,7 +62,7 @@ def main():
                 break
             except OSError:
                 time.sleep(0.1)
-        ok, total = run(base), 0
+        ok, total = run(base, inbox), 0
         total = ok[1]
         print(f"\n{ok[0]}/{total} passed")
         return 0 if ok[0] == total else 1
@@ -68,8 +71,8 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def run(base):
-    G = base + "/spidermap.php"
+def run(base, inbox):
+    G, O = base + "/spidermap.php", base + "/open.php"
 
     def cookie(sid, old=False):
         return ("zbx_sessionid=" + sid) if old else \
@@ -108,6 +111,13 @@ def run(base):
         ("PUT request", req(G, SA, edit, H, method="PUT"), 405),
         ("correct edit", req(G, SA, edit, dict(H, Origin=base)), 200),
         ("speed test request", req(G, SA, '{"action":"speedtest"}', H), 200),
+        # other permissions (open.php: view 1, edit 2, speed test 3)
+        ("permissions: normal user may look", req(O, US), 200),
+        ("permissions: normal user may not edit", req(O, US, edit, H), 403),
+        ("permissions: Admin may edit", req(O, AD, edit, H), 200),
+        ("permissions: Admin may not start a test", req(O, AD, '{"action":"speedtest"}', H), 403),
+        ("permissions: guest still refused", req(O, GU), 403),
+        ("'me' without login", req(G + "?data=me"), 401),
     ]
     passed = 0
     for name, (code, _), want in cases:
@@ -122,7 +132,26 @@ def run(base):
     good = "frame-ancestors 'self'" in (h.get("Content-Security-Policy") or "")
     passed += good
     print(f"{'OK ' if good else 'BAD'} {'Content-Security-Policy':38} {'present' if good else 'missing'}")
-    return passed, len(cases) + 3
+    extra = 3
+
+    def getj(url, sid):
+        r = urllib.request.Request(url, headers={"Cookie": cookie(sid)})
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            return json.loads(resp.read())
+    me = getj(O + "?data=me", AD)
+    good = me.get("name") == "netadmin" and me["can"] == {"edit": True, "speedtest": False} and me["need"]["speedtest"] == 3
+    passed += good
+    extra += 1
+    print(f"{'OK ' if good else 'BAD'} {"'me' tells the page what Admin may do":38} {me.get('can')}")
+    try:
+        got = json.load(open(os.path.join(inbox, "speedtest.request")))
+    except (OSError, ValueError):
+        got = {}
+    good = got.get("by") == "Admin"
+    passed += good
+    extra += 1
+    print(f"{'OK ' if good else 'BAD'} {'speed test request says who asked':38} {got}")
+    return passed, len(cases) + extra
 
 
 if __name__ == "__main__":

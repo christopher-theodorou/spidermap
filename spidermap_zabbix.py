@@ -19,12 +19,14 @@ Run it ON the Zabbix server (it needs to reach the switches over SNMP):
     python3 spidermap_zabbix.py               # build map + dashboard
 """
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 import requests
 
@@ -134,6 +136,51 @@ def resolve(value, macros):
     return value
 
 
+SNMP_CONF_DIR = os.environ.get("SPIDERMAP_SNMP_DIR", "/var/lib/spidermap/snmp")
+
+
+class SnmpAuth(list):
+    """Options for net-snmp commands. The credentials are NOT among them: they are in a private snmp.conf
+    (env SNMPCONFPATH), so they never appear on the command line, where any local user could read them (ps)."""
+    env = None
+
+    def __add__(self, other):
+        r = SnmpAuth(list(self) + list(other))
+        r.env = self.env
+        return r
+
+
+def _conf_word(v):
+    """A value for snmp.conf, quoted when needed (spaces, quotes, #, backslashes)."""
+    v = str(v if v is not None else "")
+    if v and not re.search(r'[\s"#\\]', v):
+        return v
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _private_snmp_env(target, lines):
+    """Write the credentials for one target to <SNMP_CONF_DIR>/<id>/snmp.conf (folders 700, file 600)."""
+    content = "mibs :\n" + "".join(f"{k} {_conf_word(v)}\n" for k, v in lines)
+    key = hashlib.sha256(target.encode()).hexdigest()[:16]
+    for base in (SNMP_CONF_DIR, os.path.join(tempfile.gettempdir(), f"spidermap-snmp-{os.getuid()}")):
+        d = os.path.join(base, key)
+        try:
+            os.makedirs(d, mode=0o700, exist_ok=True)
+            os.chmod(base, 0o700)
+            os.chmod(d, 0o700)
+            f = os.path.join(d, "snmp.conf")
+            old = open(f, encoding="utf-8").read() if os.path.exists(f) else None
+            if old != content:
+                fd = os.open(f + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(content)
+                os.replace(f + ".tmp", f)
+            return {**os.environ, "SNMPCONFPATH": d, "SNMP_PERSISTENT_DIR": d}
+        except PermissionError:
+            continue
+    raise RuntimeError("cannot write the private SNMP settings (check /var/lib/spidermap/snmp)")
+
+
 def snmp_auth(iface, macros, community_override=None):
     d = iface.get("details") or {}
     ver = str(d.get("version", "2"))
@@ -141,18 +188,22 @@ def snmp_auth(iface, macros, community_override=None):
     target = f"udp:{host}:{iface.get('port') or 161}"
     if ver == "3":
         lvl = str(d.get("securitylevel", "0"))
-        args = ["-v", "3", "-l", SEC_LEVEL[lvl], "-u", resolve(d.get("securityname"), macros)]
+        lines = [("defVersion", "3"), ("defSecurityName", resolve(d.get("securityname"), macros)),
+                 ("defSecurityLevel", SEC_LEVEL[lvl])]
         if d.get("contextname"):
-            args += ["-n", resolve(d["contextname"], macros)]
+            lines.append(("defContext", resolve(d["contextname"], macros)))
         if lvl in ("1", "2"):
-            args += ["-a", AUTH_PROTO.get(str(d.get("authprotocol", "0")), "MD5"),
-                     "-A", resolve(d.get("authpassphrase"), macros)]
+            lines += [("defAuthType", AUTH_PROTO.get(str(d.get("authprotocol", "0")), "MD5")),
+                      ("defAuthPassphrase", resolve(d.get("authpassphrase"), macros))]
         if lvl == "2":
-            args += ["-x", PRIV_PROTO.get(str(d.get("privprotocol", "0")), "DES"),
-                     "-X", resolve(d.get("privpassphrase"), macros)]
-        return args, target
-    community = community_override or resolve(d.get("community", "{$SNMP_COMMUNITY}"), macros)
-    return ["-v", "1" if ver == "1" else "2c", "-c", community], target
+            lines += [("defPrivType", PRIV_PROTO.get(str(d.get("privprotocol", "0")), "DES")),
+                      ("defPrivPassphrase", resolve(d.get("privpassphrase"), macros))]
+    else:
+        community = community_override or resolve(d.get("community", "{$SNMP_COMMUNITY}"), macros)
+        lines = [("defVersion", "1" if ver == "1" else "2c"), ("defCommunity", community)]
+    auth = SnmpAuth()
+    auth.env = _private_snmp_env(target, lines)
+    return auth, target
 
 
 def _clean(v):
@@ -168,7 +219,7 @@ def _clean(v):
 def snmpwalk(auth, target, base):
     cmd = ["snmpwalk", "-t", "3", "-r", "1", "-On", "-Oq", *auth, target, base]
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=90, env=getattr(auth, "env", None))
     except subprocess.TimeoutExpired:
         raise RuntimeError(f"snmpwalk timeout on {target}")
     if out.returncode != 0 and not out.stdout:

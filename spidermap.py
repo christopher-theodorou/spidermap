@@ -28,7 +28,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.3.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.4.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEVICES_FILE = os.path.join(HERE, "devices.json")
@@ -42,6 +42,10 @@ OLD_DASHBOARDS = ["Network topology (live)"]   # earlier versions (zabbix-netmap
 PVE_URL = os.environ.get("PVE_URL", "")                 # e.g. https://192.168.1.10:8006
 PVE_TOKEN_ID = os.environ.get("PVE_TOKEN_ID", "")       # e.g. spidermap@pve!spidermap
 PVE_TOKEN_SECRET = os.environ.get("PVE_TOKEN_SECRET", "")
+# How to trust the Proxmox certificate (strongest first). Without any of these the connection is not verified.
+PVE_FINGERPRINT = os.environ.get("PVE_FINGERPRINT", "")   # SHA-256 of its certificate (works with self-signed)
+PVE_CA = os.environ.get("PVE_CA", "")                     # path to the CA certificate (pve-root-ca.pem)
+PVE_VERIFY = os.environ.get("PVE_VERIFY", "") == "1"      # certificate trusted by the system (e.g. Let's Encrypt)
 
 TABLER = "https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/"
 LOGO_URL = "https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/{}.svg"
@@ -173,6 +177,19 @@ LOCK_FILE = os.path.join(HERE, ".spidermap.lock")
 def ev(kind, sev, text, node=None, t=None):
     """One activity-feed entry. sev: info | ok | warn | bad"""
     return {"t": t or now(), "type": kind, "sev": sev, "text": text, "node": node}
+
+
+def audit(action, by, detail):
+    """Append to the audit log (root only, 600). Kept to about 1 MB, plus one older file."""
+    try:
+        os.makedirs(EDITS_DIR, exist_ok=True)
+        if os.path.exists(AUDIT_FILE) and os.path.getsize(AUDIT_FILE) > 1_000_000:
+            os.replace(AUDIT_FILE, AUDIT_FILE + ".1")
+        fd = os.open(AUDIT_FILE, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            f.write(json.dumps({"t": now(), "by": by or "?", "action": action, **detail}, ensure_ascii=False) + "\n")
+    except OSError as e:
+        print(f"audit log: {e}", flush=True)
 
 
 def add_events(evs):
@@ -361,12 +378,52 @@ def ping_many(ips):
         return dict(ex.map(one, ips))
 
 
+class _PinnedAdapter(requests.adapters.HTTPAdapter):
+    """HTTPS that accepts exactly one certificate, identified by its SHA-256 fingerprint."""
+    def __init__(self, fingerprint, **kw):
+        self.fingerprint = fingerprint
+        super().__init__(**kw)
+
+    def init_poolmanager(self, *a, **kw):
+        kw["assert_fingerprint"] = self.fingerprint
+        super().init_poolmanager(*a, **kw)
+
+
+class _PveSession(requests.Session):
+    """Passes the certificate setting with every request: a session-wide verify can otherwise be overridden by
+    REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE in the environment."""
+    def request(self, method, url, **kw):
+        kw.setdefault("verify", self.verify)
+        return super().request(method, url, **kw)
+
+
+def pve_session():
+    """requests session for the Proxmox API with the configured certificate check."""
+    s = _PveSession()
+    fp = re.sub(r"[^0-9a-fA-F]", "", PVE_FINGERPRINT).lower()
+    if fp:
+        if len(fp) != 64:
+            raise RuntimeError("PVE_FINGERPRINT must be a SHA-256 fingerprint (64 hex digits)")
+        requests.packages.urllib3.disable_warnings()
+        s.verify = False                      # the chain is not checked; the exact certificate is
+        s.mount("https://", _PinnedAdapter(fp))
+    elif PVE_CA:
+        s.verify = PVE_CA
+    elif PVE_VERIFY:
+        s.verify = True
+    else:
+        requests.packages.urllib3.disable_warnings()
+        s.verify = False
+        s.unverified = True
+    return s
+
+
 def pve_guests():
     if not (PVE_URL and PVE_TOKEN_ID and PVE_TOKEN_SECRET):
         return []
-    requests.packages.urllib3.disable_warnings()
-    s = requests.Session()
-    s.verify = False
+    s = pve_session()
+    if getattr(s, "unverified", False):
+        print("Proxmox: certificate not verified - set PVE_FINGERPRINT in zabbix.env (see README)", flush=True)
     s.headers["Authorization"] = f"PVEAPIToken={PVE_TOKEN_ID}={PVE_TOKEN_SECRET}"
     base = PVE_URL.rstrip("/") + "/api2/json"
     out = []
@@ -878,6 +935,7 @@ def full_scan(api, community=None, quiet=False):
 # Live refresh (every minute): port status + traffic from Zabbix, ping important devices
 # --------------------------------------------------------------------------- #
 EDITS_DIR = "/var/lib/spidermap"                         # root only
+AUDIT_FILE = os.path.join(EDITS_DIR, "audit.log")     # who changed what from the map, one JSON line each
 INBOX = os.path.join(EDITS_DIR, "inbox")                  # the only place the web server may write
 EDITS_FILE = os.path.join(INBOX, "edits.json")
 HIST_FILE = os.path.join(HERE, "spidermap_hist.json")
@@ -916,11 +974,16 @@ def apply_edits():
     return merged
 
 
+AUDIT_FIELDS = ("name", "type", "url", "pin", "important")
+
+
 def _merge_edits(edits):
     cfg = load_json(DEVICES_FILE, DEFAULT_DEVICES)
     devs = cfg.setdefault("devices", {})
+    evs = []
     for mac, e in edits.items():
         d = devs.setdefault(mac.lower(), {})
+        before = {k: d.get(k) for k in AUDIT_FIELDS}
         for k, v in e.items():
             if k in ("by", "at"):
                 continue
@@ -930,7 +993,17 @@ def _merge_edits(edits):
                 d[k] = v
         if d.get("important") is False:
             d.pop("important")
+        changes = {k: [before[k], d.get(k)] for k in AUDIT_FIELDS if (before[k] or None) != (d.get(k) or None)}
+        if changes:
+            by = e.get("by") or "?"
+            audit("edit", by, {"mac": mac.lower(), "changes": changes})
+            what = ", ".join(f"{k} “{old or '-'}” → “{new or '-'}”" if k != "important" else
+                             ("marked important" if new else "no longer important") for k, (old, new) in changes.items())
+            evs.append(ev("audit", "info", f"{by} changed {d.get('name') or before['name'] or mac}: {what}",
+                          "d-" + mac.lower().replace(":", "")))
     save_json(DEVICES_FILE, cfg)
+    if evs:
+        add_events(evs)
     return {m.lower(): devs[m.lower()] for m in edits}
 
 
@@ -1251,7 +1324,7 @@ def snmp_get(auth, target, oids):
     out = {}
     for i in range(0, len(oids), 30):                      # keep each request small
         r = subprocess.run(["snmpget", "-t", "2", "-r", "0", "-On", "-Oq", "-Oe", "-Ot", *auth, target, *oids[i:i + 30]],
-                           capture_output=True, text=True, timeout=10)
+                           capture_output=True, text=True, timeout=10, env=getattr(auth, "env", None))
         for line in r.stdout.splitlines():
             oid, _, val = line.partition(" ")
             val = val.strip().strip('"')
@@ -1587,10 +1660,20 @@ def rt_loop(api):
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         due = speedtest_due(daily, datetime.datetime.now(), daily_done)
         if (os.path.exists(SPEED_REQ) or due) and not speed["running"]:
+            req = {}
             try:
-                os.remove(SPEED_REQ)
+                with open(SPEED_REQ, encoding="utf-8") as f:
+                    req = json.loads(f.read() or "{}")
+            except (OSError, ValueError):
+                pass
+            try:
+                os.remove(SPEED_REQ)          # always, also when it could not be read: otherwise it would repeat
             except FileNotFoundError:
                 pass
+            by = req.get("by") if isinstance(req, dict) else None
+            if by:
+                audit("speedtest", by, {})
+                evs.append(ev("audit", "info", f"Speed test started by {by}", "inet"))
             if due:
                 daily_done = today
                 save_json(SCHED_FILE, {"speedtest_daily_last": today})
@@ -1724,7 +1807,10 @@ GATEWAY_PHP = r"""<?php
  */
 const DATA_DIR = '/var/lib/spidermap/www';
 const STATE_DIR = '/var/lib/spidermap/inbox';      // the only folder the web server may write to
-const VIEW_MIN_TYPE = __VIEW_MIN_TYPE__;            // 1 = Zabbix user, 2 = admin, 3 = super admin (devices.json: view_min_user_type)
+const VIEW_MIN_TYPE = __VIEW_MIN_TYPE__;            // 1 = Zabbix user, 2 = admin, 3 = super admin
+const EDIT_MIN_TYPE = __EDIT_MIN_TYPE__;            // who may rename devices, set types, pins, web addresses (2 or 3)
+const SPEED_MIN_TYPE = __SPEED_MIN_TYPE__;          // who may start a speed test (1, 2 or 3)
+// set in devices.json: "permissions": {"view": 3, "edit": 2, "speedtest": 2}
 const ZBX_API = '__API_URL__';                      // checked by the installer from this server
 const CACHE_TTL = 10;                               // seconds a session check is reused
 const FILES = ['map' => 'spidermap.json', 'live' => 'spidermap_live.json', 'rt' => 'spidermap_rt.json',
@@ -1841,6 +1927,12 @@ if ($IS_PAGE) {
 // ---- the data
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
   header('Content-Type: application/json');
+  if ((string)$_GET['data'] === 'me') {                // what this user may do, so the page can grey out buttons
+    echo json_encode(['name' => $user['name'], 'type' => $user['type'],
+                      'can' => ['edit' => $user['type'] >= EDIT_MIN_TYPE, 'speedtest' => $user['type'] >= SPEED_MIN_TYPE],
+                      'need' => ['edit' => EDIT_MIN_TYPE, 'speedtest' => SPEED_MIN_TYPE]]);
+    exit;
+  }
   $f = FILES[(string)$_GET['data']] ?? null;
   if (!$f) deny(400, 'Unknown data set');
   $path = DATA_DIR . '/' . $f;
@@ -1856,14 +1948,19 @@ if (($_SERVER['HTTP_X_SPIDERMAP'] ?? '') !== '1') deny(403, 'Missing request hea
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 if ($origin !== '' && parse_url($origin, PHP_URL_HOST) !== parse_url('//' . ($_SERVER['HTTP_HOST'] ?? ''), PHP_URL_HOST))
   deny(403, 'Cross-site request refused');
-if ($user['type'] < 2) deny(403, 'Only Zabbix admins can make changes.');
 $in = json_decode((string)file_get_contents('php://input'), true);
 if (!is_array($in)) deny(400, 'Bad request');
+$ROLE = [1 => 'Zabbix users', 2 => 'Zabbix admins', 3 => 'Zabbix Super admins'];
 
 if (($in['action'] ?? '') === 'speedtest') {
-  if (!@touch(STATE_DIR . '/speedtest.request')) deny(500, 'Cannot write ' . STATE_DIR);
+  if ($user['type'] < SPEED_MIN_TYPE) deny(403, 'Only ' . $ROLE[SPEED_MIN_TYPE] . ' can start a speed test.');
+  // who asked is recorded in the activity feed and the audit log
+  if (@file_put_contents(STATE_DIR . '/speedtest.request', json_encode(['by' => $user['name'], 'at' => time()]), LOCK_EX) === false)
+    deny(500, 'Cannot write ' . STATE_DIR);
   echo json_encode(['ok' => true]); exit;
 }
+
+if ($user['type'] < EDIT_MIN_TYPE) deny(403, 'Only ' . $ROLE[EDIT_MIN_TYPE] . ' can make changes.');
 
 $mac = strtolower((string)($in['mac'] ?? ''));
 if (!preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $mac)) deny(400, 'Bad MAC address');
@@ -1931,6 +2028,29 @@ def web_user():
     return None
 
 
+def permissions(settings):
+    """Minimum Zabbix user type per action: 1 = user, 2 = admin, 3 = super admin.
+    "permissions": {"view": 3, "edit": 2, "speedtest": 2}; the older "view_min_user_type" still works."""
+    p = settings.get("permissions") or {}
+
+    def lvl(key, default, lo):
+        try:
+            return max(lo, min(3, int(p.get(key, default))))
+        except (TypeError, ValueError):
+            return default
+    view = lvl("view", settings.get("view_min_user_type", 3) or 3, 1)
+    # changes never below admin; nobody may do more than they may see
+    return {"view": view, "edit": max(view, lvl("edit", 2, 2)), "speedtest": max(view, lvl("speedtest", 2, 1))}
+
+
+def gateway_code(settings, api_url):
+    """spidermap.php as installed, from the settings in devices.json."""
+    pm = permissions(settings)
+    return (GATEWAY_PHP.replace("__VIEW_MIN_TYPE__", str(pm["view"])).replace("__EDIT_MIN_TYPE__", str(pm["edit"]))
+            .replace("__SPEED_MIN_TYPE__", str(pm["speedtest"]))
+            .replace("__API_URL__", api_url.replace("'", "") if api_url else ""))
+
+
 def install_page(webd):
     ensure_data_dir()
     src = os.path.join(HERE, PAGE)
@@ -1944,10 +2064,7 @@ def install_page(webd):
         if os.path.isfile(os.path.join(HERE, "assets", f)):
             shutil.copyfile(os.path.join(HERE, "assets", f), os.path.join(adir, f))
             os.chmod(os.path.join(adir, f), 0o644)
-    settings = load_json(DEVICES_FILE, {}).get("settings", {})
-    vmin = int(settings.get("view_min_user_type", 3) or 3)
-    code = GATEWAY_PHP.replace("__VIEW_MIN_TYPE__", str(max(1, min(3, vmin)))) \
-                      .replace("__API_URL__", at.ZABBIX_URL.replace("'", "") if at.ZABBIX_URL else "")
+    code = gateway_code(load_json(DEVICES_FILE, {}).get("settings", {}), at.ZABBIX_URL)
     write_if_changed(os.path.join(webd, GATEWAY), code)
     # old entry points become redirects, so bookmarks and dashboard widgets keep working
     write_if_changed(os.path.join(webd, PAGE), redirect_stub(GATEWAY))

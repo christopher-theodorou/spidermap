@@ -105,11 +105,71 @@ def test_job_lock():
     again.close()
 
 
+def test_audit():
+    tmp = tempfile.mkdtemp(prefix="spidermap-audit-")
+    sm.DEVICES_FILE, sm.EDITS_FILE = os.path.join(tmp, "devices.json"), os.path.join(tmp, "edits.json")
+    sm.AUDIT_FILE, sm.EVENTS_FILE, sm.LOCK_FILE = os.path.join(tmp, "audit.log"), os.path.join(tmp, "ev.json"), os.path.join(tmp, ".lock")
+    json.dump({"settings": {}, "devices": {"aa:bb:cc:dd:ee:01": {"name": "Cam", "type": "camera"}}}, open(sm.DEVICES_FILE, "w"))
+    json.dump({"aa:bb:cc:dd:ee:01": {"name": "Driveway cam", "type": "camera", "important": True, "by": "Admin", "at": 1}},
+              open(sm.EDITS_FILE, "w"))
+    sm.apply_edits()
+    lines = [json.loads(x) for x in open(sm.AUDIT_FILE)]
+    check("audit: an edit is logged with who and what changed",
+          len(lines) == 1 and lines[0]["by"] == "Admin" and lines[0]["changes"] == {"name": ["Cam", "Driveway cam"], "important": [None, True]},
+          lines)
+    check("audit: the log is readable by root only (600)", oct(os.stat(sm.AUDIT_FILE).st_mode & 0o777) == "0o600")
+    evs = json.load(open(sm.EVENTS_FILE))
+    check("audit: the change appears in the activity feed",
+          any(e["type"] == "audit" and "Admin changed" in e["text"] and "Driveway cam" in e["text"] for e in evs), evs)
+    json.dump({"aa:bb:cc:dd:ee:01": {"name": "Driveway cam", "type": "camera", "important": True, "by": "Admin", "at": 2}},
+              open(sm.EDITS_FILE, "w"))
+    sm.apply_edits()
+    check("audit: saving without changes logs nothing", len(open(sm.AUDIT_FILE).readlines()) == 1)
+
+
+def test_snmp_secrets():
+    import spidermap_zabbix as at
+    tmp = tempfile.mkdtemp(prefix="spidermap-snmp-")
+    at.SNMP_CONF_DIR = os.path.join(tmp, "snmp")
+    v3 = {"ip": "10.0.0.2", "useip": "1", "port": "161", "details": {
+        "version": "3", "securityname": "mon", "securitylevel": "2", "authprotocol": "1",
+        "authpassphrase": 'a "quoted" pass#1', "privprotocol": "1", "privpassphrase": "{$PRIV}"}}
+    auth, target = at.snmp_auth(v3, {"{$PRIV}": "priv secret 2"})
+    cmd = " ".join(["snmpwalk", *auth, target])
+    check("SNMP: no password or community on the command line",
+          not any(x in cmd for x in ("quoted", "priv secret", "mon", "-A", "-X", "-c")), cmd)
+    conf = open(os.path.join(auth.env["SNMPCONFPATH"], "snmp.conf")).read()
+    check("SNMP: credentials are in the private snmp.conf (macros resolved, quotes escaped)",
+          'defAuthPassphrase "a \\"quoted\\" pass#1"' in conf and 'defPrivPassphrase "priv secret 2"' in conf
+          and "defSecurityName mon" in conf, conf)
+    d = auth.env["SNMPCONFPATH"]
+    check("SNMP: private folder 700, file 600",
+          oct(os.stat(d).st_mode & 0o777) == "0o700" and oct(os.stat(d + "/snmp.conf").st_mode & 0o777) == "0o600")
+    check("SNMP: extra options keep the private settings", (auth + ["-Oe"]).env is auth.env)
+    v2 = {"ip": "10.0.0.3", "useip": "1", "port": "161", "details": {"version": "2", "community": "{$SNMP_COMMUNITY}"}}
+    a2, _ = at.snmp_auth(v2, {"{$SNMP_COMMUNITY}": "s3cret"})
+    check("SNMP: v2c community from a Zabbix macro, not on the command line",
+          "s3cret" not in " ".join(a2) and "defCommunity s3cret" in open(a2.env["SNMPCONFPATH"] + "/snmp.conf").read())
+
+
+def test_permissions():
+    cases = [({}, {"view": 3, "edit": 3, "speedtest": 3}),
+             ({"view_min_user_type": 1}, {"view": 1, "edit": 2, "speedtest": 2}),
+             ({"permissions": {"view": 1, "edit": 1, "speedtest": 1}}, {"view": 1, "edit": 2, "speedtest": 1}),
+             ({"permissions": {"view": 2, "speedtest": 1}}, {"view": 2, "edit": 2, "speedtest": 2}),
+             ({"permissions": {"edit": "x"}}, {"view": 3, "edit": 3, "speedtest": 3})]
+    check("permissions: defaults, limits (edits never below admin, nothing below view) and bad values",
+          all(sm.permissions(st) == want for st, want in cases), [(st, sm.permissions(st)) for st, _ in cases])
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
     test_apply_edits()
     test_job_lock()
+    test_audit()
+    test_snmp_secrets()
+    test_permissions()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

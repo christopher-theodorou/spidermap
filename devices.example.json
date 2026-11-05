@@ -4,7 +4,7 @@
   "forget_after_days": 30,
   "speedtest_daily": "03:30",
   "speedtest_server": "",
-  "view_min_user_type": 3,
+  "permissions": {"view": 3, "edit": 2, "speedtest": 2},
   "port_media": {"SW-Core": {"17": "SFP+", "18": "SFP+"}},
   "scan_subnets": ["192.168.1.0/24"],
   "core_switch": "SW-Core",

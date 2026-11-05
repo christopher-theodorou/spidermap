@@ -98,6 +98,7 @@ Most of it can also be changed from the map with the **Edit** button (Zabbix adm
 | `scan_subnets` | Subnets to scan (default: the /24 of each switch) |
 | `flag_hours` | How long "new" and "moved" stay highlighted |
 | `forget_after_days` | Forget unknown devices not seen for this long |
+| `permissions` | Who may do what, as the lowest Zabbix user type (1 = user, 2 = admin, 3 = Super admin): `{"view": 3, "edit": 2, "speedtest": 2}`. Nobody may do more than view; edits never below admin. Run `bash install.sh --update` after a change |
 | `port_media` | Mark ports as SFP / SFP+ when SpiderMap cannot tell, per switch: `{"SW-Core": {"17": "SFP+", "18": "SFP+"}}` (`"copper"` removes a mark) |
 | `core_switch`, `manual_links`, `aliases` | Only for the classic Zabbix map (`spidermap_zabbix.py`) |
 
@@ -106,6 +107,21 @@ Most of it can also be changed from the map with the **Edit** button (Zabbix adm
 Gives every VM and container its real name and running/stopped state. In Proxmox, add the user `spidermap@pve`
 with the role **PVEAuditor** on `/`, create an API token `spidermap` for it with *Privilege Separation* unticked,
 and add `PVE_URL`, `PVE_TOKEN_ID` and `PVE_TOKEN_SECRET` to `zabbix.env` (see `zabbix.env.example`).
+
+**Check Proxmox's certificate** by adding its fingerprint to `zabbix.env` too; this works with Proxmox's own
+self-signed certificate. You find it in Proxmox under *your node → System → Certificates → pve-ssl.pem → View
+Certificate*, or on the Proxmox shell:
+
+```bash
+openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256     # pveproxy-ssl.pem if you uploaded your own
+```
+
+```bash
+export PVE_FINGERPRINT="69:E7:68:40:...:E2:0F"
+```
+
+Alternatives: `PVE_CA=/path/to/pve-root-ca.pem`, or `PVE_VERIFY=1` for a certificate your system already trusts
+(e.g. Let's Encrypt). Without any of these SpiderMap still connects, but writes a warning to its log.
 
 ## Update
 
@@ -128,18 +144,40 @@ SpiderMap has a single entry point in the Zabbix web folder: **`spidermap.php`**
 through the public Zabbix API before it shows anything, so it keeps working across Zabbix upgrades.
 
 - **Page and data need a Zabbix login.** By default only **Zabbix Super admins** can open SpiderMap, because it shows
-  the whole network. Change it with `"view_min_user_type"` in `devices.json` settings (1 = any Zabbix user,
-  2 = admins, 3 = Super admins) and run `bash install.sh --update`. The Zabbix *guest* account is always refused.
+  the whole network. Who may look, edit devices and start speed tests is set separately with `"permissions"` in
+  `devices.json` (see *Your settings*). Buttons a user may not use are greyed out with the reason. The Zabbix *guest*
+  account is always refused.
 - **Nothing about your network is in the web folder.** The page and the map data live in `/var/lib/spidermap/www`,
   readable by root and the web server only. The web folder contains just `spidermap.php`, the icons, and redirects
   from older addresses (`spidermap.html`, `spider-secure.php`).
-- **Changes need a Zabbix admin**: editing devices and starting speed tests, protected against cross-site request
-  forgery (a special request header and an Origin check). The web server can write to one folder only,
-  `/var/lib/spidermap/inbox`.
+- **Changes need a Zabbix admin** (or what you set in `permissions`): editing devices and starting speed tests,
+  protected against cross-site request forgery (a special request header and an Origin check). The web server can
+  write to one folder only, `/var/lib/spidermap/inbox`.
+- **Audit log:** every change from the map and every speed test is recorded with the Zabbix user and the time, in
+  `/var/lib/spidermap/audit.log` (root only, one JSON line each) and in the activity feed (filter *Changes*).
+- **SNMP passwords are never on a command line**, where any local user could see them with `ps`: SpiderMap gives them
+  to net-snmp in a private file per switch, in `/var/lib/spidermap/snmp` (folders 700, files 600).
 - **Session checks** are reused for at most 10 seconds and never extend an expired Zabbix session.
 - **Browser hardening**: no caching, no framing by other sites (`X-Frame-Options`, `frame-ancestors`), and a
   Content-Security-Policy that only allows SpiderMap's own resources.
 - Your Zabbix API token stays in `zabbix.env` (root only) and never reaches the browser.
+
+### A dedicated Zabbix account for SpiderMap
+
+The installer can use any API token, but a separate account limits what SpiderMap could ever do in Zabbix:
+
+1. **User role** *SpiderMap* (*Users → User roles*): user type **Admin**, *API access* on, and *API methods* set to
+   **Allow list**: `host.get`, `item.get`, `item.create`, `trigger.get`, `trigger.create`, `history.push`,
+   `usermacro.get`, `image.get`, `dashboard.get`, `dashboard.create`, `dashboard.update`, `dashboard.delete`
+   (plus `map.get`, `map.create`, `map.delete` only if you use the classic Zabbix map, `spidermap_zabbix.py`).
+2. **User group** *SpiderMap*: *Frontend access* **Disabled**; **Read** on the host groups of your switches and
+   servers; **Read-write** on the host group of the *Zabbix server* host, where SpiderMap creates its items and
+   triggers.
+3. **User** *spidermap* in that group with that role; then *Users → API tokens → Create API token* for it, and put
+   the token in `zabbix.env`.
+
+SNMP credentials stored as *Secret text* macros are never returned by the Zabbix API, to any account, so SpiderMap
+cannot use them: keep the SNMP credentials as text macros or in the host's SNMP interface.
 
 **Optional extra layer:** a web server rule that blocks any stray `spidermap*.json` in the web folder. Do **not**
 block `.php` or `.html` files: `spidermap.php` must stay reachable. The installer warns you if a rule blocks it.

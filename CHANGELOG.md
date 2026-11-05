@@ -4,6 +4,32 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.4.0] - 2026-11-05
+
+**Hardening**, from the review by Nikolaos Karanikolas (phase 2). Nothing changes for you unless you set the new
+options; defaults behave as before.
+
+### Added
+- **Separate permissions** for viewing, editing devices and starting speed tests: `"permissions": {"view": 3,
+  "edit": 2, "speedtest": 2}` in `devices.json` (lowest Zabbix user type for each). Edits are never allowed below
+  Zabbix admin, and nobody may do more than view. Buttons a user may not use are greyed out with the reason.
+- **Audit log:** every change from the map (name, type, web address, pin, important) and every speed test is
+  recorded with the Zabbix user and the time in `/var/lib/spidermap/audit.log` (root only) and in the activity feed
+  under the new *Changes* filter.
+- **Proxmox certificate check:** `PVE_FINGERPRINT` (works with Proxmox's self-signed certificate), `PVE_CA` or
+  `PVE_VERIFY=1` in `zabbix.env`. Without them SpiderMap connects as before and logs a warning.
+- README: how to give SpiderMap its own limited Zabbix account (role with an API allow list, read-only host groups).
+
+### Changed
+- **SNMP passwords and communities are no longer on the command line**, where any local user could read them
+  (`ps`). They are passed to net-snmp in a private file per switch, in `/var/lib/spidermap/snmp` (700 / 600).
+- The certificate setting for Proxmox can no longer be overridden by `REQUESTS_CA_BUNDLE` in the environment.
+- `"view_min_user_type"` still works; `"permissions"` is the new way to set it.
+
+### Upgrade notes
+- Nothing to do. Optional: add `PVE_FINGERPRINT` to `zabbix.env` if you use the Proxmox integration, and set
+  `"permissions"` if you want to let other Zabbix users look or edit.
+
 ## [0.3.1] - 2026-11-04
 
 ### Changed
@@ -146,6 +172,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.4.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.0
 [0.2.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.3

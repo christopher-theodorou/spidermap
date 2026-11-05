@@ -25,6 +25,7 @@ header h1 img{width:30px;height:30px}
 .sp{flex:1}
 .search{height:30px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);padding:0 10px;width:200px;font:inherit}
 .btn{height:30px;min-width:30px;padding:0 9px;border:1px solid var(--border);border-radius:8px;background:var(--card);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:5px;font:inherit;text-decoration:none}
+.btn:disabled,.btn:disabled:hover{opacity:.45;cursor:not-allowed;border-color:var(--border);color:inherit}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn i{font-size:16px}
 #canvas{position:absolute;top:var(--hh,51px);left:0;right:0;bottom:0;overflow:hidden;cursor:grab;touch-action:none}
@@ -199,7 +200,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.3.1";
+const PAGE_VERSION = "0.4.0";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -222,6 +223,16 @@ async function getData(name) {
   if (!r.ok) throw new Error(String(r.status));
   if (authMsg) { authMsg = ""; $("#auth").style.display = "none"; }
   return r.json();
+}
+// what this Zabbix user may do (from the server); until it is known, nothing is greyed out - the server decides anyway
+let ME = { can: { edit: true, speedtest: true }, need: {} };
+const ROLE = { 1: "Zabbix users", 2: "Zabbix admins", 3: "Zabbix Super admins" };
+const denied = what => `Only ${ROLE[ME.need[what]] || "Zabbix admins"} can ${what === "edit" ? "change devices" : "start a speed test"}.`;
+async function loadMe() {
+  try {
+    const j = await getData("me");
+    if (j && j.can) { ME = j; if (DATA) { gwCard(); if (sel === "#speed") special("speed"); } }
+  } catch (e) { /* older server without "me": keep the defaults */ }
 }
 function postApi(body) {
   return fetch(API, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", "X-SpiderMap": "1" }, body: JSON.stringify(body) });
@@ -428,8 +439,8 @@ function speedHtml() {
        + `<div class="gr" title="High bufferbloat makes video calls and games stutter during downloads."><span>Bufferbloat</span><span style="color:${bb[1]};font-weight:600">${bb[0]}</span></div>`;
   } else h += `<p style="color:var(--muted)">No speed test yet.</p>`;
   if (SP.error) h += `<div style="color:var(--bad);font-size:12px;margin-top:8px">${esc(SP.error)}</div>`;
-  h += `<button class="btn wide" id="spt2" style="margin-top:14px">${SP.running ? '<i class="ti ti-loader-2 spin"></i>Testing…' : '<i class="ti ti-gauge"></i>' + (L ? "Run again" : "Run speed test")}</button>`
-     + `<div id="spm2" style="font-size:11px;color:var(--muted);margin-top:5px">Runs from the Zabbix server and uses about 10 s of full-speed traffic each way.</div>`;
+  h += `<button class="btn wide" id="spt2" style="margin-top:14px"${ME.can.speedtest ? "" : ` disabled title="${esc(denied("speedtest"))}"`}>${SP.running ? '<i class="ti ti-loader-2 spin"></i>Testing…' : '<i class="ti ti-gauge"></i>' + (L ? "Run again" : "Run speed test")}</button>`
+     + `<div id="spm2" style="font-size:11px;color:var(--muted);margin-top:5px">${ME.can.speedtest ? "Runs from the Zabbix server and uses about 10 s of full-speed traffic each way." : esc(denied("speedtest"))}</div>`;
   const SH = spHist(SP).slice(-10);
   if (SH.length) {
     h += `<div class="sec">History · last ${SH.length}</div><div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">Mbps</span></div>` + speedBars(SH);
@@ -613,7 +624,7 @@ function panel(id, quiet) {
   const acts = [];
   if (n.url && /^https?:\/\//i.test(n.url)) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open web UI</a>`);
   if (n.zbx) acts.push(`<a class="btn" href="${esc(DATA.zabbix_url)}?action=latest.view&filter_set=1&hostids%5B%5D=${encodeURIComponent(n.zbx)}" target="_top"><i class="ti ti-chart-line"></i>Show in Zabbix</a>`);
-  if (n.mac) acts.push(`<button class="btn" id="cmac"><i class="ti ti-copy"></i>Copy MAC</button>`, `<button class="btn" id="edit"><i class="ti ti-pencil"></i>Edit</button>`);
+  if (n.mac) acts.push(`<button class="btn" id="cmac"><i class="ti ti-copy"></i>Copy MAC</button>`, `<button class="btn" id="edit"${ME.can.edit ? "" : ` disabled title="${esc(denied("edit"))}"`}><i class="ti ti-pencil"></i>Edit</button>`);
   if (acts.length) h += `<div class="acts">${acts.join("")}</div>`;
   issues(n).forEach(i => { h += `<div class="iss-line"><i class="ti ti-alert-triangle"></i> ${esc(i.text)}</div>`; });
   if (n.id === "inet") h += internetHtml();
@@ -675,9 +686,9 @@ function presenceHtml(mac) {
 
 /* ---------- activity feed ---------- */
 let EVENTS = [], evFilter = "all";
-const EVI = { device: "devices", security: "shield", ip: "network", internet: "world", port: "plug-connected", cable: "plug-x", traffic: "activity", speedtest: "gauge" };
+const EVI = { device: "devices", security: "shield", ip: "network", internet: "world", port: "plug-connected", cable: "plug-x", traffic: "activity", speedtest: "gauge", audit: "user-edit" };
 const SEVC = { info: "var(--muted)", ok: "var(--ok)", warn: "var(--warn)", bad: "var(--bad)" };
-const EVF = { all: () => true, warnings: e => e.sev === "warn" || e.sev === "bad", devices: e => ["device", "security", "ip"].includes(e.type), internet: e => ["internet", "speedtest"].includes(e.type), ports: e => ["port", "cable", "traffic"].includes(e.type) };
+const EVF = { all: () => true, warnings: e => e.sev === "warn" || e.sev === "bad", devices: e => ["device", "security", "ip"].includes(e.type), internet: e => ["internet", "speedtest"].includes(e.type), ports: e => ["port", "cable", "traffic"].includes(e.type), changes: e => e.type === "audit" };
 async function loadEvents() {
   try { { EVENTS = await getData("events"); actBadge(); if (sel === "#activity") special("activity"); } } catch (e) {}
 }
@@ -797,6 +808,7 @@ $("#b-top").onclick = () => special("top");
 function toast(t) { const e = $("#toast"); e.textContent = t; e.classList.add("on"); clearTimeout(toast.h); toast.h = setTimeout(() => e.classList.remove("on"), 3500); }
 async function startSpeedtest(msg) {
   const say = (t, bad) => { if (msg) { msg.style.color = bad ? "var(--bad)" : "var(--muted)"; msg.textContent = t; } else toast(t); };
+  if (!ME.can.speedtest) return say(denied("speedtest"), true);
   if (RT && RT.speedtest && RT.speedtest.running) return say("A speed test is already running.");
   say("Starting speed test…");
   try {
@@ -835,7 +847,7 @@ function headerHeight() { document.documentElement.style.setProperty("--hh", $("
 headerHeight();
 if (window.ResizeObserver) new ResizeObserver(headerHeight).observe($("header"));
 window.addEventListener("resize", () => { headerHeight(); fit(false); });
-load(); loadLive(); loadRT(); loadEvents(); loadPresence();
+load(); loadLive(); loadRT(); loadEvents(); loadPresence(); loadMe();
 setInterval(load, 60000); setInterval(loadLive, 30000); setInterval(loadRT, 5000); setInterval(loadEvents, 20000); setInterval(loadPresence, 300000);
 </script>
 </body>
