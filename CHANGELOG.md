@@ -6,9 +6,6 @@ and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap 
 
 ## [0.4.0] - 2026-11-05
 
-**Hardening**, from the review by Nikolaos Karanikolas (phase 2). Nothing changes for you unless you set the new
-options; defaults behave as before.
-
 ### Added
 - **Separate permissions** for viewing, editing devices and starting speed tests: `"permissions": {"view": 3,
   "edit": 2, "speedtest": 2}` in `devices.json` (lowest Zabbix user type for each). Edits are never allowed below
