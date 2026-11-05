@@ -4,6 +4,21 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.3.1] - 2026-11-04
+
+### Changed
+- **Gateway card in the style of a UniFi gateway card:** gateway IP and ping, then the internet provider with this
+  month's uptime (green, amber or red), public IP, monthly data usage, throughput with graph and latency tiles.
+- **"ISP Speed Test" button at the bottom of the card, always visible:** when the card is taller than the window,
+  the content scrolls and the button stays in place. It opens the new **speed test panel** (also from the toolbar):
+  latest result, latency under load and bufferbloat, run again, and the history.
+
+### Fixed
+- **Switches appeared a second time as devices** under "Not placed yet" (their own management address was
+  treated as an unknown device). A switch's own address is no longer a device.
+- **A horizontal scrollbar** appeared at the bottom of the page (the closed side panel made the page wider than the
+  window).
+
 ## [0.3.0] - 2026-11-03
 
 **Correct traffic numbers on every switch.** From the review by Nikolaos Karanikolas, confirmed with the interface
@@ -131,6 +146,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.3.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.1
 [0.3.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.0
 [0.2.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.3
 [0.2.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.2.2

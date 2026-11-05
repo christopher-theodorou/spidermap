@@ -12,7 +12,7 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#14171c;--card:#1d2128;--text:#e7eaf0;--muted:#9aa3b2;--faint:#646d7c;--border:#2c323c;--accent:#7c86f0;--accent-bg:#22264a;--ok-bg:#16301f;--warn-bg:#382a10;--bad-bg:#3a1a1b;--off:#4b525e;--line:#3f4794;--pur-bg:#2a2045;--shadow:0 1px 2px rgba(0,0,0,.4)}}
 :root[data-theme=dark]{--pur-bg:#2a2045;--bg:#14171c;--card:#1d2128;--text:#e7eaf0;--muted:#9aa3b2;--faint:#646d7c;--border:#2c323c;--accent:#7c86f0;--accent-bg:#22264a;--ok-bg:#16301f;--warn-bg:#382a10;--bad-bg:#3a1a1b;--off:#4b525e;--line:#3f4794;--shadow:0 1px 2px rgba(0,0,0,.4)}
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,Arial,sans-serif}
 header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card)}
 header h1{font-size:17px;font-weight:800;margin:0 6px 0 0;display:flex;align-items:center;gap:8px;letter-spacing:-.3px}
 header h1 b{font-weight:800}header h1 span{color:var(--accent)}
@@ -109,6 +109,10 @@ table{width:100%;border-collapse:collapse}
 .tile b{display:block;font-size:14px;font-weight:600}
 .tile span{font-size:11px;color:var(--muted)}
 .spark{width:100%;height:46px;display:block;margin:6px 0 2px}
+.gsep{border-top:1px solid var(--border);margin:8px 0 4px}
+.gr.isp{cursor:pointer}.gr.isp span:first-child{display:inline-flex;align-items:center;gap:6px;color:var(--accent)}
+.gfoot{position:sticky;bottom:0;background:var(--card);padding:12px 0 2px;margin-top:4px}
+.gfoot .btn{margin-top:0}.gfoot .last{font-size:11px;color:var(--muted);text-align:center;margin-top:6px}
 .livedot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--ok);margin-right:5px;animation:blink 1.5s infinite}
 @keyframes blink{50%{opacity:.25}}
 .st-big{display:flex;gap:16px;align-items:baseline;margin:6px 0 2px}
@@ -195,7 +199,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.3.0";
+const PAGE_VERSION = "0.3.1";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -257,7 +261,7 @@ async function loadLive() {
 async function loadRT() {
   try {
     RT = await getData("rt");
-    if (DATA) { render(); gwCard(); if (sel === "#top") special("top"); else if (sel && byId[sel] && !($("#ef") && $("#ef").style.display === "block")) panel(sel, true); }
+    if (DATA) { render(); gwCard(); if (sel === "#top" || sel === "#speed") special(sel.slice(1)); else if (sel && byId[sel] && !($("#ef") && $("#ef").style.display === "block")) panel(sel, true); }
   } catch (e) {}
 }
 const rtFresh = () => RT && Date.now() / 1000 - RT.t < 30;
@@ -345,6 +349,11 @@ function bytes(v) { const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (v
 
 /* ---------- gateway card ---------- */
 let gwMin = store("nm-gwmin"); if (gwMin === null) gwMin = false;
+function bufferbloat(L) {
+  if (!L || !L.load_down) return null;
+  const rise = Math.max(L.load_down || 0, L.load_up || 0) - (L.ping || 0);
+  return rise < 30 ? ["low", "var(--ok)"] : rise < 100 ? ["medium", "var(--warn)"] : ["high", "var(--bad)"];
+}
 function gwCard() {
   const box = $("#gw"); if (!DATA) return;
   const gw = DATA.nodes.find(n => n.kind === "router"), inet = byId.inet, I = LIVE.inet || {};
@@ -356,57 +365,77 @@ function gwCard() {
   const wan = live && RT.wan ? RT.wan : I.wan;
   const wanRows = live && RT.hist.wan.length > 2 ? RT.hist.wan : LIVE.hist && LIVE.hist.wan;
   const lat = live && RT.latency && Object.keys(RT.latency).length ? RT.latency : I.latency || {};
-  const SP = live ? RT.speedtest : null;
+  const SP = live ? RT.speedtest : null, L = SP && SP.last;
+  const RI = live && RT.inet ? RT.inet : I;
   let h = "";
   const W = (LIVE.warnings || []);
   if (W.length && !down.length) h += `<div class="warnb" id="gw-warn"><i class="ti ti-alert-triangle"></i>${W.length === 1 ? esc(W[0]) : W.length + " warnings"}<span style="margin-left:auto">›</span></div>`;
   if (down.length) h += `<div class="warnb" data-go="${esc(down[0].id)}"><i class="ti ti-alert-triangle"></i>${down.length === 1 ? esc(down[0].name) + " is offline" : down.length + " important devices offline"}<span style="margin-left:auto">›</span></div>`;
-  h += `<div class="gh" id="gwh"><div class="ic">${gw ? iconHtml(gw) : '<i class="ti ti-router"></i>'}</div><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">${esc(gw ? gw.name : "Gateway")}</div><div style="color:var(--muted);font-size:12px">${I.up === false ? '<span style="color:var(--bad)">Internet down</span>' : "Internet online"}${wan ? " · ↓ " + mbps(wan.down) + " ↑ " + mbps(wan.up) : ""}</div></div><i class="ti ti-chevron-${gwMin ? "down" : "up"}" style="color:var(--muted)"></i></div>`;
+  h += `<div class="gh" id="gwh"><div class="ic">${gw ? iconHtml(gw) : '<i class="ti ti-router"></i>'}</div><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">${esc(gw ? gw.name : "Gateway")}</div><div style="color:var(--muted);font-size:12px">${RI.up === false ? '<span style="color:var(--bad)">Internet down</span>' : "Internet online"}${wan ? " · ↓ " + mbps(wan.down) + " ↑ " + mbps(wan.up) : ""}</div></div><i class="ti ti-chevron-${gwMin ? "down" : "up"}" style="color:var(--muted)"></i></div>`;
   h += `<div class="gb"><div class="chain">
-    <span class="c" title="Internet"><i class="ti ti-world"></i>${I.up === false ? '<span class="rd"></span>' : ""}</span><span class="ln1"></span>
+    <span class="c" title="Internet"><i class="ti ti-world"></i>${RI.up === false ? '<span class="rd"></span>' : ""}</span><span class="ln1"></span>
     <span class="c" title="Gateway"><i class="ti ti-router"></i></span><span class="ln1"></span>
     <span class="c" title="Switches"><i class="ti ti-server-2"></i><b>${sws.length}</b></span><span class="ln2"></span>
     <span class="c" title="Devices online / total"><i class="ti ti-devices"></i><b>${on}</b><span style="color:var(--muted)">/${devs.length}</span>${devs.some(n => status(n) === "down") ? '<span class="rd"></span>' : ""}</span></div>`;
-  const row = (k, v) => `<div class="gr"><span>${k}</span><span>${v}</span></div>`;
-  h += row("Gateway IP", esc(gw && gw.ip || "-")) + row("Public IP", esc(inet && inet.sub || "-"));
-  const RI = live && RT.inet ? RT.inet : I;
-  h += row("Internet", RI.down_since ? `<span style="color:var(--bad)">down since ${ago(RI.down_since)}</span>` : RI.last_outage ? "last outage " + ago(RI.last_outage[0]) : "no outages seen");
-  if (live && RT.inet && RT.inet.uptime_month != null) h += row("Uptime this month", RT.inet.uptime_month.toFixed(RT.inet.uptime_month >= 99.995 ? 2 : 3) + " %" + (RT.inet.outages_month.length ? ` · ${RT.inet.outages_month.length} outage${RT.inet.outages_month.length > 1 ? "s" : ""}` : ""));
+  const row = (k, v, title) => `<div class="gr"${title ? ` title="${esc(title)}"` : ""}><span>${k}</span><span>${v}</span></div>`;
+  h += row("Gateway IP", esc(gw && gw.ip || "-"));
   const gT = live && RT.targets && RT.targets.Gateway;
   if (gT) h += row("Gateway ping", gT.ms == null ? '<span style="color:var(--bad)">no answer</span>' : gT.ms + " ms" + (gT.loss ? ` · ${gT.loss} % loss` : ""));
+  h += `<div class="gsep"></div>`;
+  // internet line: provider and uptime this month, like a UniFi gateway card
+  const up = live && RT.inet ? RT.inet.uptime_month : null;
+  const upc = up == null ? "var(--muted)" : up >= 99.9 ? "var(--ok)" : up >= 99 ? "var(--warn)" : "var(--bad)";
+  const outages = live && RT.inet && RT.inet.outages_month ? RT.inet.outages_month.length : 0;
+  const upTitle = RI.down_since ? "" : (RI.last_outage ? "Last outage " + ago(RI.last_outage[0]) : "No outages seen") + (outages ? ` · ${outages} this month` : "");
+  h += `<div class="gr isp" id="gw-inet" title="${esc(upTitle)}"><span><i class="ti ti-world"></i>${esc((L && L.isp) || "Internet")}</span>`
+     + `<span style="color:${RI.down_since ? "var(--bad)" : upc};font-weight:600">${RI.down_since ? "down " + ago(RI.down_since).replace(" ago", "") : up == null ? "" : up.toFixed(up >= 99.995 ? 2 : 3) + " %"}</span></div>`;
+  h += row("IPv4 Address", esc(inet && inet.sub || "-"));
   const rootSw = DATA.nodes.find(n => n.kind === "switch" && n.flip && n.port_ref);
-  const mu = live && rootSw && RT.usage && RT.usage.m && RT.usage.m[rootSw.port_ref[0]] ? RT.usage.m[rootSw.port_ref[0]][String(rootSw.port_ref[1])] : null;
+  const mu = live && rootSw && RT.usage && RT.usage.m && RT.usage.m[rootSw.port_ref[0]] ? RT.usage.m[rootSw.port_ref[0]][String(rootSw.port_ref[1])] : (I.month ? [I.month.down, I.month.up] : null);
   const since = live && RT.usage && RT.usage.since && RT.usage.since > new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() / 1000
-    ? ` <span style="color:var(--muted)">(since ${new Date(RT.usage.since * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" })})</span>` : "";
-  if (mu) h += row("Gateway port this month", "↓ " + bytes(mu[0]) + " ↑ " + bytes(mu[1]) + since);
-  else if (I.month) h += row("Gateway port this month", "↓ " + bytes(I.month.down) + " ↑ " + bytes(I.month.up));
-  h += `<div class="gr" style="margin-top:4px"><span title="Measured on the switch port to the gateway. Wi-Fi traffic to the internet goes through the gateway directly and is not included.">Throughput <i class="ti ti-info-circle"></i></span><span>${wan ? `<span style="color:var(--accent)">↓ ${mbps(wan.down)}</span> &nbsp;<span style="color:var(--pur)">↑ ${mbps(wan.up)}</span>` : "-"}</span></div>`;
-  h += spark(wanRows, 1, 2) + `<div class="lgd"><span>${live ? '<span class="livedot"></span>live, every ' + (RT.every || 5) + " s" : "updated every minute"}</span><span style="margin-left:auto">${wanRows ? (live && wanRows === RT.hist.wan ? "last " + Math.round(wanRows.length * (RT.every || 5) / 60) + " min" : "last " + wanRows.length + " min") : ""}</span></div>`;
+    ? new Date(RT.usage.since * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+  if (mu) h += row("Monthly Data Usage", bytes(mu[0] + mu[1]) + (since ? ` <span style="color:var(--muted)">since ${esc(since)}</span>` : ""),
+                   `↓ ${bytes(mu[0])} · ↑ ${bytes(mu[1])}, measured on the switch port to the gateway`);
+  h += `<div class="gr" title="Measured on the switch port to the gateway. Wi-Fi traffic to the internet goes through the gateway directly and is not included."><span>Throughput</span><span>${wan ? `<span style="color:var(--accent)">↓ ${mbps(wan.down)}</span> &nbsp;<span style="color:var(--pur)">↑ ${mbps(wan.up)}</span>` : "-"}</span></div>`;
+  h += spark(wanRows, 1, 2);
   const TG = live && RT.targets ? RT.targets : {};
-  h += `<div class="tiles">${Object.entries(lat).map(([k, v]) => { const x = TG[k]; return `<div class="tile"><b style="color:${v == null ? "var(--bad)" : v > 80 ? "var(--warn)" : "var(--text)"}">${v == null ? "—" : Math.round(v) + " ms"}</b><span>${esc(k)}</span>${x ? `<small style="color:${x.loss >= 5 ? "var(--warn)" : "var(--faint)"}">loss ${x.loss}% · jitter ${x.jit ?? "-"}</small>` : ""}</div>`; }).join("")}</div>`;
-  if (SP) {
-    const L = SP.last;
-    h += `<div class="sec" style="margin-top:14px">Speed test</div>`;
-    if (SP.running) h += `<div class="st-big" style="color:var(--accent)"><i class="ti ti-loader-2 spin"></i><span>Running… ${Math.round(Date.now() / 1000 - (SP.started || 0))} s</span></div>`;
-    else if (L) {
-      h += `<div class="st-big"><span style="color:var(--accent)">↓ <b>${(L.down / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--pur)">↑ <b>${(L.up / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--muted)">${L.ping} ms</span></div><div style="font-size:11px;color:var(--muted)">${esc(L.server)} · ${ago(L.at)}${L.url && /^https:\/\/www\.speedtest\.net\//.test(L.url) ? ` · <a href="${esc(L.url)}" target="_blank" rel="noopener" style="color:var(--accent)">details</a>` : ""}</div>`;
-      if (L.load_down) {
-        const rise = Math.max(L.load_down || 0, L.load_up || 0) - (L.ping || 0);
-        const [g, c] = rise < 30 ? ["low", "var(--ok)"] : rise < 100 ? ["medium", "var(--warn)"] : ["high", "var(--bad)"];
-        h += `<div class="gr" style="margin-top:6px" title="How much the ping rises while the line is busy. High bufferbloat makes video calls and games stutter during downloads."><span>Latency under load</span><span>↓ ${Math.round(L.load_down)} ms · ↑ ${Math.round(L.load_up || 0)} ms</span></div><div class="gr"><span>Bufferbloat</span><span style="color:${c};font-weight:600">${g}</span></div>`;
-      }
-    }
-    if (spHist(SP).length > 1) h += `<div class="gr" style="cursor:pointer;color:var(--accent)" id="sp-more"><span>History of ${spHist(SP).length} tests</span><span>›</span></div>`;
-    if (SP.error) h += `<div style="color:var(--bad);font-size:12px;margin-top:6px">${esc(SP.error)}</div>`;
-    h += `<button class="btn wide" id="spt"><i class="ti ti-gauge"></i>${SP.running ? "Speed test running…" : L ? "Run again" : "Run speed test"}</button><div id="spm" style="font-size:11px;color:var(--muted);margin-top:5px">Runs from the Zabbix server and uses about 10 s of full-speed traffic each way.</div>`;
-  }
+  h += `<div class="tiles">${Object.entries(lat).map(([k, v]) => { const x = TG[k]; return `<div class="tile" title="${x ? `loss ${x.loss} % · jitter ${x.jit ?? "-"} ms` : ""}"><b style="color:${v == null ? "var(--bad)" : v > 80 ? "var(--warn)" : "var(--text)"}">${v == null ? "—" : Math.round(v) + "ms"}</b><span>${esc(k)}</span>${x && x.loss >= 5 ? `<small style="color:var(--warn)">loss ${x.loss}%</small>` : ""}</div>`; }).join("")}</div>`;
+  // the speed test button stays visible at the bottom of the card, even when the card has to scroll
+  if (SP) h += `<div class="gfoot"><button class="btn wide" id="spt">${SP.running ? `<i class="ti ti-loader-2 spin"></i>Testing… ${Math.round(Date.now() / 1000 - (SP.started || 0))} s` : '<i class="ti ti-gauge"></i>ISP Speed Test'}</button>`
+     + (L && !SP.running ? `<div class="last">Last: ↓ ${(L.down / 1e6).toFixed(0)} · ↑ ${(L.up / 1e6).toFixed(0)} Mbps · ${ago(L.at)}</div>` : "") + `</div>`;
   h += `</div>`;
   box.innerHTML = h; box.classList.toggle("min", gwMin);
   $("#gwh").onclick = () => { gwMin = !gwMin; store("nm-gwmin", gwMin); gwCard(); };
   const wb = box.querySelector(".warnb"); if (wb) wb.onclick = () => select(wb.dataset.go, true);
-  const sb = $("#spt"); if (sb) sb.onclick = () => startSpeedtest($("#spm"));
-  const sm2 = $("#sp-more"); if (sm2) sm2.onclick = () => select("inet", true);
+  const sb = $("#spt"); if (sb) sb.onclick = () => special("speed");
+  const gi = $("#gw-inet"); if (gi) gi.onclick = () => select("inet", true);
   const gwW = $("#gw-warn"); if (gwW) gwW.onclick = () => { evFilter = "warnings"; special("activity"); };
+}
+
+/* ---------- speed test panel ---------- */
+function speedHtml() {
+  const SP = rtFresh() ? RT.speedtest : null;
+  if (!SP) return `<p style="color:var(--muted)">Speed tests need the real-time service (spidermap-rt).</p>`;
+  const L = SP.last;
+  let h = "";
+  if (SP.running) h += `<div class="st-big" style="color:var(--accent)"><i class="ti ti-loader-2 spin"></i><span>Testing… ${Math.round(Date.now() / 1000 - (SP.started || 0))} s</span></div><p style="color:var(--muted);margin:4px 0 0">A test takes about 30 seconds.</p>`;
+  else if (L) {
+    h += `<div class="st-big"><span style="color:var(--accent)">↓ <b>${(L.down / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--pur)">↑ <b>${(L.up / 1e6).toFixed(0)}</b> Mbps</span><span style="color:var(--muted)">${L.ping} ms</span></div>`
+       + `<div style="font-size:12px;color:var(--muted)">${esc(L.server)} · ${ago(L.at)}${L.url && /^https:\/\/www\.speedtest\.net\//.test(L.url) ? ` · <a href="${esc(L.url)}" target="_blank" rel="noopener" style="color:var(--accent)">details</a>` : ""}</div>`;
+    const bb = bufferbloat(L);
+    if (bb) h += `<div class="sec">Responsiveness</div>`
+       + `<div class="gr" title="How much the ping rises while the line is busy."><span>Latency under load</span><span>↓ ${Math.round(L.load_down)} ms · ↑ ${Math.round(L.load_up || 0)} ms</span></div>`
+       + `<div class="gr" title="High bufferbloat makes video calls and games stutter during downloads."><span>Bufferbloat</span><span style="color:${bb[1]};font-weight:600">${bb[0]}</span></div>`;
+  } else h += `<p style="color:var(--muted)">No speed test yet.</p>`;
+  if (SP.error) h += `<div style="color:var(--bad);font-size:12px;margin-top:8px">${esc(SP.error)}</div>`;
+  h += `<button class="btn wide" id="spt2" style="margin-top:14px">${SP.running ? '<i class="ti ti-loader-2 spin"></i>Testing…' : '<i class="ti ti-gauge"></i>' + (L ? "Run again" : "Run speed test")}</button>`
+     + `<div id="spm2" style="font-size:11px;color:var(--muted);margin-top:5px">Runs from the Zabbix server and uses about 10 s of full-speed traffic each way.</div>`;
+  const SH = spHist(SP).slice(-10);
+  if (SH.length) {
+    h += `<div class="sec">History · last ${SH.length}</div><div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">Mbps</span></div>` + speedBars(SH);
+    h += `<table class="lst" style="margin-top:6px">${SH.slice().reverse().map(x => `<tr><td>${new Date(x.at * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td><td style="white-space:nowrap">↓ ${(x.down / 1e6).toFixed(0)} · ↑ ${(x.up / 1e6).toFixed(0)}</td><td>${x.ping} ms${x.load_down ? ` · load ${Math.round(Math.max(x.load_down, x.load_up || 0))} ms` : ""}</td></tr>`).join("")}</table>`;
+  }
+  return h;
 }
 
 /* ---------- stats + edit form for the side panel ---------- */
@@ -614,6 +643,7 @@ function panel(id, quiet) {
   $("#pclose").onclick = closePanel;
   const cm = $("#cmac"); if (cm) cm.onclick = () => { navigator.clipboard && navigator.clipboard.writeText(n.mac); cm.innerHTML = '<i class="ti ti-check"></i>Copied'; };
   P.querySelectorAll("[data-go]").forEach(r => r.onclick = () => select(r.dataset.go, true));
+  const isp = $("#inet-speed"); if (isp) isp.onclick = () => special("speed");
   const eb = $("#edit"); if (eb) eb.onclick = () => { const f = $("#ef"); f.style.display = f.style.display === "block" ? "none" : "block"; if (f.style.display === "block") $("#e-name").focus(); };
   const es = $("#e-save"); if (es) es.onclick = () => saveEdit(n);
   const ec = $("#e-cancel"); if (ec) ec.onclick = () => { $("#ef").style.display = "none"; };
@@ -736,17 +766,15 @@ function internetHtml() {
   h += `<div class="sec">Outages this month · ${outs.length}</div>`;
   h += outs.length ? `<table class="lst">${outs.map(o => `<tr><td>${new Date(o[0] * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td><td>${Math.max(1, Math.round((o[1] - o[0]) / 60))} min</td></tr>`).join("")}</table>` : `<p style="color:var(--muted);margin:0">None.</p>`;
   const SH = spHist(RT.speedtest).slice(-10);
-  if (SH.length) {
-    h += `<div class="sec">Speed tests · last ${SH.length}</div><div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">Mbps</span></div>` + speedBars(SH);
-    h += `<table class="lst" style="margin-top:6px">${SH.slice().reverse().map(x => `<tr><td>${new Date(x.at * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td><td style="white-space:nowrap">↓ ${(x.down / 1e6).toFixed(0)} · ↑ ${(x.up / 1e6).toFixed(0)}</td><td>${x.ping} ms${x.load_down ? ` · load ${Math.round(Math.max(x.load_down, x.load_up || 0))} ms` : ""}</td></tr>`).join("")}</table>`;
-  }
+  if (SH.length) h += `<div class="gr" id="inet-speed" style="cursor:pointer;color:var(--accent);margin-top:12px"><span>Speed tests · last ${SH.length}</span><span>›</span></div>`;
   const ph = DATA.public_ip_history || [];
   if (ph.length) h += `<div class="sec">Public IP changes</div><table class="lst">${ph.slice().reverse().map(x => `<tr><td>${new Date(x[0] * 1000).toLocaleDateString()}</td><td>${esc(x[1])} → ${esc(x[2])}</td></tr>`).join("")}</table>`;
   return h;
 }
 
 /* ---------- special panels (activity, people, top talkers) ---------- */
-const SPECIAL = { activity: ["Activity", "bell", activityHtml], people: ["Who's online", "users", peopleHtml], top: ["Top talkers", "chart-bar", topHtml] };
+const SPECIAL = { activity: ["Activity", "bell", activityHtml], people: ["Who's online", "users", peopleHtml], top: ["Top talkers", "chart-bar", topHtml],
+                  speed: ["ISP Speed Test", "gauge", speedHtml] };
 function special(kind) {
   const [title, icon, fn] = SPECIAL[kind], P = $("#panel");
   sel = "#" + kind;
@@ -758,6 +786,7 @@ function special(kind) {
   P.querySelectorAll("[data-pa]").forEach(c => c.onclick = () => { pplAll = c.dataset.pa === "1"; special("people"); });
   P.querySelectorAll("[data-tp]").forEach(c => c.onclick = () => { topPer = c.dataset.tp; special("top"); });
   if (kind === "activity") { store("nm-seen", Date.now() / 1000); actBadge(); }
+  const s2 = $("#spt2"); if (s2) s2.onclick = () => startSpeedtest($("#spm2"));
   if (DATA) render();
 }
 $("#b-act").onclick = () => special("activity");
@@ -775,11 +804,11 @@ async function startSpeedtest(msg) {
     const j = await r.json().catch(() => ({ ok: false, error: "Unexpected answer (" + r.status + ")" }));
     if (!j.ok) return say(j.error || "Couldn't start the test.", true);
     if (RT && RT.speedtest) { RT.speedtest.running = true; RT.speedtest.started = Date.now() / 1000; RT.speedtest.error = ""; }
-    gwCard(); say("Speed test started. Results appear on the gateway card in about 30 s.");
-    if (gwMin) { gwMin = false; store("nm-gwmin", false); gwCard(); }
+    gwCard(); if (sel === "#speed") special("speed");
+    say("Speed test started. The result appears here in about 30 s.");
   } catch (e) { say("Couldn't reach the server.", true); }
 }
-$("#b-spd").onclick = () => startSpeedtest(null);
+$("#b-spd").onclick = () => special("speed");
 $("#b-csv").onclick = () => {
   if (!DATA) return;
   const q = v => '"' + String(v ?? "").replace(/"/g, '""') + '"';

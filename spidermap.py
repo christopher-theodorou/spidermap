@@ -28,7 +28,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.3.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.3.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEVICES_FILE = os.path.join(HERE, "devices.json")
@@ -470,6 +470,13 @@ def full_scan(api, community=None, quiet=False):
                 if not cur or len(p["macs"]) < cur[2]:
                     seen_at[mac] = (sid, p["name"], len(p["macs"]))
     online = set(seen_at) | {m for m, v in arp.items() if v[1] in ONLINE_STATES}
+    # a switch's own management address is not a device: the switch is already on the map as a switch
+    sw_ips = {ip for s_ in sw.values() for ip in s_["host"]["_ips"]}
+    switch_macs = {m for m, ip in ipmap.items() if ip in sw_ips}
+    online -= switch_macs
+    for m in switch_macs:
+        seen_at.pop(m, None)
+        sdev.pop(m, None)
 
     gw_loc = seen_at.get(gw_mac) if gw_mac else None
     root_sw = gw_loc[0] if gw_loc else (next(iter(sw)) if sw else None)
@@ -750,7 +757,7 @@ def full_scan(api, community=None, quiet=False):
                              ["MAC", ", ".join(g["macs"]) or "-"]])
 
     # known devices never placed
-    rest = [m for m in set(dcfg) | set(sdev) if m not in placed and m != gw_mac
+    rest = [m for m in set(dcfg) | set(sdev) if m not in placed and m != gw_mac and m not in switch_macs
             and m not in by_mac and not (sdev.get(m, {}).get("loc") or {}).get("k") == "behind"]
     if rest and root_sw:
         add("unplaced", "s-" + root_sw, name="Not placed yet", sub=f"{len(rest)} devices", icon="question-mark",
