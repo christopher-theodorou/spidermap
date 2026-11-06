@@ -202,9 +202,80 @@ def test_zabbix_items():
           [(k, sm.zabbix_port_item(k, n, by_name)) for k, n, _ in cases])
 
 
+def _fake_walks(with_vlans=True):
+    """An 8-port switch as SNMP would show it: VLAN 1 (default), 20 (Cameras) on ports 3-4, 30 (Guests) tagged on 8,
+    ports 6+7 in a LAG (ifIndex 100)."""
+    names = {str(i): f"GigabitEthernet0/0/{i}" for i in range(1, 9)}
+    names["100"] = "Eth-Trunk1"
+    W = {"name": names, "type": {**{str(i): "6" for i in range(1, 9)}, "100": "161"},
+         "oper": {k: "1" for k in names}, "admin": {k: "1" for k in names}, "speed": {k: "1000" for k in names},
+         "alias": {}, "bport": {str(i): str(i) for i in range(1, 9)}, "arp": {}, "dfdb": {}}
+    macs = {"3": ("20", "aa:bb:cc:00:00:03"), "4": ("20", "aa:bb:cc:00:00:04"), "5": ("1", "aa:bb:cc:00:00:05")}
+    W["qfdb"] = {f"{fid}." + ".".join(str(int(x, 16)) for x in mac.split(":")): bp for bp, (fid, mac) in macs.items()}
+    if with_vlans:
+        W.update(vname={"1": "default", "20": "Cameras", "30": "Guests"}, vegress={"1": "FF", "20": "30", "30": "01"},
+                 vuntag={"1": "CF", "20": "30", "30": "00"}, pvid={**{str(i): "1" for i in range(1, 9)}, "3": "20", "4": "20"},
+                 vfdb={}, lagof={"6": "100", "7": "100"})
+    else:
+        W.update(vname={}, vegress={}, vuntag={}, pvid={}, vfdb={}, lagof={})
+    return W
+
+
+def scan_fake(with_vlans=True):
+    W = _fake_walks(with_vlans)
+    rev = {v: k for k, v in zp.OID.items()}
+    real = (zp.at.snmpwalk, zp.at.snmp_auth, zp.at.lldp_neighbors, zp.entity_media)
+    zp.at.snmpwalk = lambda auth, target, oid: W.get(rev.get(oid), {})
+    zp.at.snmp_auth = lambda *a, **k: (zp.at.SnmpAuth(), "udp:10.0.0.2:161")
+    zp.at.lldp_neighbors = lambda *a, **k: []
+    zp.entity_media = lambda *a, **k: {}
+    try:
+        h = {"hostid": "99", "name": "SW-Test", "host": "sw", "_snmp": {"ip": "10.0.0.2"}, "_macros": {}, "_ips": ["10.0.0.2"]}
+        ports, _ = zp.scan_switch(h, None, [])
+        return {p["name"]: p for p in ports}, zp.VLANS.get("99")
+    finally:
+        zp.at.snmpwalk, zp.at.snmp_auth, zp.at.lldp_neighbors, zp.entity_media = real
+
+
+def test_vlans_and_lag():
+    P, names = scan_fake()
+    g = lambda i: P[f"GigabitEthernet0/0/{i}"]  # noqa: E731
+    check("VLANs: names read from the switch", names == {1: "default", 20: "Cameras", 30: "Guests"}, names)
+    check("VLANs: port 3 is an access port in VLAN 20 (and carries VLAN 1 tagged)",
+          g(3)["vlans"] == {"pvid": 20, "tagged": [1], "untagged": [20]}, g(3)["vlans"])
+    check("VLANs: port 8 carries VLAN 30 tagged, VLAN 1 untagged", g(8)["vlans"] == {"pvid": 1, "tagged": [30], "untagged": [1]}, g(8)["vlans"])
+    check("VLANs: each device's VLAN from the MAC table", g(3)["mac_vlans"] == {"aa:bb:cc:00:00:03": 20}
+          and g(5)["mac_vlans"] == {"aa:bb:cc:00:00:05": 1}, (g(3)["mac_vlans"], g(5)["mac_vlans"]))
+    check("LAG: ports 6 and 7 are members of Eth-Trunk1", g(6)["lag"] == "100" and g(7)["lag"] == "100" and g(1)["lag"] is None)
+    P2, names2 = scan_fake(with_vlans=False)
+    check("VLANs: a switch without Q-BRIDGE-MIB still scans, without VLANs",
+          len(P2) == 9 and not names2 and P2["GigabitEthernet0/0/3"]["vlans"] is None
+          and P2["GigabitEthernet0/0/3"]["macs"] == ["aa:bb:cc:00:00:03"], (names2, P2["GigabitEthernet0/0/3"]))
+    check("VLANs: port bitmaps, also printed with a prefix", zp.portlist("80 01") == [1, 16] and zp.portlist("Hex-STRING: C0") == [1, 2])
+
+
+def test_device_types():
+    cases = [("idrac-7XK2", "Dell Inc.", "oob"), ("pve1", "Dell Inc.", "hypervisor"), ("esx01", "VMware", "hypervisor"),
+             ("", "American Power Conversion", "ups"), ("nvr-office", "Hikvision", "camera"), ("SIP-T46U", "Yealink", "voip"),
+             ("opnsense", "Protectli", "firewall"), ("plc-line1", "Siemens AG", "industrial"), ("washer", "Siemens", "appliance"),
+             ("devolo-magic", "devolo AG", "mediaconv"), ("fritz.box", "AVM", "ont"), ("server01", "Supermicro", "server"),
+             ("EPSON1234", "Seiko Epson", "printer"), ("ds920", "Synology", "nas"), ("esp32", "Espressif", "iot")]
+    got = {n: sm.classify(n, v, "00:11:22:33:44:55") for n, v, _ in cases}
+    check("device types: the 11 categories and the older types are recognised", all(got[n] == t for n, _, t in cases),
+          {n: (got[n], t) for n, _, t in cases if got[n] != t})
+    check("device types: a category switched off is not used (iDRAC -> server, pve1 -> server)",
+          sm.classify("idrac-7XK2", "Dell Inc.", "00:11:22:33:44:55", ["oob"]) == "server"
+          and sm.classify("pve1", "Dell Inc.", "00:11:22:33:44:55", ["hypervisor"]) == "server")
+    check("device types: every category has an icon", all(sm.TYPE_ICON.get(t) for _, t, *_ in sm.DEVICE_CATEGORIES))
+    check("device types: only known categories can be switched off",
+          not sm.validate_settings({"device_types_off": ["oob", "ups"]})[1] and sm.validate_settings({"device_types_off": ["x"]})[1])
+
+
 def main():
     test_labels()
     test_sfp()
+    test_vlans_and_lag()
+    test_device_types()
     test_report()
     test_counters()
     test_zabbix_items()

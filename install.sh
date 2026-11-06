@@ -123,6 +123,55 @@ check_webserver_rules() {   # a rule written for spider-secure.php would block s
 EOW
 }
 
+if [ "${1:-}" = "--uninstall" ]; then
+  # Removes what SpiderMap created, after a plan, a confirmation and a backup.
+  #   --keep-data    keep /etc/spidermap, /var/lib/spidermap and the spidermap user (to install again later)
+  #   --keep-zabbix  leave SpiderMap's items, triggers, dashboards and map in Zabbix
+  #   --yes          do not ask (for scripts)
+  shift; KEEP_DATA=0; KEEP_ZBX=0; YES=0
+  for a in "$@"; do
+    case "$a" in --keep-data) KEEP_DATA=1 ;; --keep-zabbix) KEEP_ZBX=1 ;; --yes|-y) YES=1 ;; *) fail "Unknown option: $a" ;; esac
+  done
+  [ "$(id -u)" = 0 ] || fail "Run as root."
+  say "SpiderMap uninstall. This is what will be removed:"
+  echo "  service: spidermap (and the older spidermap-rt, cron lines, /var/log/spidermap.log if still there)"
+  python3 spidermap.py --uninstall-web --dry-run || true
+  if [ $KEEP_ZBX = 1 ]; then echo "  Zabbix: kept (--keep-zabbix)"
+  else python3 spidermap.py --uninstall-zabbix --dry-run 2>/dev/null || echo "  Zabbix: cannot be reached now - remove the SpiderMap dashboard and the 'autotopo.' items by hand"; fi
+  if [ $KEEP_DATA = 1 ]; then echo "  kept (--keep-data): $CONF, $LIB, the user $SVC_USER"
+  else echo "  $CONF (settings, API token), $LIB (history, logs, backups), the user $SVC_USER"; fi
+  [ -x /usr/local/bin/ookla-speedtest ] && echo "  /usr/local/bin/ookla-speedtest (installed by SpiderMap)"
+  echo "  not touched: system packages, the API token and the iframe setting in Zabbix, $DIR (the code: remove it yourself at the end)"
+  BACKUP="/root/spidermap-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
+  echo "  first, a backup of your settings, devices and history: $BACKUP"
+  if [ $YES != 1 ]; then
+    read -r -p "Type 'remove' to continue: " ans
+    [ "$ans" = "remove" ] || { echo "Nothing removed."; exit 0; }
+  fi
+  ( umask 077; tar czf "$BACKUP" $(for p in "$CONF" "$LIB/state" "$LIB/audit.log" "$LIB/speedtest.json" "$LIB/backup"; do [ -e "$p" ] && echo "$p"; done) 2>/dev/null ) \
+    && echo "  backup written: $BACKUP" || echo "  (nothing to back up)"
+  if [ $KEEP_ZBX != 1 ]; then                       # first, while the API token still exists
+    python3 spidermap.py --uninstall-zabbix || printf '\033[33m%s\033[0m\n' "  some Zabbix objects could not be removed - see above"
+  fi
+  for u in spidermap.service spidermap-rt.service; do
+    systemctl disable --now "$u" >/dev/null 2>&1 || true
+    rm -f "/etc/systemd/system/$u"; rm -rf "/etc/systemd/system/$u.d"
+  done
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  remove_cron_lines 'spidermap.py'; remove_cron_lines 'zabbix_netmap.py'
+  python3 spidermap.py --uninstall-web
+  rm -f /usr/local/bin/ookla-speedtest /var/log/spidermap.log
+  if [ $KEEP_DATA != 1 ]; then
+    rm -rf "$LIB" "$CONF"
+    for f in zabbix.env devices.json; do [ -L "$DIR/$f" ] && rm -f "$DIR/$f"; done
+    id "$SVC_USER" >/dev/null 2>&1 && userdel "$SVC_USER" 2>/dev/null || true
+  fi
+  say "SpiderMap is removed."
+  echo "Remove the code too:   rm -rf $DIR"
+  echo "Your backup:           $BACKUP   (to restore after a new install: tar xzf $BACKUP -C /)"
+  exit 0
+fi
+
 if [ "${1:-}" = "--update" ]; then
   say "Updating SpiderMap to $(python3 spidermap.py --version 2>/dev/null | cut -d' ' -f2)..."
   [ -f zabbix.env ] || [ -f "$CONF/zabbix.env" ] || fail "No zabbix.env - run: bash install.sh"

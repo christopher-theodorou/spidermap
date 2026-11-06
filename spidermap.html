@@ -92,6 +92,9 @@ header h1 img{width:30px;height:30px}
 .sm-foot #sm-state{margin-right:auto;font-size:13.5px;color:var(--muted);max-height:60px;overflow:auto}.sm-foot .sm-btn{width:auto;padding:0 22px;margin:0}
 .sm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
 .sm-cat{border:1px solid var(--border);border-radius:10px;padding:11px 12px;font-size:12.5px;color:var(--muted);opacity:.75}.sm-cat b{display:block;color:var(--text);font-size:13.5px;margin-bottom:2px}
+.sm-dt{border:1px solid var(--border);border-radius:10px;padding:11px 12px;font-size:12.5px;color:var(--muted)}
+.sm-dt.is-off{opacity:.55}.sm-dt-h{display:flex;align-items:center;gap:8px;margin-bottom:4px}.sm-dt-h i{font-size:19px;color:var(--sm-text)}
+.sm-dt-h b{color:var(--text);font-size:13.5px;flex:1}.sm-dt .det{margin-top:5px}.sm-dt .nr{margin-top:6px;font-weight:600;color:var(--text)}
 .sm-log{border:1px solid var(--border);border-radius:8px;font-size:12.5px}.sm-log div{display:grid;grid-template-columns:110px 60px 1fr;gap:8px;padding:7px 10px;border-bottom:1px solid var(--border)}.sm-log div:last-child{border:0}
 @media (max-width:760px){.sm-back{padding:0}.sm{border-radius:0;height:100%}.sm-body{grid-template-columns:1fr;grid-template-rows:auto 1fr}
 .sm-tabs{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--border);padding:8px}.sm-tab{white-space:nowrap;padding:7px 11px}.sm-tab[aria-selected=true]::before{display:none}
@@ -126,7 +129,10 @@ header h1 img{width:30px;height:30px}
 svg line{transition:stroke .2s}
 .ln{stroke:var(--line);stroke-width:1.5}
 .ln.off{stroke:var(--off);stroke-dasharray:4 4}
+#vlan-pop{position:fixed;z-index:40;width:280px;max-height:60vh;overflow:auto;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(10,10,40,.18);padding:10px 12px;font-size:13px}
+.vl-row{display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer}.vl-row .vl-c{margin-left:auto;color:var(--muted);font-size:12px}
 .ln.lw{stroke:var(--warn)}.ln.lc{stroke:var(--bad)}
+.ln.lag{stroke-width:4.5}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
 #mapctl{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:6;transition:right .25s}
 #mapctl button{width:34px;height:34px;border:0;border-radius:7px;background:none;color:var(--muted);font-size:17px;cursor:pointer;display:grid;place-items:center}
 #mapctl button:hover{background:var(--bg);color:var(--accent)}#mapctl button:focus-visible{outline:2px solid var(--accent)}
@@ -261,6 +267,7 @@ table{width:100%;border-collapse:collapse}
   <span class="sp"></span>
   <span class="stat" id="s-time"></span>
   <input class="search" id="q" placeholder="Name, IP or MAC" aria-label="Search devices">
+  <button class="btn tb" id="b-vlan" title="Show VLANs" aria-label="Show VLANs" aria-haspopup="true" style="display:none"><i class="ti ti-filter"></i><span class="bd" id="vlan-bd" style="display:none"></span></button>
   <button class="btn tb" id="b-act" title="Activity" aria-label="Activity"><i class="ti ti-bell"></i><span class="bd" id="act-bd" style="display:none"></span></button>
   <button class="btn" id="b-ppl" title="Who's online" aria-label="Who's online"><i class="ti ti-users"></i></button>
   <button class="btn" id="b-top" title="Top talkers" aria-label="Top talkers"><i class="ti ti-chart-bar"></i></button>
@@ -293,7 +300,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.5.3";
+const PAGE_VERSION = "0.6.0";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -392,7 +399,7 @@ function index() {
   $("#s-off").innerHTML = `<i class="dot" style="background:var(--off)"></i>${all.length - on} offline`;
   const nw = all.filter(n => n.flags.includes("new") || n.flags.includes("unknown")).length;
   $("#s-new").innerHTML = nw ? `<i class="dot" style="background:var(--accent)"></i>${nw} new / unknown` : "";
-  scanPill();
+  scanPill(); vlanButton();
 }
 function status(n) { return (LIVE.nodes && LIVE.nodes[n.id]) || n.status; }
 function portLive(ref) {
@@ -635,7 +642,7 @@ async function sendToService(body, done) {
 /* ---------- settings dialog (design: the "SpiderMap v0.5.0 - Settings" artifact) ---------- */
 const SM = { open: false, tab: "Scans", draft: {}, errors: {}, saved: false };
 const SM_TABS = [["General", "settings"], ["Scans", "search"], ["SNMP", "stack-2"], ["Topology", "topology-star-3"],
-  ["Wireless & WAN", "wifi", "0.6"], ["Device types", "cpu", "0.6"], ["Measurements", "chart-bar"], ["Security", "shield"], ["Logging", "file-text"]];
+  ["Wireless & WAN", "wifi", "0.7"], ["Device types", "cpu"], ["Measurements", "chart-bar"], ["Security", "shield"], ["Logging", "file-text"]];
 const smF = k => SETTINGS.schema.find(f => f.key === k);
 const smSame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const smDirtyKeys = () => SETTINGS && SETTINGS.values ? Object.keys(SM.draft).filter(k => !smSame(SM.draft[k], SETTINGS.values[k])) : [];
@@ -736,11 +743,11 @@ const SM_PREVIEW = {
     ["Powerline & media converters", "Managed models", "Vendor tools where available"],
     ["Out-of-band management", "iLO, iDRAC, IPMI, console servers", "Separate management network"]] };
 function smPreview(tab) {
-  let h = `<h3>${esc(tab)}<span class="sm-badge new">New in v0.6</span></h3><div class="sm-note" style="margin:0 0 14px"><i class="ti ti-info-circle"></i><span>Planned for SpiderMap 0.6.0. Shown here so you can see what is coming; nothing in this tab is active yet.</span></div>`;
+  let h = `<h3>${esc(tab)}<span class="sm-badge new">New in v0.7</span></h3><div class="sm-note" style="margin:0 0 14px"><i class="ti ti-info-circle"></i><span>Planned for SpiderMap 0.7.0. Shown here so you can see what is coming; nothing in this tab is active yet.</span></div>`;
   if (tab === "Device types")
     return h + `<div class="sm-grid">${SM_PREVIEW[tab].map(c => `<div class="sm-cat"><b>${esc(c[0])}</b>${esc(c[1])}<div style="margin-top:6px">Detection: ${esc(c[2])}</div></div>`).join("")}</div>`;
   for (const [g, items] of SM_PREVIEW[tab])
-    h += `<h4>${esc(g)}</h4>` + items.map(([l, d]) => `<div class="sm-row sw dis"><span class="lb">${esc(l)}${smInfo(d)}<span class="sm-mini">v0.6</span></span><label class="sm-switch"><input type="checkbox" disabled aria-label="Not available yet"><span></span></label></div>`).join("");
+    h += `<h4>${esc(g)}</h4>` + items.map(([l, d]) => `<div class="sm-row sw dis"><span class="lb">${esc(l)}${smInfo(d)}<span class="sm-mini">v0.7</span></span><label class="sm-switch"><input type="checkbox" disabled aria-label="Not available yet"><span></span></label></div>`).join("");
   return h;
 }
 function smLogRows() {
@@ -752,7 +759,15 @@ function smLogRows() {
   return rows.slice(0, 12).map(r => `<div><span>${new Date(r[0] * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span><b class="${r[1] === "ERROR" ? "badc" : ""}" style="color:${r[1] === "ERROR" ? "" : "var(--sm-text)"}">${r[1]}</b><span>${esc(r[2])}</span></div>`).join("") || '<div><span></span><span></span><span style="color:var(--muted)">Nothing yet.</span></div>';
 }
 function smTab(tab) {
-  if (tab === "Wireless & WAN" || tab === "Device types") return smPreview(tab);
+  if (tab === "Wireless & WAN") return smPreview(tab);
+  if (tab === "Device types") {
+    const off = SM.draft.device_types_off || [], cats = SETTINGS.device_categories || [];
+    const cnt = k => DATA ? DATA.nodes.filter(n => n.kind === "device" && n.type === k).length : 0;
+    return `<h3>Device types</h3><p style="color:var(--muted);font-size:13.5px;margin:-4px 0 14px">Which kinds of devices SpiderMap recognises, and how. A category that is off is not recognised: its devices get the next matching type, or "unknown". A type you set with Edit always wins.</p>`
+      + `<div class="sm-grid">${cats.map(c => `<div class="sm-dt${off.includes(c.key) ? " is-off" : ""}"><div class="sm-dt-h"><i class="ti ti-${esc(c.icon)}"></i><b>${esc(c.title)}</b>`
+      + `<label class="sm-switch" title="${off.includes(c.key) ? "Off" : "On"}"><input type="checkbox" role="switch" data-dt="${esc(c.key)}" aria-label="${esc(c.title)}" ${off.includes(c.key) ? "" : "checked"}><span></span></label></div>`
+      + `<div class="ex">${esc(c.examples)}</div><div class="det">Detection: ${esc(c.detect)}</div><div class="nr">${cnt(c.key) ? cnt(c.key) + " on your network" : "none found"}</div></div>`).join("")}</div>`;
+  }
   if (tab === "Scans")
     return `<div class="sm-cols"><div><h3>Scan schedule</h3>${smGroups("Scans")}
       <div class="sm-note"><i class="ti ti-info-circle"></i><span><b>Note:</b> the size of SNMP packets (max-repetitions) is set separately in the <a data-go-tab="SNMP">SNMP</a> tab and does not depend on the ICMP payload.</span></div></div>
@@ -832,7 +847,13 @@ function smWire() {
   };
   const main = $("#sm-main");
   main.addEventListener("change", e => {
-    const el = e.target, k = el.dataset.k; if (!k) return;
+    const el = e.target;
+    if (el.dataset.dt) {                                   // Device types: a category on / off
+      const off = new Set(SM.draft.device_types_off || []);
+      el.checked ? off.delete(el.dataset.dt) : off.add(el.dataset.dt);
+      SM.draft.device_types_off = [...off].sort(); smRender(); return;
+    }
+    const k = el.dataset.k; if (!k) return;
     if (el.id === "st-imp") return;
     const f = smF(k); if (f.type === "cidrs" || f.type === "ips") return;
     smSet(k, el.type === "checkbox" ? el.checked : el.value);
@@ -976,12 +997,15 @@ function statsHtml(id) {
   if (hs && (st.cpu || st.mem)) h += `<div class="lgd" style="margin-top:8px"><span><i style="background:var(--accent)"></i>CPU</span><span><i style="background:var(--pur)"></i>Memory</span><span style="margin-left:auto">last ${Math.round(hs.length)} min</span></div>` + spark(hs, 1, 2, 100);
   return h;
 }
-const TYPES = { router: "router", switch: "server-2", unifi: "cloud", camera: "device-cctv", tv: "device-tv", laptop: "device-laptop", desktop: "device-desktop", phone: "device-mobile", printer: "printer", appliance: "wash-machine", iot: "bulb", nas: "database", server: "server", vm: "device-desktop", lxc: "box", unknown: "help-circle" };
+const TYPES = { router: "router", switch: "server-2", unifi: "cloud", camera: "device-cctv", tv: "device-tv", laptop: "device-laptop", desktop: "device-desktop", phone: "device-mobile", printer: "printer", appliance: "wash-machine", iot: "bulb", nas: "database", server: "server", vm: "device-desktop", lxc: "box", unknown: "help-circle",
+  firewall: "shield-lock", ont: "building-broadcast-tower", ups: "battery-charging", voip: "phone", hypervisor: "server-cog",
+  industrial: "building-factory-2", mediaconv: "arrows-exchange", oob: "terminal-2" };
+const TYPE_LABEL = { ont: "ONT / modem", ups: "UPS / PDU", voip: "IP phone / PBX", mediaconv: "powerline / media converter", oob: "out-of-band management", iot: "IoT", lxc: "LXC", vm: "VM", tv: "TV", nas: "NAS" };
 function editForm(n) {
   const url = (n.url || "").split(n.ip || "\u0000").join("{ip}");
   return `<div class="ef" id="ef" style="display:none"><div class="sec">Edit device</div>
     <label for="e-name">Name</label><input type="text" id="e-name" value="${esc(n.name)}">
-    <label for="e-type">Type (icon)</label><select id="e-type">${Object.keys(TYPES).map(t => `<option ${t === n.type ? "selected" : ""}>${t}</option>`).join("")}</select>
+    <label for="e-type">Type (icon)</label><select id="e-type">${Object.keys(TYPES).map(t => `<option value="${t}" ${t === n.type ? "selected" : ""}>${esc(TYPE_LABEL[t] || t)}</option>`).join("")}</select>
     <label for="e-url">Web UI address</label><input type="text" id="e-url" value="${esc(url)}" placeholder="http://{ip}:8080">
     <div style="font-size:11px;color:var(--muted);margin-top:3px">{ip} is replaced by the device's current IP.</div>
     <label for="e-pin">Pin to port (optional)</label><input type="text" id="e-pin" placeholder="SW-Office:3">
@@ -1009,8 +1033,56 @@ async function saveEdit(n) {
 
 /* ---------- layout + render ---------- */
 // the children shown under a node: offline devices can be hidden (Settings > General)
+// VLAN filter (per browser): null = all VLANs; otherwise the VLAN ids shown ("none" = devices without VLAN information)
+let VSEL = (() => { const v = store("nm-vlans"); return Array.isArray(v) ? new Set(v.map(String)) : null; })();
+const vlanOk = n => !VSEL || n.kind !== "device" || VSEL.has(n.vlan ? String(n.vlan) : "none");
 function shownKids(id) {
-  return (kids[id] || []).filter(k => DISP.show_offline || !(byId[k].kind === "device" && ["off", "asleep"].includes(status(byId[k])) && !(kids[k] || []).length));
+  return (kids[id] || []).filter(k => {
+    const n = byId[k];
+    if (!DISP.show_offline && n.kind === "device" && ["off", "asleep"].includes(status(n)) && !(kids[k] || []).length) return false;
+    if (!vlanOk(n)) return !!(kids[k] || []).length && shownKids(k).length > 0;       // a filtered device that has shown children stays
+    if (VSEL && n.kind === "group") return shownKids(k).length > 0;                  // an empty group disappears
+    return true;
+  });
+}
+function portVlanTxt(p, sw) {
+  const v = p.vlans, bits = [];
+  if (v) {
+    const unt = (v.untagged || []).filter(x => x !== v.pvid);
+    if (v.pvid) bits.push("VLAN " + v.pvid + (unt.length ? "+" + unt.join("+") : ""));
+    else if (unt.length) bits.push("VLAN " + unt.join("+"));
+    if ((v.tagged || []).length) bits.push("tagged " + (v.tagged.length > 3 ? v.tagged.length + " VLANs" : v.tagged.join(", ")));
+  }
+  if (p.lag) { const a = sw.ports.find(q => pidOf(q) === String(p.lag)); bits.push("in " + (a ? a.label : "LAG")); }
+  if (p.media) bits.push(p.media);
+  return bits.length ? `<div style="font-size:10.5px;color:var(--muted)">${esc(bits.join(" · "))}</div>` : "";
+}
+function vlanButton() {
+  const b = $("#b-vlan"), V = DATA && DATA.vlans ? DATA.vlans : {}, n = Object.keys(V).length;
+  b.style.display = n ? "" : "none";
+  const bd = $("#vlan-bd"); if (VSEL) { bd.style.display = ""; bd.textContent = VSEL.size; } else bd.style.display = "none";
+  b.title = VSEL ? `Showing ${VSEL.size} of ${n} VLANs` : "Show VLANs";
+}
+function vlanMenu() {
+  const old = $("#vlan-pop"); if (old) { old.remove(); return; }
+  const V = DATA.vlans || {}, devs = DATA.nodes.filter(n => n.kind === "device");
+  const none = devs.filter(n => !n.vlan).length, on = id => !VSEL || VSEL.has(id);
+  const rows = Object.entries(V).map(([id, x]) => [id, `${id} · ${x.name}`, x.devices]).concat(none ? [["none", "No VLAN information", none]] : []);
+  const pop = document.createElement("div"); pop.id = "vlan-pop"; pop.setAttribute("role", "dialog"); pop.setAttribute("aria-label", "VLAN filter");
+  pop.innerHTML = `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><b>VLANs</b><span style="margin-left:auto"></span><button class="btn" id="vl-all" style="padding:2px 8px;font-size:12px">All</button><button class="btn" id="vl-none" style="padding:2px 8px;font-size:12px">None</button></div>`
+    + rows.map(([id, label, c]) => `<label class="vl-row"><input type="checkbox" data-vl="${esc(id)}" ${on(id) ? "checked" : ""}><span>${esc(label)}</span><span class="vl-c">${c}</span></label>`).join("")
+    + `<div style="font-size:11px;color:var(--muted);margin-top:6px">Switches and the gateway are always shown.</div>`;
+  document.body.appendChild(pop);
+  const r = $("#b-vlan").getBoundingClientRect(); pop.style.top = (r.bottom + 6) + "px"; pop.style.left = Math.max(8, Math.min(r.left, innerWidth - 290)) + "px";
+  const apply_ = () => {
+    const ids = [...pop.querySelectorAll("[data-vl]")].filter(c => c.checked).map(c => c.dataset.vl);
+    VSEL = ids.length === rows.length ? null : new Set(ids); store("nm-vlans", VSEL ? [...VSEL] : null);
+    vlanButton(); render();
+  };
+  pop.querySelectorAll("[data-vl]").forEach(c => c.onchange = apply_);
+  $("#vl-all").onclick = () => { pop.querySelectorAll("[data-vl]").forEach(c => { c.checked = true; }); apply_(); };
+  $("#vl-none").onclick = () => { pop.querySelectorAll("[data-vl]").forEach(c => { c.checked = false; }); apply_(); };
+  setTimeout(() => document.addEventListener("pointerdown", function off(e) { if (!pop.contains(e.target) && !e.target.closest("#b-vlan")) { pop.remove(); document.removeEventListener("pointerdown", off); } }), 0);
 }
 function W(id) { const c = shownKids(id); return (!c.length || isFolded(id)) ? 1 : c.reduce((a, k) => a + W(k), 0); }
 // orientation of the tree: "v" (levels downwards) or "h" (levels to the right), per browser
@@ -1057,7 +1129,7 @@ function render() {
         xs.push(cc);
         // the child's own line: from the bus to the child
         const [x1, y1, x2, y2] = H ? [bus, cc, (d + 1) * HD + 62 - 27, cc] : [cc, bus, cc, bus + 36];
-        line(x1, y1, x2, y2, off ? "off" : lk.cls, k, lk.w);
+        line(x1, y1, x2, y2, (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : ""), k, lk.w);
         if (dur) svg += `<line class="fl" style="animation-duration:${dur}s" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
         if (ch.port) extra += H ? `<div class="pt" style="left:${(x1 + x2) / 2}px;top:${cc - 21}px">${esc(ch.port)}</div>`
                                : `<div class="pt" style="left:${cc}px;top:${bus + 12}px">${esc(ch.port)}</div>`;
@@ -1258,7 +1330,7 @@ function panel(id, quiet) {
       + `<div style="margin-top:8px"><span class="spd"><i style="background:var(--warn)"></i>10/100 Mbps</span><span class="spd"><i style="background:var(--ok)"></i>1 Gbps</span><span class="spd"><i style="background:var(--accent)"></i>2.5 Gbps</span><span class="spd"><i style="background:var(--pur)"></i>10 Gbps</span></div>`;
     h += `<div class="sec">Port clients</div><table class="lst"><tr class="h"><td>Port</td><td>Client</td><td>Speed</td><td>Traffic</td></tr>${sw.ports.filter(p => st(p) === "up" || p.clients.length).map(p => {
       const l = live[pidOf(p)];
-      return `<tr class="${selPort === pidOf(p) ? "on" : ""}" data-pr="${esc(pidOf(p))}"><td>${esc(p.label)}</td><td>${esc(p.clients.join(", ") || (p.alias || "—"))}${ci(p) ? `<div style="color:var(--warn);font-size:11px">cable? ${esc(ci(p).join("; "))}</div>` : ""}</td><td>${esc(p.speed || (st(p) === "up" ? "" : "down"))}</td><td style="white-space:nowrap">${l ? "↓" + mbps(l.tx, (p.speed_mbps || 0) * 1e6) + " ↑" + mbps(l.rx, (p.speed_mbps || 0) * 1e6) : ""}</td></tr>`;
+      return `<tr class="${selPort === pidOf(p) ? "on" : ""}" data-pr="${esc(pidOf(p))}"><td>${esc(p.label)}${portVlanTxt(p, sw)}</td><td>${esc(p.clients.join(", ") || (p.alias || "—"))}${ci(p) ? `<div style="color:var(--warn);font-size:11px">cable? ${esc(ci(p).join("; "))}</div>` : ""}</td><td>${esc(p.speed || (st(p) === "up" ? "" : "down"))}</td><td style="white-space:nowrap">${l ? "↓" + mbps(l.tx, (p.speed_mbps || 0) * 1e6) + " ↑" + mbps(l.rx, (p.speed_mbps || 0) * 1e6) : ""}</td></tr>`;
     }).join("")}</table>`;
   }
   if (kids[id] && kids[id].length) h += `<div class="sec">${n.kind === "switch" ? "Connected" : "Clients"} · ${kids[id].length}</div>` + rowsTable(kids[id]);
@@ -1466,6 +1538,7 @@ const every = (fn, ms) => setInterval(() => { if (!document.hidden) fn(); }, ms)
 setRefresh(60); every(loadRT, 5000); every(loadEvents, 20000); every(loadPresence, 300000); every(loadStatus, 10000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { load(); loadLive(); loadRT(); loadStatus(); } });
 $("#b-hlt").onclick = () => special("health");
+$("#b-vlan").onclick = () => { if (DATA) vlanMenu(); };
 smWire();
 $("#b-set").onclick = () => smOpen();
 $("#s-time").onclick = () => special("health");

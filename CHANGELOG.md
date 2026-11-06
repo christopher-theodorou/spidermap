@@ -4,6 +4,32 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.6.0] - 2026-11-06
+
+### Added
+- **VLANs.** SpiderMap reads, where the switches offer it (Q-BRIDGE-MIB), the VLAN names, which VLANs each port
+  carries (untagged / tagged) and the VLAN of every device (from the MAC table). A **VLAN filter** in the header
+  shows only the VLANs you choose (remembered per browser); switches and the gateway always stay. The port table
+  shows each port's VLANs, and a device's panel its VLAN. Switches without Q-BRIDGE-MIB work as before, without
+  VLANs. Settings > Topology > *VLANs* switches it off.
+- **Device types** (Settings > Device types, as in the design): 11 categories with their own icons - firewalls &
+  gateways, ONT / provider modems, UPS & smart PDU, IP cameras & NVR, IP phones & PBX, printers, NAS & storage,
+  hypervisors, industrial & IoT (only ever read), powerline & media converters, out-of-band management (iLO,
+  iDRAC, IPMI). Each card says how the devices are recognised and how many are on your network, and can be
+  switched off. A type set with Edit always wins.
+- **Link aggregation and fibre on the map.** A link over a LAG is drawn as one thicker link, named after the LAG
+  and its member ports (IEEE8023-LAG-MIB); links on SFP ports are drawn dashed in purple. The port table says which
+  ports belong to a LAG.
+- **Uninstall:** `bash install.sh --uninstall` shows exactly what it will remove, asks, writes a backup of your
+  settings, devices and history to `/root/spidermap-backup-<time>.tar.gz`, then removes the service, the
+  `spidermap` user, `/etc/spidermap`, `/var/lib/spidermap`, SpiderMap's files in the Zabbix web folder (only files
+  that carry SpiderMap's mark) and, in Zabbix, only its `autotopo.*` items (with their triggers) and its
+  dashboards and map. `--keep-data` keeps settings and history, `--keep-zabbix` leaves Zabbix untouched, `--yes`
+  does not ask.
+
+### Fixed
+- An unknown device without a name showed its MAC address twice in the activity feed.
+
 ## [0.5.3] - 2026-11-06
 
 ### Changed
@@ -295,6 +321,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.6.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.0
 [0.5.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.3
 [0.5.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.2
 [0.5.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.1

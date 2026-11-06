@@ -59,6 +59,19 @@ and a job that was running is marked *interrupted*. It writes `spidermap_status.
 health) for the page. Job output goes to `/var/lib/spidermap/spidermap.log` (2 MB + one older file); the service
 itself logs to the journal (`journalctl -u spidermap`).
 
+**VLANs and link aggregation** come from Q-BRIDGE-MIB (`dot1qVlanStaticName`, `dot1qVlanStaticEgressPorts` /
+`UntaggedPorts` read as hex bitmaps, `dot1qPvid`, `dot1qVlanFdbId`; the VLAN of a device is the fdb id in
+`dot1qTpFdbPort`) and IEEE8023-LAG-MIB (`dot3adAggPortAttachedAggID`), in `scan_switch()` and `vlan_tables()`.
+Both are optional: a switch without them is scanned as before.
+
+**Device types:** `DEVICE_CATEGORIES` in `spidermap.py` (key, type, title, examples, how it is detected, regex on
+name / DNS name / manufacturer) is checked before the older `CLASSIFY` rules; categories in `device_types_off` are
+skipped. The Settings > Device types tab is built from it.
+
+**Uninstall:** `install.sh --uninstall` drives it; `spidermap.py --uninstall-zabbix` / `--uninstall-web`
+(with `--dry-run`) remove only `autotopo.*` items, SpiderMap's dashboards and map, and web files that carry
+`REDIRECT_MARK` or are SpiderMap's gateway.
+
 **Internet and throughput.** Every 15 s the service pings Cloudflare, Google and Quad9; when all fail it checks
 again at once before recording an outage (`inet_update()`). Time with no check for over 2 minutes (service stopped,
 server off) is recorded as a gap (`inet_start()`), and `month_uptime()` counts uptime over the monitored time only.

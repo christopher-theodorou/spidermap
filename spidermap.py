@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.5.3"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.6.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -85,7 +85,47 @@ TYPE_ICON = {"router": "router", "switch": "server-2", "ap": "access-point", "un
              "camera": "device-cctv", "tv": "device-tv", "laptop": "device-laptop",
              "desktop": "device-desktop", "phone": "device-mobile", "printer": "printer",
              "appliance": "wash-machine", "iot": "bulb", "nas": "database", "server": "server",
-             "vm": "device-desktop", "lxc": "box", "guest": "box", "unknown": "help-circle"}
+             "vm": "device-desktop", "lxc": "box", "guest": "box", "unknown": "help-circle",
+             "firewall": "shield-lock", "ont": "building-broadcast-tower", "ups": "battery-charging", "voip": "phone",
+             "hypervisor": "server-cog", "industrial": "building-factory-2", "mediaconv": "arrows-exchange",
+             "oob": "terminal-2"}
+
+# Device categories (Settings > Device types). Specific ones come before general ones: the first match wins.
+# key, types it gives, title, examples, how it is detected, regex on "name dns-name manufacturer"
+DEVICE_CATEGORIES = [
+    ("oob", "oob", "Out-of-band management", "iLO, iDRAC, IPMI, console servers",
+     "Name (ilo-, idrac-, ipmi, bmc) and manufacturer (Opengear, Avocent, Lantronix)",
+     r"\bilo\b|ilo[-_]|idrac|ipmi|\bbmc\b|bmc[-_]|xclarity|\bimm[-_]|opengear|avocent|lantronix|console.?server"),
+    ("firewall", "firewall", "Firewalls & gateways", "pfSense, OPNsense, FortiGate, Sophos",
+     "Name and manufacturer (Fortinet, Sophos, SonicWall, WatchGuard, Netgate)",
+     r"pfsense|opnsense|fortigate|fortinet|sophos|sonicwall|watchguard|netgate|firewall|\bfw\b|fw[-_]"),
+    ("ont", "ont", "ONT / provider modem", "Fibre routers, VDSL, cable",
+     "Name (ont, modem) and manufacturer (Sagemcom, Technicolor, ZTE, AVM, Genexis, Nokia)",
+     r"\bont\b|ont[-_]|modem|fritz|sagemcom|technicolor|genexis|\bzte\b|nokia.*(g-|ont)"),
+    ("ups", "ups", "UPS & smart PDU", "APC, Eaton, CyberPower, Riello, Raritan",
+     "Name (ups, pdu) and manufacturer (APC / Schneider, Eaton, CyberPower, Riello, Raritan, Vertiv)",
+     r"\bups\b|ups[-_]|american power|\bapc\b|eaton|cyberpower|riello|\bpdu\b|pdu[-_]|raritan|vertiv|netbotz"),
+    ("camera", "camera", "IP cameras & NVR", "Hikvision, Dahua, Axis, UniView, Reolink",
+     "Name (cam, ipc, nvr, dvr) and manufacturer",
+     r"\bipc\b|ipc[-_.]|cam|cctv|\bnvr\b|nvr[-_]|\bdvr\b|hikvision|dahua|reolink|tapo|vigi|imou|ezviz|axis comm|uniview|amcrest|hanwha"),
+    ("voip", "voip", "IP phones & PBX", "Yealink, Grandstream, Snom, 3CX",
+     "Name (sip, voip, pbx) and manufacturer (Yealink, Grandstream, Snom, Fanvil, Poly, Gigaset)",
+     r"yealink|grandstream|snom|fanvil|polycom|\bpoly\b|gigaset|cisco.?ip.?phone|\bsip[-_]|voip|\bpbx\b|pbx[-_]|3cx|asterisk|freepbx"),
+    ("printer", "printer", "Printers", "All network printers", "Name and manufacturer (Epson, Brother, Canon, HP, Lexmark)",
+     r"epson|printer|brother|canon|lexmark|laserjet|officejet|deskjet|kyocera|ricoh|xerox"),
+    ("nas", "nas", "NAS & storage", "Synology, QNAP, TrueNAS, OpenMediaVault",
+     "Name and manufacturer (Synology, QNAP)", r"\bomv\b|openmediavault|nas\b|synology|qnap|truenas|unraid"),
+    ("hypervisor", "hypervisor", "Hypervisors", "Proxmox, VMware ESXi, Hyper-V, XCP-ng",
+     "Name, manufacturer (VMware) and the Proxmox API: many VMs behind one physical port",
+     r"proxmox|\bpve\d*\b|pve[-_]|esxi|vmware|vsphere|hyper-?v|xcp-?ng|xenserver|nutanix"),
+    ("industrial", "industrial", "Industrial & IoT", "PLC, BMS, sensors (read only)",
+     "Name and manufacturer (Siemens SIMATIC, Schneider, WAGO, Beckhoff, Moxa); only ever read, never written to",
+     r"simatic|siemens.?s7|\bs7-|\bplc\b|modbus|bacnet|wago|beckhoff|phoenix.?contact|moxa|advantech|loytec|schneider elec"),
+    ("mediaconv", "mediaconv", "Powerline & media converters", "devolo, TP-Link powerline, managed converters",
+     "Name and manufacturer (devolo, powerline adapters, media converters)",
+     r"devolo|powerline|homeplug|tl-?pa\d|tl-?wpa|media.?converter"),
+]
+DEVICE_CATEGORY_KEYS = [c[0] for c in DEVICE_CATEGORIES]
 
 CLASSIFY = [  # (regex on "name vendor", type) - first match wins
     (r"cloud.?key|unifi|ubiquiti", "unifi"),
@@ -425,12 +465,17 @@ def vendor_of(mac):
     return _OUI.get(mac[:8], "")
 
 
-def classify(name, vendor, mac):
+def classify(name, vendor, mac, off=()):
+    """Device type from its name / DNS name and manufacturer. Categories switched off in Settings > Device types
+    are skipped: their devices get the next matching type, or "unknown"."""
     text = f"{name} {vendor}".lower()
     if mac.startswith("bc:24:11"):
         return "guest"
+    for key, typ, _t, _e, _d, rx in DEVICE_CATEGORIES:
+        if key not in off and re.search(rx, text):
+            return typ
     for rx, t in CLASSIFY:
-        if re.search(rx, text):
+        if t not in ("camera", "printer", "nas") and re.search(rx, text):     # those three are categories above
             return t
     return "phone" if is_private_mac(mac) else "unknown"
 
@@ -578,7 +623,8 @@ def full_scan(api, community=None, quiet=False):
                 raise RuntimeError("SNMP collection is off (Settings > Scans)")
             ports, sarp = zp.scan_switch(h, community, hosts)
             # a plain-JSON copy (sets become sorted lists), so the cache can always be saved with the state
-            cache[h["hostid"]] = {"t": t_sw, "ports": json.loads(json.dumps(ports, default=sorted)), "sarp": dict(sarp)}
+            cache[h["hostid"]] = {"t": t_sw, "ports": json.loads(json.dumps(ports, default=sorted)), "sarp": dict(sarp),
+                                  "vlans": {str(k): v for k, v in zp.VLANS.get(h["hostid"], {}).items()}}
             report["switches"][h["hostid"]] = {"name": h["name"], "ok": True, "ports": len(ports), "seconds": now() - t_sw}
         except Exception as e:  # noqa: BLE001
             # one switch not answering must not make its devices look offline: use its last good data for 30 min
@@ -586,6 +632,7 @@ def full_scan(api, community=None, quiet=False):
             msg = str(e)[:200] or type(e).__name__
             if old and (t0 - old["t"] <= 1800 or not S["snmp_collection"]):
                 ports, sarp = old["ports"], old["sarp"]
+                zp.VLANS[h["hostid"]] = {int(k): v for k, v in (old.get("vlans") or {}).items()}
                 report["partial"] = True
                 report["switches"][h["hostid"]] = {"name": h["name"], "ok": False, "error": msg,
                                                    "used_from": old["t"], "ports": len(ports)}
@@ -603,6 +650,14 @@ def full_scan(api, community=None, quiet=False):
             arp.setdefault(mac, (ip, "STALE"))
         say(f"  {h['name']}: {len(ports)} ports, {sum(p['status'] == 'up' for p in ports)} up")
     scan_progress(82, "building the map")
+    vlan_names, mac_vlan = {}, {}
+    if S["topo_vlans"]:
+        for sid, s_ in sw.items():
+            vlan_names.update(zp.VLANS.get(sid, {}))
+            for p in s_["ports"]:
+                for m_, v_ in (p.get("mac_vlans") or {}).items():
+                    if len(p.get("macs") or []) <= 2 or m_ not in mac_vlan:     # an access port knows best
+                        mac_vlan[m_] = v_
     port_media = cfg.get("settings", {}).get("port_media", {})
     for s_ in sw.values():
         label_ports(s_["ports"], port_media.get(s_["host"]["name"]) or port_media.get(s_["host"]["host"]) or {})
@@ -778,7 +833,7 @@ def full_scan(api, community=None, quiet=False):
         d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
         ip, name = d.get("ip", ""), dname(mac)
         vendor = vendor_of(mac)
-        typ = c.get("type") or (g and g["kind"]) or classify(f"{name} {d.get('dns', '')}", vendor, mac)
+        typ = c.get("type") or (g and g["kind"]) or classify(f"{name} {d.get('dns', '')}", vendor, mac, S["device_types_off"])
         h = host_by_ip.get(ip)
         is_on = mac in online
         if g and g["status"] and not is_on:
@@ -812,6 +867,8 @@ def full_scan(api, community=None, quiet=False):
             conn = "via " + nodes[parent]["name"]
         det = [["IP", ip or "-"], ["MAC", mac], ["Manufacturer", vendor or "-"], ["Type", typ],
                ["Connection", conn or "-"]]
+        if mac_vlan.get(mac):
+            det.append(["VLAN", f"{mac_vlan[mac]} · {vlan_names.get(mac_vlan[mac], 'VLAN ' + str(mac_vlan[mac]))}"])
         if g:
             det.append(["Proxmox", f"{g['kind'].upper()} {g['vmid']} on {g['node']} · {g['status']}"])
         if d.get("loc_prev") and "moved" in flags:
@@ -824,7 +881,9 @@ def full_scan(api, community=None, quiet=False):
         n = add("d-" + mac.replace(":", ""), parent, name=name, sub=sub, icon=TYPE_ICON.get(typ, "help-circle"),
                 logo=c.get("logo") or logo_for(name, webd), kind="device", type=typ, status=st, flags=flags,
                 details=det, ip=ip, mac=mac, url=web_url(name, ip, c.get("url", "")), zbx=h["hostid"] if h else "",
-                port=port_lbl, port_ref=port_ref, vendor=vendor, conn=conn or "-",
+                port=port_lbl, port_ref=port_ref, vendor=vendor, conn=conn or "-", vlan=mac_vlan.get(mac),
+                link="fiber" if port_ref and (next((p for p in sw[port_ref[0]]["ports"] if p["pid"] == port_ref[1]), None)
+                                               or {}).get("media") else "",
                 first=d.get("first_seen", 0), last=t if is_on else d.get("last_seen", 0))
         by_mac[mac] = n["id"]
         return n
@@ -856,11 +915,22 @@ def full_scan(api, community=None, quiet=False):
             rb = next((p for p in sw[sid]["ports"] if zp.norm(p["name"]) == zp.norm(pb)), None)
             parent, lbl = "s-" + par, f"{plabel(par, pa)} ↔ {rb['label'].replace('Port ', '') if rb else pb}"
             pref = [par, pid_of(par, pa)]
+            # a link aggregation: name the LAG, and draw the link as one thicker link
+            mine = _pinfo.get((par, pa), {})
+            agg = next((q for q in sw[par]["ports"] if mine.get("lag") and str(q.get("ifindex")) == str(mine["lag"])), None) \
+                or (mine if mine.get("kind") == "lag" else None)
+            if agg:
+                members = [q["label"].replace("Port ", "") for q in sw[par]["ports"] if str(q.get("lag")) == str(agg.get("ifindex"))]
+                lbl = f"{agg['label']}" + (f" ({'+'.join(members)})" if members else "") + f" ↔ {rb['label'].replace('Port ', '') if rb else pb}"
+                link_kind = "lag"
+            else:
+                link_kind = "fiber" if mine.get("media") else ""
         else:
+            link_kind = "fiber" if gw_loc and sid == root_sw and _pinfo.get((sid, gw_loc[1]), {}).get("media") else ""
             parent, lbl = gw_id, (plabel(sid, gw_loc[1]) if gw_loc and sid == root_sw else "")
             pref = [sid, pid_of(sid, gw_loc[1])] if gw_loc and sid == root_sw else None
         add("s-" + sid, parent, name=h["name"], sub="." + h["_snmp"]["ip"].split(".")[-1], icon="server-2",
-            kind="switch", sw=sid, status="up", port=lbl, port_ref=pref, zbx=sid, flip=sid not in parent_of,
+            kind="switch", sw=sid, status="up", port=lbl, port_ref=pref, zbx=sid, flip=sid not in parent_of, link=link_kind,
             url=f"http://{h['_snmp']['ip']}",
             details=[["IP", h["_snmp"]["ip"]], ["Ports up", f"{up} of {len(sw[sid]['ports'])}"]])
 
@@ -963,7 +1033,8 @@ def full_scan(api, community=None, quiet=False):
                 clients.setdefault(pid_of(sid, pa), []).append(sw_name[b])
         switches_out[sid] = {"name": sw_name[sid], "ports": [
             {"id": p["pid"], "n": p.get("pos", 0), "label": p["label"], "kind": p.get("kind", "port"),
-             "media": p.get("media", ""),
+             "media": p.get("media", ""), "vlans": p.get("vlans") if S["topo_vlans"] else None,
+             "lag": next((q["pid"] for q in sw[sid]["ports"] if str(q.get("ifindex")) == str(p.get("lag"))), None),
              "full": p["name"], "status": p["status"], "speed_mbps": p.get("speed_mbps", 0),
              "speed": p["speed"], "alias": p["alias"], "ifindex": p.get("ifindex"),
              "downgrade": downgrade.get(f"{sid}:{p['name']}", ""),
@@ -991,7 +1062,7 @@ def full_scan(api, community=None, quiet=False):
         if d.get("new_at") == t:
             if mac not in dcfg and wired:
                 who = dname(mac) if dname(mac) in (mac, d.get("ip")) else f"{dname(mac)} ({d.get('ip') or mac})"
-                evs.append(ev("security", "warn", f"Unknown device plugged into {loc_text(loc)}: {who} [{mac}]", nid(mac)))
+                evs.append(ev("security", "warn", f"Unknown device plugged into {loc_text(loc)}: {who}" + ("" if who == mac else f" [{mac}]"), nid(mac)))
             else:
                 ident = d.get("ip") or mac
                 who = dname(mac) if dname(mac) == ident else f"{dname(mac)} ({ident})"
@@ -1046,7 +1117,10 @@ def full_scan(api, community=None, quiet=False):
     data = {"generated": t, "generated_text": iso(t), "page_version": pv, "conflicts": conflicts,
             "public_ip_history": state.get("public_ip_history", []), "scan_seconds": now() - t0, "nodes": list(nodes.values()),
             "switches": switches_out, "zabbix_url": "zabbix.php",
-            "partial": report["partial"], "scan_warnings": report["warnings"]}
+            "partial": report["partial"], "scan_warnings": report["warnings"],
+            "vlans": {str(v): {"name": vlan_names.get(v, f"VLAN {v}"),
+                               "devices": sum(1 for n in nodes.values() if n.get("vlan") == v)}
+                      for v in sorted(set(vlan_names) | {n["vlan"] for n in nodes.values() if n.get("vlan")})}}
     scan_progress(95, "saving")
     install_data_page()                   # a new page version reaches the browsers; the web folder is install.sh's job
     save_json(os.path.join(DATA_DIR, DATA), data)
@@ -2234,6 +2308,8 @@ def publish_settings():
         "schema": SETTINGS_SCHEMA,
         "values": effective_settings(st), "effective_permissions": permissions(st),
         "advanced": {k: st[k] for k in ADVANCED_SETTINGS if k in st},
+        "device_categories": [{"key": k, "title": t, "examples": e, "detect": d, "icon": TYPE_ICON.get(ty, "help-circle")}
+                              for k, ty, t, e, d, _rx in DEVICE_CATEGORIES],
         "ookla_servers": load_json(OOKLA_SERVERS, {}).get("servers", []),
         "devices": cfg.get("devices", {}), "history": config_history()})
     save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
@@ -3179,7 +3255,7 @@ SETTINGS_SCHEMA = [
     _S("show_offline", "bool", True, "General", "General settings", "Show offline devices",
        help="Devices that do not answer are shown in grey instead of being hidden from the map."),
     _S("ip_labels", "bool", True, "General", "General settings", "IP labels on nodes"),
-    _S("zabbix_triggers", "bool", False, "General", "General settings", "Link with Zabbix triggers", preview="0.6",
+    _S("zabbix_triggers", "bool", False, "General", "General settings", "Link with Zabbix triggers", preview="0.7",
        help="Nodes change colour with the severity of the host's active problems."),
     _S("flag_hours", "int", 24, "General", "Devices", "Mark new and moved devices for", range=[1, 720], unit="h"),
     _S("forget_after_days", "int", 30, "General", "Devices", "Forget unknown devices after", range=[1, 365], unit="days"),
@@ -3213,7 +3289,10 @@ SETTINGS_SCHEMA = [
     _S("snmp_timeout_ms", "int", 3000, "SNMP", "Packet size", "Timeout", range=[500, 10000], unit="ms"),
     # ---- Topology
     _S("topo_lldp", "bool", True, "Topology", "Link sources", "LLDP"),
-    _S("topo_cdp", "bool", False, "Topology", "Link sources", "CDP (Cisco)", preview="0.6"),
+    _S("topo_cdp", "bool", False, "Topology", "Link sources", "CDP (Cisco)", preview="0.7"),
+    _S("topo_vlans", "bool", True, "Topology", "Link sources", "VLANs (Q-BRIDGE-MIB)",
+       help="Reads the VLANs of each switch port and of each device, for the VLAN filter on the map. Switches without "
+            "Q-BRIDGE-MIB simply show no VLANs."),
     _S("topo_fdb", "bool", True, "Topology", "Link sources", "MAC tables (FDB)",
        help="Places devices without LLDP through the MAC addresses the switches learn. When off, devices are not "
             "placed on switch ports."),
@@ -3221,9 +3300,11 @@ SETTINGS_SCHEMA = [
        help="IP addresses from the switches' and routers' ARP tables, in addition to this server's own."),
     _S("layout", "choice", "tree", "Topology", "Layout", "Map layout",
        choices=[["tree", "Hierarchical (tree)"], ["force", "Free (force-directed)", "planned"], ["radial", "Radial", "planned"]]),
-    _S("group_subnet", "bool", False, "Topology", "Layout", "Group by subnet", preview="0.6"),
-    _S("lock_positions", "bool", False, "Topology", "Layout", "Lock node positions", preview="0.6",
+    _S("group_subnet", "bool", False, "Topology", "Layout", "Group by subnet", preview="0.7"),
+    _S("lock_positions", "bool", False, "Topology", "Layout", "Lock node positions", preview="0.7",
        help="Nodes you moved by hand keep their place after a new scan."),
+    # ---- Device types (the tab shows a card with a switch per category)
+    _S("device_types_off", "list", [], "Device types", "Device types", "Categories switched off"),
     # ---- Measurements
     _S("wan_source", "choice", "router", "Measurements", "Traffic", "Throughput source",
        choices=[["router", "The router's WAN (SNMP, else UPnP)"], ["switch", "Switch port to the gateway"]],
@@ -3342,6 +3423,10 @@ def validate_settings(new, current=None):
             if typ == "bool":
                 if not isinstance(v, bool):
                     raise ValueError("must be on or off")
+            elif typ == "list":
+                if not isinstance(v, list) or any(x not in DEVICE_CATEGORY_KEYS for x in v):
+                    raise ValueError("unknown category")
+                v = sorted(set(v))
             elif typ == "choice":
                 ok = [c[0] for c in f["choices"] if len(c) < 3]          # options marked "planned" are not accepted
                 if v not in ok:
@@ -3622,6 +3707,61 @@ def check_ports(api, community=None):
         print("\n" + text)
 
 
+# --------------------------------------------------------------------------- #
+# Uninstall (called by install.sh --uninstall): only what SpiderMap itself created
+# --------------------------------------------------------------------------- #
+ZBX_DASHBOARDS = (DASHBOARD_NAME, at.DASHBOARD_NAME)      # "SpiderMap", and the classic tool's dashboard
+ZBX_MAPS = (at.MAP_NAME,)                                 # the classic tool's map
+
+
+def uninstall_zabbix(api, dry=False):
+    """Items with keys "autotopo.*" (their triggers go with them), SpiderMap's dashboards and map. Returns problems."""
+    items = api.call("item.get", {"output": ["itemid", "key_", "hostid"], "search": {"key_": "autotopo."},
+                                  "startSearch": True, "templated": False})
+    dash = api.call("dashboard.get", {"output": ["dashboardid", "name"], "filter": {"name": list(ZBX_DASHBOARDS)}})
+    maps = api.call("map.get", {"output": ["sysmapid", "name"], "filter": {"name": list(ZBX_MAPS)}})
+    print(f"  Zabbix: {len(items)} items (and their triggers): {', '.join(sorted({i['key_'] for i in items})) or '-'}")
+    print(f"  Zabbix: dashboards: {', '.join(d['name'] for d in dash) or '-'}; maps: {', '.join(m['name'] for m in maps) or '-'}")
+    if dry:
+        return []
+    problems = []
+    for method, ids in (("item.delete", [i["itemid"] for i in items]), ("dashboard.delete", [d["dashboardid"] for d in dash]),
+                        ("map.delete", [m["sysmapid"] for m in maps])):
+        if ids:
+            try:
+                api.call(method, ids)
+            except Exception as e:  # noqa: BLE001
+                problems.append(f"{method}: {e} - remove them in Zabbix by hand, or allow {method} for the API token")
+    return problems
+
+
+def uninstall_web(webd, dry=False):
+    """spidermap.php, the icons, and the redirect files SpiderMap wrote (recognised by their mark, nothing else)."""
+    gone = []
+    for name in (GATEWAY, PAGE, "netmap.html", "spider-secure.php"):
+        f = os.path.join(webd, name)
+        if not os.path.isfile(f):
+            continue
+        with open(f, encoding="utf-8", errors="ignore") as fh:
+            text = fh.read(200_000)
+        if name == GATEWAY and "SpiderMap" not in text:
+            continue                                     # not ours
+        if name != GATEWAY and REDIRECT_MARK not in text:
+            continue
+        gone.append(f)
+    assets = os.path.join(webd, ASSETS)
+    if os.path.isdir(assets):
+        gone.append(assets + "/")
+    print("  web folder: " + (", ".join(os.path.basename(g.rstrip("/")) for g in gone) or "nothing of SpiderMap's"))
+    if not dry:
+        for g in gone:
+            if g.endswith("/"):
+                shutil.rmtree(g, ignore_errors=True)
+            else:
+                os.remove(g)
+    return gone
+
+
 def job_lock(name, wait):
     """One job of each kind at a time. wait=False: return None if it is already running."""
     import fcntl
@@ -3640,14 +3780,27 @@ def main():
     ap.add_argument("--live", action="store_true", help="refresh live status and traffic only")
     ap.add_argument("--service", "--rt", dest="rt", action="store_true", help="run the service (scheduler, live traffic)")
     ap.add_argument("--install-web", action="store_true", help="install spidermap.php and icons in the web folder (root)")
+    ap.add_argument("--uninstall-zabbix", action="store_true", help="remove SpiderMap's items, triggers, dashboards and map from Zabbix")
+    ap.add_argument("--uninstall-web", action="store_true", help="remove SpiderMap's files from the Zabbix web folder (root)")
+    ap.add_argument("--dry-run", action="store_true", help="with --uninstall-*: only show what would be removed")
     ap.add_argument("--version", action="version", version=f"SpiderMap {__version__}")
     ap.add_argument("--check-ports", action="store_true", help="show how SpiderMap sees every switch port (read-only)")
     ap.add_argument("--install-service", action="store_true", help="install/restart the real-time service")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--community", help="SNMP v1/v2c community override")
     args = ap.parse_args()
+    if args.uninstall_web:                  # needs no token: it only removes files
+        webd = webdir()
+        if webd:
+            uninstall_web(webd, args.dry_run)
+        return
     if not at.ZABBIX_TOKEN:
         raise SystemExit(f"No Zabbix API token: check {os.path.join(CONF_DIR, 'zabbix.env')}")
+    if args.uninstall_zabbix:
+        problems = uninstall_zabbix(at.Zabbix(at.ZABBIX_URL, at.ZABBIX_TOKEN, at.VERIFY_TLS), args.dry_run)
+        for p_ in problems:
+            print("  !", p_)
+        raise SystemExit(1 if problems else 0)
     if args.install_web:
         webd = webdir()
         if not webd:

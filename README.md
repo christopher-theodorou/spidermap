@@ -90,11 +90,12 @@ Zabbix Super admins (by default) find a **Settings** button (the gear) on the ma
 | General | Map name, map refresh, offline devices, IP labels; backup (export, import, restore an earlier version) |
 | Scans | Automatic scan, ICMP discovery, SNMP collection, intervals, ICMP payload, timeout, parallel checks, allowed networks, addresses never to scan; **Scan now / Cancel / Pause** with the scan's progress |
 | SNMP | GETBULK max-repetitions, retries, timeout (the credentials come from each switch's interface in Zabbix) |
-| Topology | Link sources: LLDP, MAC tables, ARP tables |
+| Topology | Link sources: LLDP, MAC tables, ARP tables, VLANs |
 | Measurements | Link thickness by traffic, units, load warning / critical, status refresh, history, daily speed test |
 | Security | Off-peak scan window, packet limit, address limit, who may open, edit, test and change settings |
 | Logging | Log level and retention, recent events |
-| Wireless & WAN, Device types | A preview of SpiderMap 0.6.0 |
+| Device types | 11 categories (firewalls, ONT/modems, UPS/PDU, cameras/NVR, IP phones/PBX, printers, NAS, hypervisors, industrial/IoT, powerline/media converters, out-of-band management), how each is recognised, on/off |
+| Wireless & WAN | A preview of SpiderMap 0.7.0 |
 
 Every change is checked in the browser and on the server, recorded in the audit log, and the previous version is
 kept, so a mistake is one click away from being undone.
@@ -255,6 +256,28 @@ tail -n 5 /var/lib/spidermap/audit.log             # recent changes from the map
 | `tests/` | Automated tests |
 | `docs/` | Architecture and release documentation |
 | `assets/` | Logo, icons and screenshots |
+
+## Uninstall
+
+```bash
+cd /opt/spidermap && bash install.sh --uninstall
+```
+
+It first shows everything it will remove and asks; then it writes a backup of your settings, devices and history
+to `/root/spidermap-backup-<time>.tar.gz` and removes the service, the `spidermap` user, `/etc/spidermap`,
+`/var/lib/spidermap`, SpiderMap's own files in the Zabbix web folder, and in Zabbix only SpiderMap's `autotopo.*`
+items (with their triggers), its dashboards and map. Finally remove the code: `rm -rf /opt/spidermap`.
+
+| Option | Effect |
+|---|---|
+| `--keep-data` | Keep `/etc/spidermap`, `/var/lib/spidermap` and the `spidermap` user, to install again later |
+| `--keep-zabbix` | Leave SpiderMap's items, triggers, dashboards and map in Zabbix |
+| `--yes` | Do not ask (for scripts) |
+
+Not touched: the system packages, the API token you created in Zabbix and the iframe setting you changed there.
+By hand, without the script: `systemctl disable --now spidermap`, remove `/etc/systemd/system/spidermap.service`,
+`/etc/spidermap`, `/var/lib/spidermap`, `spidermap.php` and `spidermap-assets/` in the Zabbix web folder, the
+user `spidermap`, and in Zabbix the *SpiderMap* dashboard and the items whose key starts with `autotopo.`.
 
 ## Documentation
 

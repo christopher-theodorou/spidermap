@@ -50,7 +50,12 @@ OID = {
     "admin": "1.3.6.1.2.1.2.2.1.7", "speed": "1.3.6.1.2.1.31.1.1.1.15",
     "bport": "1.3.6.1.2.1.17.1.4.1.2", "qfdb": "1.3.6.1.2.1.17.7.1.2.2.1.2",
     "dfdb": "1.3.6.1.2.1.17.4.3.1.2", "arp": "1.3.6.1.2.1.4.22.1.2",
+    # VLANs (Q-BRIDGE-MIB) and link aggregation (IEEE8023-LAG-MIB); switches without them simply have none
+    "vname": "1.3.6.1.2.1.17.7.1.4.3.1.1", "vegress": "1.3.6.1.2.1.17.7.1.4.3.1.2",
+    "vuntag": "1.3.6.1.2.1.17.7.1.4.3.1.4", "pvid": "1.3.6.1.2.1.17.7.1.4.5.1.1",
+    "vfdb": "1.3.6.1.2.1.17.7.1.4.2.1.3", "lagof": "1.2.840.10006.300.43.1.2.1.1.13",
 }
+VLANS = {}          # hostid -> {vlan id: name}, from the last scan of each switch
 ENUM = {"up": "1", "down": "2", "testing": "3", "unknown": "4", "dormant": "5",
         "notPresent": "6", "lowerLayerDown": "7",
         "ethernetCsmacd": "6", "gigabitEthernet": "117", "ieee8023adLag": "161"}
@@ -130,6 +135,42 @@ def rdns_all(ips):
 # --------------------------------------------------------------------------- #
 # Switch scan
 # --------------------------------------------------------------------------- #
+def portlist(value):
+    """Bridge port numbers in a Q-BRIDGE PortList (bit 1 = the first bit of the first byte)."""
+    out = []
+    for i, byte in enumerate(re.findall(r"[0-9A-Fa-f]{2}", str(value or ""))):
+        b = int(byte, 16)
+        out += [i * 8 + k + 1 for k in range(8) if b & (0x80 >> k)]
+    return out
+
+
+def vlan_tables(names, egress, untagged, pvids, fdb_ids):
+    """From the Q-BRIDGE walks: ({vlan: name}, {bridge port: {"pvid", "tagged", "untagged"}}, {fdb id: vlan})."""
+    vnames = {}
+    for vid, nm in names.items():
+        if str(vid).isdigit():
+            vnames[int(vid)] = str(nm).strip('"') or f"VLAN {vid}"
+    ports = {}
+    for vid, plist in egress.items():
+        if not str(vid).isdigit():
+            continue
+        unt = set(portlist(untagged.get(vid, "")))
+        for bp in portlist(plist):
+            e = ports.setdefault(str(bp), {"pvid": None, "tagged": [], "untagged": []})
+            e["untagged" if bp in unt else "tagged"].append(int(vid))
+            vnames.setdefault(int(vid), f"VLAN {vid}")
+    for bp, vid in pvids.items():
+        if str(vid).strip().isdigit() and int(vid):
+            ports.setdefault(str(bp), {"pvid": None, "tagged": [], "untagged": []})["pvid"] = int(vid)
+            vnames.setdefault(int(vid), f"VLAN {int(vid)}")
+    fdb_vlan = {}
+    for suffix, fid in fdb_ids.items():                  # index: time mark . vlan id  ->  fdb id
+        parts = str(suffix).split(".")
+        if len(parts) >= 2 and str(fid).strip().isdigit():
+            fdb_vlan[str(fid).strip()] = int(parts[-1])
+    return vnames, ports, fdb_vlan
+
+
 def iface_kind(name, iftype):
     """What one interface is: ("port" | "lag" | None, reason when it is not a switch port)."""
     t = num(iftype) if iftype not in (None, "") else ""
@@ -185,15 +226,32 @@ def scan_switch(h, community, hosts):
     oper, admin, speed = w("oper"), w("admin"), w("speed")
     bport = {k: num(v) for k, v in w("bport").items()}
 
-    macs = {}
-    fdb = w("qfdb") or w("dfdb")
+    macs, mac_vlan = {}, {}
+    qfdb = w("qfdb")
+    fdb = qfdb or w("dfdb")
+    try:
+        wx = lambda k: at.snmpwalk(auth + ["-Ox"], target, OID[k])  # noqa: E731 - port bitmaps always as hex
+        vnames, vports, fdb_vlan = vlan_tables(w("vname"), wx("vegress"), wx("vuntag"), w("pvid"), w("vfdb"))
+    except Exception:  # noqa: BLE001 - VLANs are optional
+        vnames, vports, fdb_vlan = {}, {}, {}
     for suffix, port in fdb.items():
         parts = suffix.split(".")
         port = num(port)
         if len(parts) < 6 or port in ("", "0"):
             continue
         mac = ":".join(f"{int(x):02x}" for x in parts[-6:])
-        macs.setdefault(bport.get(port, port), set()).add(mac)
+        ifx = bport.get(port, port)
+        macs.setdefault(ifx, set()).add(mac)
+        if qfdb and len(parts) == 7:                     # dot1qTpFdbPort: fdb id . MAC
+            vid = fdb_vlan.get(parts[0]) or (int(parts[0]) if (int(parts[0]) in vnames or not fdb_vlan) else None)
+            if vid:
+                mac_vlan.setdefault(ifx, {})[mac] = vid
+    VLANS[h["hostid"]] = {k: v for k, v in vnames.items() if 0 < k < 4095}
+    by_ifx = {bport.get(bp, bp): v for bp, v in vports.items()}     # bridge port -> ifIndex
+    try:
+        lag_of = {k: num(v) for k, v in w("lagof").items() if num(v) not in ("", "0") and num(v) != k}
+    except Exception:  # noqa: BLE001
+        lag_of = {}
 
     arp = {}
     for suffix, mac in w("arp").items():
@@ -222,6 +280,7 @@ def scan_switch(h, community, hosts):
             "speed_mbps": sp if status == "up" else 0, "media_hw": hw_media.get(idx, ""),
             "speed": (f"{sp / 1000:g} Gbps" if sp >= 1000 else f"{sp} Mbps") if status == "up" and sp else "",
             "lldp": lldp.get(norm(name), []), "macs": sorted(macs.get(idx, set())),
+            "vlans": by_ifx.get(idx), "mac_vlans": mac_vlan.get(idx, {}), "lag": lag_of.get(idx),
         })
     return ports, arp
 

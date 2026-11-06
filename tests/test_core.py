@@ -689,6 +689,35 @@ def test_measure_wan():
           sm.effective_settings({"wan_source": "auto"})["wan_source"] == "router" and S["wan_source"] == "router")
 
 
+def test_uninstall():
+    tmp = tempfile.mkdtemp(prefix="spidermap-web-")
+    open(os.path.join(tmp, "spidermap.php"), "w").write(sm.gateway_code({}, "http://x/api_jsonrpc.php"))
+    open(os.path.join(tmp, "spidermap.html"), "w").write(sm.redirect_stub("spidermap.php"))
+    open(os.path.join(tmp, "netmap.html"), "w").write("<html>my own page</html>")
+    open(os.path.join(tmp, "index.php"), "w").write("<?php // Zabbix")
+    os.makedirs(os.path.join(tmp, sm.ASSETS))
+    sm.uninstall_web(tmp, dry=True)
+    check("uninstall: a dry run removes nothing", len(os.listdir(tmp)) == 5)
+    sm.uninstall_web(tmp)
+    check("uninstall: only SpiderMap's files go (your own netmap.html and Zabbix stay)",
+          sorted(os.listdir(tmp)) == ["index.php", "netmap.html"], os.listdir(tmp))
+    calls = []
+
+    class Api:
+        def call(self, m, p=None):
+            calls.append((m, p))
+            return {"item.get": [{"itemid": "1", "key_": "autotopo.new", "hostid": "1"}, {"itemid": "2", "key_": "autotopo.down", "hostid": "1"}],
+                    "dashboard.get": [{"dashboardid": "7", "name": "SpiderMap"}], "map.get": []}.get(m, {})
+    sm.uninstall_zabbix(Api(), dry=True)
+    check("uninstall: a dry run sends nothing to delete to Zabbix", not any(m.endswith(".delete") for m, _ in calls))
+    calls.clear()
+    sm.uninstall_zabbix(Api())
+    get = next(p for m, p in calls if m == "item.get")
+    check("uninstall: only 'autotopo.' items (their triggers go with them) and SpiderMap's dashboard",
+          get["search"] == {"key_": "autotopo."} and get["startSearch"] is True
+          and [(m, p) for m, p in calls if m.endswith(".delete")] == [("item.delete", ["1", "2"]), ("dashboard.delete", ["7"])], calls)
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -707,6 +736,7 @@ def main():
     test_outages()
     test_reset()
     test_speed_providers()
+    test_uninstall()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 
