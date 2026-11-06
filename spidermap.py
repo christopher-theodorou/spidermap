@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.5.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.5.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -1188,6 +1188,128 @@ def ping_avg(ip, count=2):
     return r["ms"] if r and r["loss"] < 100 else None
 
 
+# --------------------------------------------------------------------------- #
+# The router's own WAN counters over UPnP (WANCommonInterfaceConfig): the real internet traffic, including Wi-Fi
+# devices that never pass a switch. Only the default gateway is trusted, not any device that answers.
+# --------------------------------------------------------------------------- #
+UPNP_SEARCH = ("urn:schemas-upnp-org:device:InternetGatewayDevice:1", "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
+               "urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1")
+
+
+def upnp_discover(gateway_ip, timeout=3.0, port=1900, mcast="239.255.255.250"):
+    """URL of the gateway's UPnP description, or None. Answers from any other address are ignored."""
+    import socket
+    from urllib.parse import urlparse
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(0.5)
+    try:
+        for st in UPNP_SEARCH:
+            msg = (f'M-SEARCH * HTTP/1.1\r\nHOST: {mcast}:1900\r\nMAN: "ssdp:discover"\r\nMX: 2\r\nST: {st}\r\n\r\n').encode()
+            for dst in ((mcast, port), (gateway_ip, port)):
+                try:
+                    s.sendto(msg, dst)
+                except OSError:
+                    pass
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                data, addr = s.recvfrom(8192)
+            except socket.timeout:
+                continue
+            m = re.search(rb"(?im)^location:\s*(\S+)", data)
+            if addr[0] == gateway_ip and m:
+                loc = m.group(1).decode(errors="ignore")
+                if urlparse(loc).hostname == gateway_ip and urlparse(loc).scheme in ("http", "https"):
+                    return loc
+    finally:
+        s.close()
+    return None
+
+
+def upnp_wan_service(location):
+    """The router's WANCommonInterfaceConfig service: {"type", "url", "name"} or None (same device only)."""
+    from urllib.parse import urljoin, urlparse
+    xml = requests.get(location, timeout=5).text
+    base = re.search(r"(?is)<URLBase>\s*(.*?)\s*</URLBase>", xml)
+    name = re.search(r"(?is)<modelName>\s*(.*?)\s*</modelName>", xml)
+    for blk in re.findall(r"(?is)<service>(.*?)</service>", xml):
+        st = re.search(r"(?is)<serviceType>\s*(.*?)\s*</serviceType>", blk)
+        ctl = re.search(r"(?is)<controlURL>\s*(.*?)\s*</controlURL>", blk)
+        if st and ctl and "WANCommonInterfaceConfig" in st.group(1):
+            url = urljoin(base.group(1) if base else location, ctl.group(1))
+            if urlparse(url).hostname == urlparse(location).hostname:
+                return {"type": st.group(1), "url": url, "name": name.group(1)[:60] if name else ""}
+    return None
+
+
+def upnp_call(svc, action):
+    body = ('<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" '
+            's:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body>'
+            f'<u:{action} xmlns:u="{svc["type"]}"/></s:Body></s:Envelope>')
+    r = requests.post(svc["url"], data=body.encode(), timeout=3,
+                      headers={"Content-Type": 'text/xml; charset="utf-8"', "SOAPAction": f'"{svc["type"]}#{action}"'})
+    r.raise_for_status()
+    return r.text
+
+
+def upnp_counters(svc):
+    """[bytes received, bytes sent] on the router's WAN side."""
+    out = []
+    for action, field in (("GetTotalBytesReceived", "NewTotalBytesReceived"), ("GetTotalBytesSent", "NewTotalBytesSent")):
+        m = re.search(rf"<{field}>\s*(\d+)\s*</{field}>", upnp_call(svc, action))
+        if not m:
+            raise RuntimeError(f"the router did not answer {action}")
+        out.append(int(m.group(1)))
+    return out
+
+
+def upnp_link_mbps(svc):
+    """The line speed the router reports (for the impossible-value check), or 0."""
+    try:
+        x = upnp_call(svc, "GetCommonLinkProperties")
+    except Exception:  # noqa: BLE001
+        return 0
+    v = [int(n) for n in re.findall(r"<NewLayer1(?:Downstream|Upstream)MaxBitRate>\s*(\d+)\s*<", x)]
+    return max(v) / 1e6 if v else 0
+
+
+def read_upnp(upnp, data, usage, source, t0):
+    """One reading of the router's WAN counters. Returns {"rx", "tx"} in bit/s, or None. Finds the router again when
+    needed (every 10 min while it does not answer), and adds the traffic to the day / month totals."""
+    gw_ip = next((n.get("ip") for n in data["nodes"] if n.get("kind") == "router" and n.get("ip")), None)
+    if gw_ip and not upnp["svc"] and t0 >= upnp["next"]:
+        upnp["next"] = t0 + 600
+        try:
+            loc = upnp_discover(gw_ip)
+            upnp["svc"] = upnp_wan_service(loc) if loc else None
+            upnp["error"] = "" if upnp["svc"] else f"the gateway {gw_ip} does not answer UPnP (turn UPnP on in the router)"
+            upnp["link"] = upnp_link_mbps(upnp["svc"]) if upnp["svc"] else 0
+        except Exception as e:  # noqa: BLE001
+            upnp["error"] = str(e)[:200]
+    if not upnp["svc"]:
+        return None
+    try:
+        rx_b, tx_b = upnp_counters(upnp["svc"])
+    except Exception as e:  # noqa: BLE001
+        upnp["fails"] += 1
+        upnp["error"] = str(e)[:200]
+        if upnp["fails"] >= 3:                         # find it again (new address, router restarted)
+            upnp.update(svc=None, prev=None, next=t0 + 60)
+        return None
+    cur = (time.monotonic(), rx_b, tx_b, None, None, max(rx_b, tx_b) < 2 ** 32)   # many routers count in 32 bits
+    rx, tx, drx, dtx, why = counter_rate(upnp["prev"], cur, upnp["link"])
+    upnp.update(prev=cur, fails=0, error="")
+    if why is not None:
+        return None
+    w = usage.setdefault("wan", {})
+    for per in ("d", "m"):
+        u = w.setdefault(per, [0, 0])
+        u[0] += drx
+        u[1] += dtx
+    usage.setdefault("wan_since", now())
+    return {"rx": rx, "tx": tx}
+
+
 def ping_stats(ip, count=4):
     """avg latency, packet loss % and jitter (mdev) from a short burst of pings"""
     try:
@@ -1546,11 +1668,143 @@ def _speedtest_once(server=""):
     raise RuntimeError("No speed test program found - run: bash install.sh --update")
 
 
+# --------------------------------------------------------------------------- #
+# Speed test providers without an extra program: Cloudflare (speed.cloudflare.com) and Fast.com (Netflix)
+# --------------------------------------------------------------------------- #
+CF_BASE = "https://speed.cloudflare.com"
+FAST_HOME, FAST_API = "https://fast.com", "https://api.fast.com/netflix/speedtest/v2"
+SPEED_SECONDS = 10
+
+
+def _latency(urls, n=10):
+    """Median and jitter (ms) of small requests: time until the answer's headers arrive."""
+    s, ms = requests.Session(), []
+    for i in range(n):
+        try:
+            r = s.get(urls[i % len(urls)], timeout=5)
+            ms.append(r.elapsed.total_seconds() * 1000)
+        except requests.RequestException:
+            pass
+    if not ms:
+        raise RuntimeError("the speed test server does not answer")
+    ms.sort()
+    med = ms[len(ms) // 2]
+    jit = sum(abs(a - b) for a, b in zip(ms, ms[1:])) / max(1, len(ms) - 1)
+    return round(med, 1), round(jit, 1)
+
+
+def _transfer(urls, upload=False, seconds=SPEED_SECONDS, streams=4, size=None):
+    """bits/s over several parallel connections, and the ping to 1.1.1.1 meanwhile (latency under load)."""
+    import threading
+    stop, lock, total, errors, loaded = time.monotonic() + seconds, threading.Lock(), [0], [], []
+    body = os.urandom(65536) * 16 if upload else None          # 1 MiB, sent again and again
+
+    def worker(i):
+        sess, k = requests.Session(), i
+        while time.monotonic() < stop:
+            url = urls[k % len(urls)]
+            k += 1
+            try:
+                if upload:
+                    sess.post(url, data=body, timeout=15).raise_for_status()
+                    with lock:
+                        total[0] += len(body)
+                else:
+                    with sess.get(url, stream=True, timeout=15) as r:
+                        r.raise_for_status()
+                        for chunk in r.iter_content(65536):
+                            with lock:
+                                total[0] += len(chunk)
+                            if time.monotonic() >= stop:
+                                break
+            except requests.RequestException as e:
+                errors.append(str(e)[:150])
+                time.sleep(0.3)
+
+    def pinger():
+        while time.monotonic() < stop - 0.5:
+            v = ping_stats("1.1.1.1", 1)["ms"]
+            if v is not None:
+                loaded.append(v)
+            time.sleep(0.4)
+    t0 = time.monotonic()
+    th = [threading.Thread(target=worker, args=(i,), daemon=True) for i in range(streams)]
+    th.append(threading.Thread(target=pinger, daemon=True))
+    for x in th:
+        x.start()
+    for x in th:
+        x.join(seconds + 20)
+    if not total[0]:
+        raise RuntimeError(errors[-1] if errors else "no data could be transferred")
+    loaded.sort()
+    return total[0] * 8 / (time.monotonic() - t0), (loaded[len(loaded) // 2] if loaded else None)
+
+
+def _speedtest_cloudflare():
+    try:
+        meta = requests.get(CF_BASE + "/meta", timeout=8).json()
+    except (requests.RequestException, ValueError):
+        meta = {}
+    ping, jit = _latency([CF_BASE + "/__down?bytes=0"])
+    down, ld = _transfer([CF_BASE + "/__down?bytes=25000000"])
+    up, lu = _transfer([CF_BASE + "/__up"], upload=True)
+    where = ", ".join(x for x in (meta.get("city"), meta.get("country")) if x)
+    return {"down": down, "up": up, "ping": ping, "jitter": jit, "load_down": ld, "load_up": lu,
+            "server": "Cloudflare" + (f" {meta['colo']}" if meta.get("colo") else "") + (f", {where}" if where else ""),
+            "isp": meta.get("asOrganization", ""), "url": "", "engine": "Cloudflare"}
+
+
+def _speedtest_fast():
+    """Fast.com (Netflix). Its API is not official: a token is read from fast.com's own script."""
+    try:
+        home = requests.get(FAST_HOME + "/", timeout=10).text
+        js = re.search(r'<script src="(/app-[^"]+\.js)"', home).group(1)
+        token = re.search(r'token:"([A-Za-z0-9]+)"', requests.get(FAST_HOME + js, timeout=10).text).group(1)
+        j = requests.get(FAST_API, params={"https": "true", "token": token, "urlCount": 5}, timeout=10).json()
+        targets = [t["url"] for t in j["targets"]]
+    except (requests.RequestException, AttributeError, KeyError, ValueError) as e:
+        raise RuntimeError(f"Fast.com cannot be reached or has changed ({type(e).__name__}) - try Ookla or Cloudflare")
+    rng = lambda u, a, b: u.replace("/speedtest", f"/speedtest/range/{a}-{b}", 1)  # noqa: E731
+    ping, jit = _latency([rng(u, 0, 0) for u in targets])
+    down, ld = _transfer([rng(u, 0, 26214400) for u in targets])
+    up, lu = _transfer([rng(u, 0, 0) for u in targets], upload=True)
+    loc = (j["targets"][0].get("location") or {}) if j.get("targets") else {}
+    cl = j.get("client") or {}
+    return {"down": down, "up": up, "ping": ping, "jitter": jit, "load_down": ld, "load_up": lu,
+            "server": "Fast.com, " + ", ".join(x for x in (loc.get("city"), loc.get("country")) if x),
+            "isp": cl.get("isp", ""), "url": "", "engine": "Fast.com"}
+
+
+OOKLA_SERVERS = os.path.join(STATE_DIR, "spidermap_ookla_servers.json")
+
+
+def ookla_servers(refresh=False):
+    """Nearby Ookla servers for the Settings list (asked once a day)."""
+    cur = load_json(OOKLA_SERVERS, {})
+    if not refresh and now() - cur.get("t", 0) < 86400 or not os.path.isfile(OOKLA):
+        return cur.get("servers", [])
+    try:
+        env = dict(os.environ, HOME=os.environ.get("HOME") or "/root")
+        r = subprocess.run([OOKLA, "--accept-license", "--accept-gdpr", "--servers", "-f", "json"],
+                           capture_output=True, text=True, timeout=60, env=env)
+        servers = [{"id": str(x["id"]), "name": f"{x.get('name', '')}, {x.get('location', '')}".strip(", ")}
+                   for x in json.loads(r.stdout or "{}").get("servers", [])][:20]
+        save_json(OOKLA_SERVERS, {"t": now(), "servers": servers})
+        return servers
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return cur.get("servers", [])
+
+
 def run_speedtest(api, zh, state):
     state.update({"running": True, "started": now(), "error": ""})
     try:
-        server = load_json(DEVICES_FILE, {}).get("settings", {}).get("speedtest_server", "")
-        res = dict(_speedtest_once(server), at=now())
+        provider = setting("speedtest_provider")
+        if provider == "cloudflare":
+            res = dict(_speedtest_cloudflare(), at=now())
+        elif provider == "fast":
+            res = dict(_speedtest_fast(), at=now())
+        else:
+            res = dict(_speedtest_once(setting("speedtest_server")), at=now())
         extra = ""
         if res.get("load_down"):
             extra = f", under load ↓ {res['load_down']:.0f} ms ↑ {res.get('load_up') or 0:.0f} ms"
@@ -1574,17 +1828,58 @@ def run_speedtest(api, zh, state):
     state["running"] = False
 
 
-def month_uptime(inet, t):
-    """uptime % since the start of the month (or since tracking began)"""
-    ms = int(datetime.datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+GAP_S = 120          # no internet check for this long = "not monitored" (service stopped, server off)
+
+
+def inet_start(inet, t):
+    """When the service starts: the time since the last check was not monitored. An outage that was going on is
+    closed at the last moment we know about - we cannot tell when it ended."""
+    inet.setdefault("since", t)
+    inet.setdefault("outages", [])
+    last = inet.get("seen")
+    if last and t - last > GAP_S:
+        if inet.get("down_since"):
+            inet["outages"] = (inet["outages"] + [[inet.pop("down_since"), last]])[-500:]
+        inet["gaps"] = (inet.get("gaps", []) + [[last, t]])[-500:]
+    inet["seen"] = t
+
+
+def inet_update(inet, up, t):
+    """One internet check (all targets failing has already been confirmed by a second try).
+    Returns "down", ("up", seconds) or None."""
+    last = inet.get("seen")
+    if last and t - last > GAP_S:                    # the service was stuck or the clock jumped: not monitored
+        inet["gaps"] = (inet.get("gaps", []) + [[last, t]])[-500:]
+    inet["seen"] = t
+    if not up and not inet.get("down_since"):
+        inet["down_since"] = t
+        return "down"
+    if up and inet.get("down_since"):
+        s0 = inet.pop("down_since")
+        inet["outages"] = (inet["outages"] + [[s0, t]])[-500:]
+        return ("up", t - s0)
+    return None
+
+
+def _overlap(spans, a, b):
+    return sum(max(0, min(e, b) - max(s_, a)) for s_, e in spans)
+
+
+def month_uptime(inet, t, month_start=None):
+    """(uptime % of the monitored time this month, outages this month, % of the month that was monitored).
+    Time without monitoring counts neither as up nor as down."""
+    ms = month_start or int(datetime.datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
     since = max(ms, inet.get("since", t))
     if t - since < 60:
-        return None, []
+        return None, [], None
     outs = [o for o in inet.get("outages", []) if o[1] >= since]
-    down = sum(min(e, t) - max(s_, since) for s_, e in outs)
-    if inet.get("down_since"):
-        down += t - max(inet["down_since"], since)
-    return round(100 * (1 - down / (t - since)), 3), outs
+    spans = outs + ([[inet["down_since"], t]] if inet.get("down_since") else [])
+    gaps = [g for g in inet.get("gaps", []) if g[1] >= since]
+    monitored = (t - since) - _overlap(gaps, since, t)
+    if monitored < 60:
+        return None, outs, 0.0
+    down = _overlap(spans, since, t)
+    return round(100 * (1 - down / monitored), 3), outs, round(100 * monitored / (t - since), 1)
 
 
 SCHED_FILE = os.path.join(STATE_DIR, "spidermap_schedule.json")         # last scheduled speed test (survives restarts)
@@ -1766,6 +2061,35 @@ def apply_settings_request(req):
         add_events([ev("audit", "info", f"{by} imported settings and {len(devs)} devices")])
         res.update(ok=True, message=f"Imported {len(devs)} devices and the settings.")
         return res
+    if "reset" in req:
+        opt = req["reset"] if isinstance(req["reset"], dict) else {}
+        keep_dev, keep_sp = opt.get("keep_devices", True) is not False, opt.get("keep_speedtests", True) is not False
+        bdir = os.path.join(STATE_DIR, "reset-" + time.strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(bdir, mode=0o700, exist_ok=True)
+        files = [STATE_FILE, HIST_FILE, EVENTS_FILE, PRESENCE_FILE, INET_FILE, USAGE_FILE, SCAN_REPORT, SCAN_PROGRESS]
+        if not keep_sp:
+            files.append(SPEED_FILE)
+        moved = 0
+        for f in files:                                   # moved to a backup folder, not deleted
+            if os.path.exists(f):
+                shutil.move(f, os.path.join(bdir, os.path.basename(f)))
+                moved += 1
+        for f in (DATA, LIVE, RT, "spidermap_events.json", "spidermap_presence.json"):
+            try:
+                os.remove(os.path.join(DATA_DIR, f))
+            except FileNotFoundError:
+                pass
+        if not keep_dev:
+            config_backup(cfg, by, "before map reset")
+            cfg["devices"] = {}
+            save_json(DEVICES_FILE, cfg)
+        olds = sorted(d for d in os.listdir(STATE_DIR) if d.startswith("reset-"))
+        for d in olds[:-3]:                               # keep the last 3 resets
+            shutil.rmtree(os.path.join(STATE_DIR, d), ignore_errors=True)
+        audit("reset", by, {"keep_devices": keep_dev, "keep_speedtests": keep_sp, "backup": bdir})
+        add_events([ev("audit", "info", f"{by} reset the map" + ("" if keep_dev else " and forgot the device names"))])
+        res.update(ok=True, restart=True, message="Map reset. A new scan starts now; the map appears within a few minutes.")
+        return res
     if "restore" in req:
         rid = str(req["restore"])
         if not re.fullmatch(r"devices-\d+\.json", rid) or not os.path.isfile(os.path.join(CONF_HIST_DIR, rid)):
@@ -1794,11 +2118,12 @@ def publish_settings():
         "schema": SETTINGS_SCHEMA,
         "values": effective_settings(st), "effective_permissions": permissions(st),
         "advanced": {k: st[k] for k in ADVANCED_SETTINGS if k in st},
+        "ookla_servers": load_json(OOKLA_SERVERS, {}).get("servers", []),
         "devices": cfg.get("devices", {}), "history": config_history()})
     save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
 
 
-DISPLAY_KEYS = ("map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
+DISPLAY_KEYS = ("wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
 
 
 def in_scan_window(S, dt):
@@ -1824,6 +2149,7 @@ class Scheduler:
         self.config_result = st.get("config_result")
         self.proc = {}
         self.finished = set()                       # jobs that ended since the last check (the loop reloads data)
+        self.restart = False                        # after a map reset: the service starts again with a clean memory
         self.started_at = now()
 
     @staticmethod
@@ -1909,7 +2235,16 @@ class Scheduler:
             audit("scan-cancel", str(req.get("by") or "?")[:64], {})
         req = take_request(SETTINGS_REQ)
         if req is not None:
+            if "reset" in req:
+                for n in list(self.proc):
+                    self.cancel(n, "map reset")
+                self.poll()
             self.config_result = apply_settings_request(req)
+            if self.config_result.get("restart"):
+                self.jobs["scan"]["last_start"] = 0          # scan right after the restart
+                self.restart = True
+                self.save()
+                return                                       # nothing more now: the clean service starts the scan
             publish_settings()
             self.save()
         for name in ("live", "scan"):
@@ -2016,8 +2351,8 @@ def rt_loop(api):
     prev_st, flap_t = {}, {}
     use32, quality, rej_said = {}, {}, {}
     inet = load_json(INET_FILE, {})
-    inet.setdefault("since", now())
-    inet.setdefault("outages", [])
+    inet_start(inet, now())
+    save_json(INET_FILE, inet)
     fails, gw_fails, loss_win = 0, 0, deque(maxlen=8)
     usage = load_json(USAGE_FILE, {})
     if usage.get("schema") != 2:
@@ -2032,6 +2367,8 @@ def rt_loop(api):
         save_json(USAGE_FILE, usage)
     sched = Scheduler()
     api_state, snmp_state, health, last_health = {}, {}, {}, 0
+    upnp = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
+    last_ookla = 0
     try:
         publish_settings()
     except Exception as e:  # noqa: BLE001
@@ -2048,9 +2385,18 @@ def rt_loop(api):
             sched.finished.discard("scan")
             last_cfg = 0
         sched.finished.discard("live")
+        if t0 - last_ookla > 86400:                  # nearby Ookla servers for Settings, once a day, in the background
+            import threading
+            last_ookla = t0
+            threading.Thread(target=lambda: (ookla_servers(refresh=True), publish_settings()), daemon=True).start()
         if t0 - last_health > 30:
             health, last_health = health_report(api_state, snmp_state), t0
+            health["upnp"] = {"ok": bool(upnp["svc"]), "name": (upnp["svc"] or {}).get("name", ""), "error": upnp["error"],
+                              "on": S["wan_source"] != "switch"}
         save_json(os.path.join(DATA_DIR, STATUS), sched.status(int(t0), S, health))
+        if sched.restart:
+            print("map reset: restarting the service", flush=True)
+            sys.exit(0)                              # systemd starts it again (Restart=always)
         if t0 - last_cfg > 300 or data is None:
             try:
                 hosts = at.load_hosts(api)
@@ -2068,8 +2414,10 @@ def rt_loop(api):
         day, month = datetime.datetime.now().strftime("%Y-%m-%d"), datetime.datetime.now().strftime("%Y-%m")
         if usage.get("day") != day:
             usage.update({"day": day, "d": {}})
+            usage.setdefault("wan", {})["d"] = [0, 0]
         if usage.get("month") != month:
             usage.update({"month": month, "m": {}})
+            usage.setdefault("wan", {})["m"] = [0, 0]
         hb = {h["hostid"]: h for h in hosts}
         port_name = {}
         ports = {}
@@ -2159,7 +2507,10 @@ def rt_loop(api):
                 lst.append([t, round(v["rx"]), round(v["tx"])])
                 del lst[:-RT_KEEP]
         root = next((n for n in data["nodes"] if n.get("kind") == "switch" and n.get("flip") and n.get("port_ref")), None)
-        wan = ports.get(root["port_ref"][0], {}).get(str(root["port_ref"][1])) if root else None
+        sw_wan = ports.get(root["port_ref"][0], {}).get(str(root["port_ref"][1])) if root else None
+        upnp_rate = read_upnp(upnp, data, usage, S["wan_source"], t0) if S["wan_source"] != "switch" else None
+        wan = upnp_rate or (sw_wan if S["wan_source"] != "router" else None)
+        wan_src = "router" if upnp_rate else ("switch" if wan else None)
         if wan:
             hist["wan"].append([t, round(wan["rx"]), round(wan["tx"])])
             del hist["wan"][:-RT_KEEP]
@@ -2173,20 +2524,20 @@ def rt_loop(api):
             last_lat = t0
             net = [v for k, v in targets.items() if k != "Gateway"]
             up = any(v["ms"] is not None for v in net)
+            if not up:                                  # all failed: check again right away before calling it an outage
+                with cf.ThreadPoolExecutor(len(LAT_TARGETS)) as ex:
+                    up = any(r["ms"] is not None for r in ex.map(lambda x: ping_stats(x[1], 3), LAT_TARGETS))
             loss = sum(v["loss"] for v in net) / max(1, len(net))
             jit = [v["jit"] for v in net if v["jit"] is not None]
             ms = [v["ms"] for v in net if v["ms"] is not None]
             hist["lat"].append([t, round(sum(ms) / len(ms), 1) if ms else None, round(loss, 1),
                                 round(sum(jit) / len(jit), 1) if jit else None])
             del hist["lat"][:-240]
-            fails = 0 if up else fails + 1
-            if fails == 2 and not inet.get("down_since"):
-                inet["down_since"] = t - 15
+            change = inet_update(inet, up, t)
+            if change == "down":
                 evs.append(ev("internet", "bad", "Internet connection lost", "inet"))
-            if up and inet.get("down_since"):
-                s0 = inet.pop("down_since")
-                inet["outages"] = (inet["outages"] + [[s0, t]])[-200:]
-                evs.append(ev("internet", "ok", f"Internet back after {_dur(t - s0)}", "inet"))
+            elif change:
+                evs.append(ev("internet", "ok", f"Internet back after {_dur(change[1])}", "inet"))
             gwv = targets.get("Gateway")
             if gwv:
                 gw_fails, change = gateway_step(gw_fails, gwv["ms"] is not None)
@@ -2237,16 +2588,19 @@ def rt_loop(api):
             save_json(USAGE_FILE, usage)
             last_save = t0
         sh = load_json(SPEED_FILE, [])
-        upt, outs = month_uptime(inet, t)
+        upt, outs, cov = month_uptime(inet, t)
         save_json(os.path.join(DATA_DIR, RT), {
             "t": t, "every": every, "ports": ports, "flaps": flaps,
-            "wan": {"down": wan["rx"], "up": wan["tx"]} if wan else None,
+            "wan": {"down": wan["rx"], "up": wan["tx"], "src": wan_src} if wan else None,
+            "upnp": {"ok": bool(upnp["svc"]), "name": (upnp["svc"] or {}).get("name", ""), "error": upnp["error"],
+                     "link_mbps": upnp["link"]} if S["wan_source"] != "switch" else None,
             "latency": {k: v["ms"] for k, v in targets.items() if k != "Gateway"}, "targets": targets,
             "inet": {"up": not inet.get("down_since"), "down_since": inet.get("down_since"),
                      "last_outage": inet["outages"][-1] if inet["outages"] else None,
-                     "outages_month": outs[-30:], "uptime_month": upt, "since": inet.get("since"),
+                     "outages_month": outs[-30:], "uptime_month": upt, "since": inet.get("since"), "monitored": cov,
                      "loss_warn": inet.get("loss_warn", False), "loss": inet.get("loss", 0)},
             "usage": {"day": usage.get("day"), "month": usage.get("month"), "d": usage.get("d", {}), "m": usage.get("m", {}),
+                      "wan": usage.get("wan"), "wan_since": usage.get("wan_since"),
                       "since": usage.get("since")},
             "quality": quality,
             "hist": hist, "speedtest": {"running": speed["running"], "started": speed.get("started"),
@@ -2577,7 +2931,7 @@ if ($act === 'speedtest') {
 }
 
 // scans and settings: carried out by the SpiderMap service, which validates everything again
-if (in_array($act, ['scan', 'cancel', 'pause', 'resume', 'settings', 'import', 'restore'], true)) {
+if (in_array($act, ['scan', 'cancel', 'pause', 'resume', 'settings', 'import', 'restore', 'reset'], true)) {
   if ($user['type'] < perm('settings')) deny(403, 'Only ' . $ROLE[perm('settings')] . ' can change settings or start scans.');
   $who = ['by' => $user['name'], 'at' => time()];
   $rid = (string)($in['rid'] ?? '');                 // lets the page find the answer to its own request
@@ -2588,6 +2942,10 @@ if (in_array($act, ['scan', 'cancel', 'pause', 'resume', 'settings', 'import', '
     if ($act === 'pause' || $act === 'resume') $body = ['settings' => ['auto_scan' => $act === 'resume']];
     elseif ($act === 'settings') { if (!is_array($in['settings'] ?? null)) deny(400, 'Bad request'); $body = ['settings' => $in['settings']]; }
     elseif ($act === 'import') { if (!is_array($in['import'] ?? null)) deny(400, 'Bad request'); $body = ['import' => $in['import']]; }
+    elseif ($act === 'reset') {
+      $r = is_array($in['reset'] ?? null) ? $in['reset'] : [];
+      $body = ['reset' => ['keep_devices' => ($r['keep_devices'] ?? true) !== false, 'keep_speedtests' => ($r['keep_speedtests'] ?? true) !== false]];
+    }
     else {
       $r = (string)($in['restore'] ?? '');
       if (!preg_match('/^devices-[0-9]+\.json$/', $r)) deny(400, 'Bad request');
@@ -2686,6 +3044,9 @@ SETTINGS_SCHEMA = [
     _S("page_refresh_s", "choice", 60, "General", "General settings", "Map refresh",
        choices=[[10, "10 seconds"], [30, "30 seconds"], [60, "1 minute"], [0, "Manually"]],
        help="How often open pages reload the map. Live traffic keeps its own interval (Measurements)."),
+    _S("wheel", "choice", "zoom", "General", "General settings", "Mouse wheel",
+       choices=[["zoom", "Zooms the map"], ["pan", "Scrolls the map"]],
+       help="Whatever you choose: Ctrl + wheel or a pinch always zooms, Shift + wheel and two-finger scrolling always move the map."),
     _S("show_offline", "bool", True, "General", "General settings", "Show offline devices",
        help="Devices that do not answer are shown in grey instead of being hidden from the map."),
     _S("ip_labels", "bool", True, "General", "General settings", "IP labels on nodes"),
@@ -2735,6 +3096,9 @@ SETTINGS_SCHEMA = [
     _S("lock_positions", "bool", False, "Topology", "Layout", "Lock node positions", preview="0.6",
        help="Nodes you moved by hand keep their place after a new scan."),
     # ---- Measurements
+    _S("wan_source", "choice", "auto", "Measurements", "Traffic", "Throughput source",
+       choices=[["auto", "Router (UPnP), else the switch port"], ["router", "Router (UPnP) only"], ["switch", "Switch port to the gateway"]],
+       help="The router's own counters include Wi-Fi devices that never pass a switch. UPnP must be on in the router."),
     _S("link_thickness", "bool", False, "Measurements", "Traffic", "Link thickness by traffic"),
     _S("units", "choice", "bits", "Measurements", "Traffic", "Units",
        choices=[["bits", "bits/s"], ["bytes", "bytes/s"], ["percent", "% of capacity"]]),
@@ -2747,7 +3111,11 @@ SETTINGS_SCHEMA = [
        choices=[[7, "7 days"], [30, "30 days"], [60, "60 days"], [90, "90 days"], [365, "1 year"]]),
     _S("presence_keep_days", "int", 30, "Measurements", "History", "Keep who-was-online", range=[1, 90], unit="days"),
     _S("speedtest_daily", "time", "", "Measurements", "Speed test", "Daily speed test at", help="HH:MM, empty = only on request."),
-    _S("speedtest_server", "digits", "", "Measurements", "Speed test", "Ookla server ID", help="Empty = nearest server."),
+    _S("speedtest_provider", "choice", "ookla", "Measurements", "Speed test", "Speed test provider",
+       choices=[["ookla", "Ookla (speedtest.net)"], ["cloudflare", "Cloudflare (speed.cloudflare.com)"], ["fast", "Fast.com (Netflix)"]],
+       help="Fast.com has no official API: if Netflix changes it, its tests may stop until SpiderMap is updated. "
+            "nPerf cannot be used: it has no public interface."),
+    _S("speedtest_server", "digits", "", "Measurements", "Speed test", "Ookla server", help="Empty = the nearest server. Ookla only."),
     # ---- Security
     _S("snmp_readonly", "bool", True, "Security", "Security", "Read-only SNMP", locked=True,
        help="SpiderMap never sends SET, even if the community may write. Always on."),

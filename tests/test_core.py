@@ -8,6 +8,7 @@ Run it before every release. Every line must say OK.
 """
 import datetime
 import json
+import re
 import os
 import subprocess
 import sys
@@ -348,6 +349,252 @@ def test_dialog_settings():
           files == [f"spidermap.log.{dt.date.fromtimestamp(old).isoformat()}"], files)
 
 
+def _fake_router(loc_host="127.0.0.1", rate_down=12_500_000, rate_up=2_500_000):
+    """A UPnP router in threads: SSDP on a random UDP port, description and SOAP on a random HTTP port."""
+    import http.server, socket, threading
+    t0, state = time.time(), {"answer": True}
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
+    hport = httpd.server_address[1]
+    desc = ('<root><device><modelName>Speedport Test</modelName><deviceList><device><serviceList><service>'
+            '<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>'
+            '<controlURL>/ctl</controlURL></service></serviceList></device></deviceList></device></root>')
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200); self.end_headers(); self.wfile.write(desc.encode())
+
+        def do_POST(self):
+            if not state["answer"]:
+                self.send_response(500); self.end_headers(); return
+            act = self.headers.get("SOAPAction", "").split("#")[-1].strip('"')
+            el = time.time() - t0
+            body = {"GetTotalBytesReceived": f"<NewTotalBytesReceived>{int(1e6 + el * rate_down) % 2**32}</NewTotalBytesReceived>",
+                    "GetTotalBytesSent": f"<NewTotalBytesSent>{int(1e6 + el * rate_up)}</NewTotalBytesSent>",
+                    "GetCommonLinkProperties": "<NewLayer1DownstreamMaxBitRate>300000000</NewLayer1DownstreamMaxBitRate>"}.get(act, "")
+            self.send_response(200); self.end_headers(); self.wfile.write(f"<r>{body}</r>".encode())
+    httpd.RequestHandlerClass = H
+    u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); u.bind(("127.0.0.1", 0))
+
+    def ssdp():
+        while True:
+            d, a = u.recvfrom(4096)
+            u.sendto(f"HTTP/1.1 200 OK\r\nLOCATION: http://{loc_host}:{hport}/d.xml\r\n\r\n".encode(), a)
+    threading.Thread(target=ssdp, daemon=True).start()
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return u.getsockname()[1], state
+
+
+def test_upnp():
+    sport, state = _fake_router()
+    real = sm.upnp_discover
+    sm.upnp_discover = lambda gw, timeout=1.5, port=None, mcast=None: real(gw, timeout, sport, "127.0.0.1")
+    try:
+        check("UPnP: an answer from another address than the gateway is ignored", sm.upnp_discover("127.0.0.9") is None)
+        data = {"nodes": [{"kind": "router", "ip": "127.0.0.1"}]}
+        upnp, usage = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}, {}
+        first = sm.read_upnp(upnp, data, usage, "auto", 0)
+        time.sleep(2)
+        r = sm.read_upnp(upnp, data, usage, "auto", 10)
+        check("UPnP: the router is found, the first reading is only a baseline", first is None and upnp["svc"]
+              and upnp["svc"]["name"] == "Speedport Test" and upnp["link"] == 300, upnp)
+        check("UPnP: throughput from the router's counters (100 / 20 Mbps)",
+              r and abs(r["rx"] / 1e6 - 100) < 8 and abs(r["tx"] / 1e6 - 20) < 3, r)
+        check("UPnP: day and month totals grow", usage["wan"]["d"][0] > 20e6 and usage["wan"]["m"] == usage["wan"]["d"]
+              and usage.get("wan_since"), usage)
+        state["answer"] = False
+        for i in range(3):
+            sm.read_upnp(upnp, data, usage, "auto", 20 + i)
+        check("UPnP: after 3 failed readings the router is looked for again", upnp["svc"] is None and upnp["next"] == 22 + 60
+              and upnp["error"], upnp)
+        state["answer"] = True
+        data2 = {"nodes": [{"kind": "router", "ip": "127.0.0.9"}]}
+        up2 = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
+        sm.read_upnp(up2, data2, {}, "auto", 0)
+        check("UPnP: a gateway that does not answer gets a clear reason", up2["svc"] is None and "turn UPnP on" in up2["error"], up2)
+    finally:
+        sm.upnp_discover = real
+
+
+def test_outages():
+    T = 1_800_000_000
+    inet = {}
+    sm.inet_start(inet, T)
+    ch = []
+    for k in range(1, 241):                             # one hour, a check every 15 s; one check fails at T+600
+        ch.append(sm.inet_update(inet, k * 15 != 600, T + k * 15))
+    up, outs, cov = sm.month_uptime(inet, T + 3600, month_start=T - 86400)
+    check("outages: a 15-second outage is recorded (not lost)", outs == [[T + 600, T + 615]] and "down" in ch, outs)
+    check("outages: uptime over the hour is 99.583 %, everything monitored", up == 99.583 and cov == 100.0, (up, cov))
+    inet2 = {}
+    sm.inet_start(inet2, T)
+    for k in range(1, 241):
+        sm.inet_update(inet2, True, T + k * 15)
+    check("outages: an hour without any outage is exactly 100 %", sm.month_uptime(inet2, T + 3600, T - 86400)[0] == 100.0)
+    sm.inet_start(inet2, T + 7200)                     # the service was stopped for an hour
+    up2, _, cov2 = sm.month_uptime(inet2, T + 7200, T - 86400)
+    check("outages: an hour without the service is 'not monitored' - not up, not down",
+          inet2["gaps"] == [[T + 3600, T + 7200]] and up2 == 100.0 and cov2 == 50.0, (inet2.get("gaps"), up2, cov2))
+    inet3 = {}
+    sm.inet_start(inet3, T)
+    for k in range(1, 241):
+        sm.inet_update(inet3, k * 15 < 3000, T + k * 15)   # internet down from T+3000, still down when the service stops
+    sm.inet_start(inet3, T + 7200)
+    up3, outs3, cov3 = sm.month_uptime(inet3, T + 7200, T - 86400)
+    check("outages: an outage going on when the service stopped ends at the last known moment",
+          outs3 == [[T + 3000, T + 3600]] and "down_since" not in inet3 and cov3 == 50.0 and up3 == round(100 * (1 - 600 / 3600), 3),
+          (outs3, up3, cov3))
+    inet4 = {"since": T - 3600, "outages": [[T - 600, T + 600]], "seen": T + 3600}
+    up4, outs4, _ = sm.month_uptime(inet4, T + 3600, month_start=T)
+    check("outages: only the part inside this month counts", up4 == round(100 * (1 - 600 / 3600), 3) and outs4, up4)
+    inet5 = {}
+    sm.inet_start(inet5, T)
+    sm.inet_update(inet5, True, T + 15)
+    sm.inet_update(inet5, True, T + 400)                 # 385 s without a check while running (stuck): not monitored
+    check("outages: a long pause while running is not monitored time either", inet5["gaps"] == [[T + 15, T + 400]], inet5.get("gaps"))
+
+
+def test_reset():
+    tmp = _sandbox()
+    sm.STATE_FILE, sm.HIST_FILE, sm.PRESENCE_FILE = (os.path.join(tmp, "state", f) for f in ("st.json", "hist.json", "pres.json"))
+    sm.INET_FILE, sm.USAGE_FILE, sm.SPEED_FILE = (os.path.join(tmp, "state", f) for f in ("inet.json", "usage.json", "speed.json"))
+    sm.EVENTS_FILE = os.path.join(tmp, "state", "ev.json")
+    for f in (sm.STATE_FILE, sm.HIST_FILE, sm.PRESENCE_FILE, sm.INET_FILE, sm.USAGE_FILE, sm.SPEED_FILE, sm.EVENTS_FILE):
+        json.dump({"old": 1}, open(f, "w"))
+    for f in (sm.DATA, sm.LIVE, sm.RT):
+        json.dump({"old": 1}, open(os.path.join(sm.DATA_DIR, f), "w"))
+    json.dump({"by": "Admin", "reset": {"keep_devices": True, "keep_speedtests": True}}, open(sm.SETTINGS_REQ, "w"))
+    sm.Scheduler.command = staticmethod(lambda name: ["sh", "-c", "sleep 30"])
+    sch = sm.Scheduler()
+    sch.start("scan", "scheduled")
+    sch.tick(int(time.time()), sm.effective_settings({}))
+    r = sch.config_result
+    bdir = [d for d in os.listdir(sm.STATE_DIR) if d.startswith("reset-")]
+    check("reset: the running scan is stopped, the service is told to restart and scan at once",
+          r["ok"] and sch.restart and "scan" not in sch.proc and sch.jobs["scan"]["last_start"] == 0, (r, sch.jobs["scan"]))
+    check("reset: history moved to a backup folder (not deleted), the speed test history kept",
+          len(bdir) == 1 and sorted(os.listdir(os.path.join(sm.STATE_DIR, bdir[0]))) == sorted(["st.json", "hist.json", "pres.json", "inet.json", "usage.json", "ev.json"])
+          and os.path.exists(sm.SPEED_FILE), os.listdir(os.path.join(sm.STATE_DIR, bdir[0])) if bdir else None)
+    check("reset: the old map is gone from the page data", not any(os.path.exists(os.path.join(sm.DATA_DIR, f)) for f in (sm.DATA, sm.LIVE, sm.RT)))
+    check("reset: device names kept, the reset is in the audit log and the new activity feed",
+          json.load(open(sm.DEVICES_FILE))["devices"] and json.loads(open(sm.AUDIT_FILE).readlines()[-1])["action"] == "reset"
+          and "reset the map" in json.load(open(sm.EVENTS_FILE))[-1]["text"])
+    time.sleep(1.1)
+    r2 = sm.apply_settings_request({"by": "Admin", "reset": {"keep_devices": False, "keep_speedtests": False}})
+    check("reset: 'forget device names' empties devices.json (kept in saved versions) and the speed tests",
+          r2["ok"] and json.load(open(sm.DEVICES_FILE))["devices"] == {} and sm.config_history()[0]["why"] == "before map reset"
+          and not os.path.exists(sm.SPEED_FILE), r2)
+
+
+def _fake_speed_servers(down_bps=40e6, up_bps=10e6, fast_token=True):
+    """Imitations of speed.cloudflare.com and fast.com on one local port, limited to a known line speed."""
+    import http.server, threading
+    lock = threading.Lock()
+    budget = {"down": [None, 0.0], "up": [None, 0.0]}
+
+    def throttle(kind, n, bps):                       # one shared limit for all connections, like a real line
+        with lock:
+            if budget[kind][0] is None:                # the clock starts with the first byte, no saved-up credit
+                budget[kind][0] = time.monotonic()
+            t0, used = budget[kind]
+            used += n
+            budget[kind][1] = used
+            wait = t0 + used * 8 / bps - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+
+    class H(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *a):
+            pass
+
+        def _send(self, body, ctype="text/plain"):
+            self.send_response(200); self.send_header("Content-Type", ctype); self.send_header("Content-Length", str(len(body)))
+            self.end_headers(); self.wfile.write(body)
+
+        def do_GET(self):
+            p = self.path
+            if p == "/meta":
+                return self._send(json.dumps({"colo": "ATH", "city": "Athens", "country": "GR", "asOrganization": "Test ISP"}).encode(), "application/json")
+            if p == "/":
+                return self._send(b'<html><script src="/app-1a2b3c.js"></script></html>', "text/html")
+            if p == "/app-1a2b3c.js":
+                return self._send(b'var a={https:!0,token:"YXNkZmFzZGxmbnNkYWZoYXNk",urlCount:5}' if fast_token else b"var a={}")
+            if p.startswith("/api"):
+                tg = [{"url": f"http://127.0.0.1:{self.server.server_port}/speedtest?c=gr&n={i}", "location": {"city": "Athens", "country": "GR"}} for i in range(3)]
+                return self._send(json.dumps({"client": {"isp": "Test ISP"}, "targets": tg}).encode(), "application/json")
+            m = re.search(r"bytes=(\d+)|/range/(\d+)-(\d+)", p)
+            n = int(m.group(1)) if m and m.group(1) is not None else (int(m.group(3)) - int(m.group(2)) + 1 if m else 0)
+            n = 0 if (m and m.group(3) == "0") else n
+            self.send_response(200); self.send_header("Content-Length", str(n)); self.end_headers()
+            sent, chunk = 0, b"\0" * 65536
+            try:
+                while sent < n:
+                    c = chunk[:min(65536, n - sent)]
+                    throttle("down", len(c), down_bps)
+                    self.wfile.write(c); sent += len(c)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def do_POST(self):
+            n = int(self.headers.get("Content-Length", 0))
+            got = 0
+            while got < n:
+                c = self.rfile.read(min(65536, n - got)); got += len(c)
+                throttle("up", len(c), up_bps)
+            self._send(b"ok")
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{srv.server_address[1]}", srv
+
+
+def test_speed_providers():
+    real_ping, real = sm.ping_stats, (sm.CF_BASE, sm.FAST_HOME, sm.FAST_API, sm.SPEED_SECONDS)
+    sm.ping_stats = lambda ip, count=4: {"ms": 12.0, "loss": 0.0, "jit": 1.0}
+    sm.SPEED_SECONDS = 4
+    try:
+        base, srv = _fake_speed_servers()
+        sm.CF_BASE = base
+        r = sm._speedtest_cloudflare()
+        check("Cloudflare: download and upload close to the line (40 / 10 Mbps)",
+              30e6 < r["down"] < 46e6 and 7e6 < r["up"] < 12e6, (round(r["down"] / 1e6, 1), round(r["up"] / 1e6, 1)))
+        check("Cloudflare: latency, latency under load, location and provider",
+              r["ping"] is not None and r["load_down"] == 12.0 and r["server"] == "Cloudflare ATH, Athens, GR"
+              and r["isp"] == "Test ISP" and r["engine"] == "Cloudflare", r)
+        srv.shutdown()
+        base, srv = _fake_speed_servers()
+        sm.FAST_HOME, sm.FAST_API = base, base + "/api"
+        r = sm._speedtest_fast()
+        check("Fast.com: token read, the three targets used, download and upload close to the line",
+              30e6 < r["down"] < 46e6 and 7e6 < r["up"] < 12e6 and r["server"] == "Fast.com, Athens, GR" and r["engine"] == "Fast.com",
+              (round(r["down"] / 1e6, 1), round(r["up"] / 1e6, 1), r["server"]))
+        srv.shutdown()
+        base, srv = _fake_speed_servers(fast_token=False)
+        sm.FAST_HOME, sm.FAST_API = base, base + "/api"
+        try:
+            sm._speedtest_fast()
+            msg = ""
+        except RuntimeError as e:
+            msg = str(e)
+        check("Fast.com: if Netflix changes its page, a clear message instead of a crash", "changed" in msg and "Ookla" in msg, msg)
+        srv.shutdown()
+        sm.CF_BASE = "http://127.0.0.1:9"                 # nothing listens there
+        try:
+            sm._speedtest_cloudflare()
+            msg = ""
+        except RuntimeError as e:
+            msg = str(e)
+        check("Cloudflare: an unreachable server gives a clear message", "does not answer" in msg, msg)
+    finally:
+        sm.ping_stats = real_ping
+        sm.CF_BASE, sm.FAST_HOME, sm.FAST_API, sm.SPEED_SECONDS = real
+    check("settings: the provider is one of Ookla, Cloudflare, Fast.com (nPerf is not offered)",
+          not sm.validate_settings({"speedtest_provider": "cloudflare"})[1] and sm.validate_settings({"speedtest_provider": "nperf"})[1])
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -360,6 +607,10 @@ def main():
     test_settings_apply()
     test_config_location()
     test_dialog_settings()
+    test_upnp()
+    test_outages()
+    test_reset()
+    test_speed_providers()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

@@ -4,6 +4,39 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.5.1] - 2026-11-06
+
+### Fixed
+- **Throughput and monthly usage missed every device on the router's own Wi-Fi / LAN ports**: they were measured on
+  the switch port to the gateway. SpiderMap now reads the **router's own WAN counters over UPnP**
+  (WANCommonInterfaceConfig), so all internet traffic counts. Only the default gateway is trusted, not any device that
+  answers. Settings > Measurements > *Throughput source*: router if available (default), router only, or switch port.
+  The card says which one it uses.
+- **Short internet outages were lost**: an outage needed two failed checks in a row (about 30 s). When Cloudflare,
+  Google and Quad9 all fail, SpiderMap now checks again at once, so outages from about 15 s are recorded, from the
+  first failed check.
+- **Time without SpiderMap running counted as "online"**, so a month could show 100 % while nobody was watching.
+  Such time is now *not monitored*: uptime is calculated over the monitored time, and the card shows how much of the
+  month was monitored. An outage that was going on when SpiderMap stopped ends at the last moment it was seen.
+- **Moving the map could get stuck** when the browser interrupted a drag; the map could also be dragged out of
+  sight. Both fixed.
+- Hiding offline devices no longer leaves gaps in the map.
+
+### Added
+- **Speed test providers:** Ookla (with a list of nearby servers), **Cloudflare** (speed.cloudflare.com) and
+  **Fast.com** (Netflix), with download, upload, latency and latency under load. Fast.com has no official API:
+  if Netflix changes it, its tests may stop until SpiderMap is updated. nPerf cannot be offered: it has no public
+  interface. Cloudflare and Fast.com were tested against local imitations of their services.
+- **Reset map** (Settings > General): forgets the devices seen, history, activity, who was online, totals and
+  outages, then scans again. Everything is moved to a backup folder first; you choose whether to keep your device
+  names and the speed test history.
+- **Map controls** at the bottom right: zoom in / out, fit, **vertical or horizontal view**, **expand all**,
+  **collapse all**, **full screen** (inside the Zabbix dashboard, where the browser may not allow it, the map opens
+  on its own).
+- **Moving around the map:** the mouse wheel zooms (or scrolls: Settings > General > *Mouse wheel*), Shift + wheel
+  and two-finger scrolling move the map in every direction, Ctrl + wheel or a pinch zooms, one finger moves and two
+  fingers zoom on touch screens, the arrow keys move and + / − / 0 zoom and fit.
+
 ## [0.5.0] - 2026-11-05
 
 **Settings on the map, a scheduler instead of cron, and SpiderMap no longer runs as root** (review phases 2 and 3;
@@ -235,6 +268,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.5.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.1
 [0.5.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.0
 [0.4.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.4.0
 [0.3.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.3.1

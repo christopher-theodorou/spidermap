@@ -129,6 +129,7 @@ def run(base, inbox, data):
         ("settings: not an object", req(G, SA, '{"action":"settings","settings":"x"}', H), 400),
         ("settings: restore a path", req(G, SA, '{"action":"restore","restore":"../../etc/passwd"}', H), 400),
         ("settings: request too large", req(G, SA, '{"action":"import","import":{"x":"' + "a" * 4300000 + '"}}', H), 413),
+        ("reset: Admin may not reset the map", req(O, AD, '{"action":"reset","reset":{"keep_devices":true}}', H), 403),
         ("settings: without the header (CSRF)", req(G, SA, '{"action":"scan"}', {"Content-Type": "text/plain"}), 403),
     ]
     passed = 0
@@ -185,7 +186,11 @@ def run(base, inbox, data):
     os.remove(os.path.join(data, "access.json"))
     code, _ = req(G, US)
     passed += chk("access.json removed: defaults again", code == 403, code)
-    extra += 5
+    code, _ = req(G, SA, '{"action":"reset","reset":{"keep_devices":false}}', H)
+    rs = json.load(open(os.path.join(inbox, "settings.request")))
+    passed += chk("reset: Super admin, written for the service", code == 200 and rs.get("reset") == {"keep_devices": False, "keep_speedtests": True}
+                  and rs.get("by") == "Admin", (code, rs))
+    extra += 6
     return passed, len(cases) + extra
 
 

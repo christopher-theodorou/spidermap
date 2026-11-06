@@ -59,6 +59,15 @@ and a job that was running is marked *interrupted*. It writes `spidermap_status.
 health) for the page. Job output goes to `/var/lib/spidermap/spidermap.log` (2 MB + one older file); the service
 itself logs to the journal (`journalctl -u spidermap`).
 
+**Internet and throughput.** Every 15 s the service pings Cloudflare, Google and Quad9; when all fail it checks
+again at once before recording an outage (`inet_update()`). Time with no check for over 2 minutes (service stopped,
+server off) is recorded as a gap (`inet_start()`), and `month_uptime()` counts uptime over the monitored time only.
+Throughput comes from the router's WAN counters over UPnP when it answers (`read_upnp()`: SSDP, then
+WANCommonInterfaceConfig, only from the default gateway), otherwise from the switch port to the gateway.
+
+**Map reset** (`"reset"` in a settings request) moves the history files to `state/reset-<time>/` (the last 3 are
+kept), removes the page data, and restarts the service with a clean memory; the first scan starts right away.
+
 **A switch that does not answer** keeps its last good data for 30 minutes (from `switch_cache` in the state), so its
 devices do not look offline; the map is marked *partial* and Collector health names the switch and its error.
 

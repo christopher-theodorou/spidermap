@@ -99,6 +99,15 @@ Zabbix Super admins (by default) find a **Settings** button (the gear) on the ma
 Every change is checked in the browser and on the server, recorded in the audit log, and the previous version is
 kept, so a mistake is one click away from being undone.
 
+**Throughput from the router.** Devices on the router's own Wi-Fi never pass a switch, so SpiderMap reads the
+router's own WAN counters over **UPnP** (most home routers support it; turn on *UPnP* in the router if the card
+says "switch port"). Only the default gateway is asked.
+
+**Moving around the map.** The controls at the bottom right zoom, fit, turn the tree **vertical or horizontal**,
+**expand or collapse everything** and go **full screen**. The mouse wheel zooms (or scrolls, if you prefer), Shift +
+wheel and two-finger scrolling move the map, Ctrl + wheel or a pinch zooms; the arrow keys move, + / − / 0 zoom
+and fit.
+
 **Collector health** (the heart icon, for everyone who may open the map) shows the service, the last scans, the
 Zabbix API, every switch (answering or not, and its error), the age of the data and the free disk space.
 
