@@ -129,6 +129,7 @@ def run(base, inbox, data):
         ("settings: not an object", req(G, SA, '{"action":"settings","settings":"x"}', H), 400),
         ("settings: restore a path", req(G, SA, '{"action":"restore","restore":"../../etc/passwd"}', H), 400),
         ("settings: request too large", req(G, SA, '{"action":"import","import":{"x":"' + "a" * 4300000 + '"}}', H), 413),
+        ("approve: a device can be approved", req(G, SA, '{"mac":"aa:bb:cc:dd:ee:09","approved":true}', H), 200),
         ("reset: Admin may not reset the map", req(O, AD, '{"action":"reset","reset":{"keep_devices":true}}', H), 403),
         ("settings: without the header (CSRF)", req(G, SA, '{"action":"scan"}', {"Content-Type": "text/plain"}), 403),
     ]

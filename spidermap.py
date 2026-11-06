@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.6.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.6.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -89,6 +89,11 @@ TYPE_ICON = {"router": "router", "switch": "server-2", "ap": "access-point", "un
              "firewall": "shield-lock", "ont": "building-broadcast-tower", "ups": "battery-charging", "voip": "phone",
              "hypervisor": "server-cog", "industrial": "building-factory-2", "mediaconv": "arrows-exchange",
              "oob": "terminal-2"}
+
+VIA_TEXT = {"lldp": "LLDP (the device announced itself)", "mac": "MAC table of the switch", "manual": "pinned in devices.json",
+            "proxmox": "Proxmox API", "arp": "guessed: seen only through the gateway (Wi-Fi or its LAN ports)",
+            "behind": "guessed: behind another device", "remembered": "guessed: where it was last seen"}
+VIA_GUESSED = ("arp", "behind", "remembered")
 
 # Device categories (Settings > Device types). Specific ones come before general ones: the first match wins.
 # key, types it gives, title, examples, how it is detected, regex on "name dns-name manufacturer"
@@ -829,7 +834,7 @@ def full_scan(api, community=None, quiet=False):
     add("inet", None, name="Internet", sub=public_ip or "public IP", icon="world", kind="inet",
         status="up" if public_ip else "down", details=[["Public IP", public_ip or "unknown"]])
 
-    def device_node(mac, parent, port_ref=None, port_lbl=""):
+    def device_node(mac, parent, port_ref=None, port_lbl="", via=""):
         d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
         ip, name = d.get("ip", ""), dname(mac)
         vendor = vendor_of(mac)
@@ -854,6 +859,11 @@ def full_scan(api, community=None, quiet=False):
         approved = mac in dcfg or g is not None or h is not None
         if not approved:
             flags.append("unknown")
+        if c.get("approved"):                      # approved from the map: neither unknown nor new any more
+            flags = [f for f in flags if f not in ("new", "unknown")]
+        stale_s = S["stale_days"] * 86400
+        if not is_on and d.get("last_seen") and t - d["last_seen"] > stale_s:
+            flags.append("stale")                  # not seen for days; forgotten after "forget_after_days"
         if c.get("important"):
             flags.append("important")
         if mac in conflict_macs:
@@ -867,6 +877,8 @@ def full_scan(api, community=None, quiet=False):
             conn = "via " + nodes[parent]["name"]
         det = [["IP", ip or "-"], ["MAC", mac], ["Manufacturer", vendor or "-"], ["Type", typ],
                ["Connection", conn or "-"]]
+        if via:
+            det.append(["Link from", VIA_TEXT.get(via, via)])
         if mac_vlan.get(mac):
             det.append(["VLAN", f"{mac_vlan[mac]} · {vlan_names.get(mac_vlan[mac], 'VLAN ' + str(mac_vlan[mac]))}"])
         if g:
@@ -881,7 +893,7 @@ def full_scan(api, community=None, quiet=False):
         n = add("d-" + mac.replace(":", ""), parent, name=name, sub=sub, icon=TYPE_ICON.get(typ, "help-circle"),
                 logo=c.get("logo") or logo_for(name, webd), kind="device", type=typ, status=st, flags=flags,
                 details=det, ip=ip, mac=mac, url=web_url(name, ip, c.get("url", "")), zbx=h["hostid"] if h else "",
-                port=port_lbl, port_ref=port_ref, vendor=vendor, conn=conn or "-", vlan=mac_vlan.get(mac),
+                port=port_lbl, port_ref=port_ref, vendor=vendor, conn=conn or "-", vlan=mac_vlan.get(mac), via=via,
                 link="fiber" if port_ref and (next((p for p in sw[port_ref[0]]["ports"] if p["pid"] == port_ref[1]), None)
                                                or {}).get("media") else "",
                 first=d.get("first_seen", 0), last=t if is_on else d.get("last_seen", 0))
@@ -919,6 +931,7 @@ def full_scan(api, community=None, quiet=False):
             mine = _pinfo.get((par, pa), {})
             agg = next((q for q in sw[par]["ports"] if mine.get("lag") and str(q.get("ifindex")) == str(mine["lag"])), None) \
                 or (mine if mine.get("kind") == "lag" else None)
+            link_via = "lldp"
             if agg:
                 members = [q["label"].replace("Port ", "") for q in sw[par]["ports"] if str(q.get("lag")) == str(agg.get("ifindex"))]
                 lbl = f"{agg['label']}" + (f" ({'+'.join(members)})" if members else "") + f" ↔ {rb['label'].replace('Port ', '') if rb else pb}"
@@ -927,10 +940,11 @@ def full_scan(api, community=None, quiet=False):
                 link_kind = "fiber" if mine.get("media") else ""
         else:
             link_kind = "fiber" if gw_loc and sid == root_sw and _pinfo.get((sid, gw_loc[1]), {}).get("media") else ""
+            link_via = "mac" if gw_loc and sid == root_sw else ""
             parent, lbl = gw_id, (plabel(sid, gw_loc[1]) if gw_loc and sid == root_sw else "")
             pref = [sid, pid_of(sid, gw_loc[1])] if gw_loc and sid == root_sw else None
         add("s-" + sid, parent, name=h["name"], sub="." + h["_snmp"]["ip"].split(".")[-1], icon="server-2",
-            kind="switch", sw=sid, status="up", port=lbl, port_ref=pref, zbx=sid, flip=sid not in parent_of, link=link_kind,
+            kind="switch", sw=sid, status="up", port=lbl, port_ref=pref, zbx=sid, flip=sid not in parent_of, link=link_kind, via=link_via,
             url=f"http://{h['_snmp']['ip']}",
             details=[["IP", h["_snmp"]["ip"]], ["Ports up", f"{up} of {len(sw[sid]['ports'])}"]])
 
@@ -977,11 +991,13 @@ def full_scan(api, community=None, quiet=False):
             add(gid, "s-" + sid, name=f"{lbl} devices", sub=f"{len(macs)} devices", icon="sitemap", kind="group",
                 status="up", port=lbl, port_ref=pr, details=[["Connection", f"{sw_name[sid]} · {lbl}"]])
             for m in macs:
-                device_node(m, gid)
+                device_node(m, gid, via="mac")
                 placed.add(m)
         else:
             for m in macs:
-                n = device_node(m, "s-" + sid, pr, lbl)
+                seen_now = m in online and (sdev.get(m, {}).get("loc") or {}).get("port") == pname
+                via = "lldp" if (sid, pname) in host_port else "mac" if seen_now else "manual" if pin_loc(m) else "remembered"
+                n = device_node(m, "s-" + sid, pr, lbl, via)
                 port = next((p for p in sw[sid]["ports"] if p["name"] == pname), None)
                 if n["status"] == "off" and port and port["status"] == "up":
                     n["status"], n["sub"] = "asleep", "asleep"
@@ -994,11 +1010,11 @@ def full_scan(api, community=None, quiet=False):
             continue
         for m in sorted(macs, key=lambda x: dname(x).lower()):
             if m not in placed:
-                device_node(m, parent)
+                device_node(m, parent, via="arp" if parent == "wifi" else "proxmox" if m in guest_by_mac else "behind")
                 placed.add(m)
 
     # stopped Proxmox guests the network never saw
-    pve_node = next((n for n in nodes.values() if n.get("type") == "server" and "proxmox" in n["name"].lower()), None)
+    pve_node = next((n for n in nodes.values() if n.get("type") in ("server", "hypervisor") and "proxmox" in n["name"].lower()), None)
     if pve_node:
         for g in guests:
             if not any(m in placed for m in g["macs"]):
@@ -1177,7 +1193,7 @@ def apply_edits():
     return merged
 
 
-AUDIT_FIELDS = ("name", "type", "url", "pin", "important")
+AUDIT_FIELDS = ("name", "type", "url", "pin", "important", "approved")
 
 
 def _merge_edits(edits):
@@ -1190,18 +1206,20 @@ def _merge_edits(edits):
         for k, v in e.items():
             if k in ("by", "at"):
                 continue
-            if v in ("", None, False) and k != "important":
+            if v in ("", None, False) and k not in ("important", "approved"):
                 d.pop(k, None)
             else:
                 d[k] = v
-        if d.get("important") is False:
-            d.pop("important")
+        for k_ in ("important", "approved"):
+            if d.get(k_) is False:
+                d.pop(k_)
         changes = {k: [before[k], d.get(k)] for k in AUDIT_FIELDS if (before[k] or None) != (d.get(k) or None)}
         if changes:
             by = e.get("by") or "?"
             audit("edit", by, {"mac": mac.lower(), "changes": changes})
-            what = ", ".join(f"{k} “{old or '-'}” → “{new or '-'}”" if k != "important" else
-                             ("marked important" if new else "no longer important") for k, (old, new) in changes.items())
+            what = ", ".join(f"{k} “{old or '-'}” → “{new or '-'}”" if k not in ("important", "approved") else
+                             ("marked important" if new else "no longer important") if k == "important" else
+                             ("approved" if new else "approval removed") for k, (old, new) in changes.items())
             evs.append(ev("audit", "info", f"{by} changed {d.get('name') or before['name'] or mac}: {what}",
                           "d-" + mac.lower().replace(":", "")))
     save_json(DEVICES_FILE, cfg)
@@ -1778,6 +1796,14 @@ def snmp_get(auth, target, oids):
 COUNTER_SANITY_BPS = 400e9          # upper limit when the link speed is unknown
 
 
+def recheck_speed(auth, target, ifindex):
+    """The port's speed now (ifHighSpeed, Mbps), or 0."""
+    try:
+        return snmp_get(auth, target, [f"1.3.6.1.2.1.31.1.1.1.15.{ifindex}"]).get(f"1.3.6.1.2.1.31.1.1.1.15.{ifindex}", 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def counter_rate(prev, cur, speed_mbps):
     """Bits per second for one port from two counter samples, following RFC 2863.
     prev / cur: (monotonic_seconds, rx_octets, tx_octets, sysUpTime, discontinuity_time, is_32bit)
@@ -2112,7 +2138,7 @@ SETTINGS_OUT = "spidermap_settings.json"  # in DATA_DIR, for users with the sett
 ACCESS = "access.json"                    # in DATA_DIR, read by spidermap.php at every request
 SCAN_REQ, CANCEL_REQ, SETTINGS_REQ = (os.path.join(INBOX, f) for f in ("scan.request", "scan.cancel", "settings.request"))
 JOB_TIMEOUT = {"scan": 900, "live": 180}
-DEVICE_FIELDS = {"name": str, "type": str, "url": str, "pin": str, "important": bool}
+DEVICE_FIELDS = {"name": str, "type": str, "url": str, "pin": str, "important": bool, "approved": bool}
 ADVANCED_SETTINGS = {"port_media": dict, "aliases": dict, "manual_links": list, "core_switch": str, "speedtest_server": str}
 
 
@@ -2542,6 +2568,7 @@ def rt_loop(api):
     daily_done, last_save = load_json(SCHED_FILE, {}).get("speedtest_daily_last", ""), 0
     prev_st, flap_t = {}, {}
     use32, quality, rej_said = {}, {}, {}
+    live_speed, rescan_at = {}, {}                # port speeds read again after a change; last rescan per switch
     inet = load_json(INET_FILE, {})
     inet_start(inet, now())
     save_json(INET_FILE, inet)
@@ -2623,7 +2650,7 @@ def rt_loop(api):
             # identity = ifIndex ("id"); "n" is only the number shown on screen
             plist = [p for p in sw["ports"] if p.get("ifindex")]
             idx = {str(p["ifindex"]): str(p.get("id") or p["ifindex"]) for p in plist}
-            speeds = {str(p["ifindex"]): p.get("speed_mbps", 0) for p in plist}
+            speeds = {str(p["ifindex"]): live_speed.get((sid, str(p["ifindex"])), p.get("speed_mbps", 0)) for p in plist}
             for p in plist:
                 port_name[(sid, idx[str(p["ifindex"])])] = f"{sw['name']} {p['label']}" + \
                     (f" ({', '.join(p['clients'])})" if p["clients"] else "")
@@ -2673,6 +2700,18 @@ def rt_loop(api):
                 cur = (mono, rx_o, tx_o, uptime, vals.get(f"1.3.6.1.2.1.31.1.1.1.19.{i}"), c32)
                 rx, tx, drx, dtx, why = counter_rate(prev.get(key), cur, speeds.get(i, 0))
                 prev[key] = cur
+                if why == "impossible":                  # maybe the port just moved to a higher speed: ask the switch
+                    new_sp = recheck_speed(auth, target, i)
+                    if new_sp and new_sp != speeds.get(i):
+                        live_speed[(sid, i)] = speeds[i] = new_sp
+                        if max(rx, tx) <= new_sp * 1e6 * 1.05:
+                            why = None
+                if why == "reboot" and t - rescan_at.get(sid, 0) > 600:
+                    rescan_at[sid] = t                   # port numbers may have changed: scan again now
+                    for k_ in [k_ for k_ in live_speed if k_[0] == sid]:
+                        live_speed.pop(k_)
+                    if sched.start("scan", f"{h['name']} restarted"):
+                        evs.append(ev("port", "info", f"{h['name']} restarted: scanning again for its ports", "s-" + sid))
                 if why is None:
                     ports.setdefault(sid, {})[n] = {"rx": rx, "tx": tx, "st": st or 0}
                     for per in ("d", "m"):
@@ -3173,6 +3212,7 @@ foreach (['name', 'type', 'url', 'pin'] as $k)
   }
 if (isset($e['url']) && $e['url'] !== '' && !preg_match('#^https?://#i', $e['url'])) deny(400, 'Web UI address must start with http:// or https://');
 if (array_key_exists('important', $in)) $e['important'] = (bool)$in['important'];
+if (array_key_exists('approved', $in)) $e['approved'] = (bool)$in['approved'];
 $fh = @fopen(STATE_DIR . '/edits.json', 'c+');
 if (!$fh) deny(500, 'Cannot write ' . STATE_DIR . '/edits.json');
 flock($fh, LOCK_EX);
@@ -3258,6 +3298,8 @@ SETTINGS_SCHEMA = [
     _S("zabbix_triggers", "bool", False, "General", "General settings", "Link with Zabbix triggers", preview="0.7",
        help="Nodes change colour with the severity of the host's active problems."),
     _S("flag_hours", "int", 24, "General", "Devices", "Mark new and moved devices for", range=[1, 720], unit="h"),
+    _S("stale_days", "int", 7, "General", "Devices", "Mark devices not seen for", range=[1, 365], unit="days",
+       help="They stay on the map, marked 'stale', until they are forgotten."),
     _S("forget_after_days", "int", 30, "General", "Devices", "Forget unknown devices after", range=[1, 365], unit="days"),
     # ---- Scans
     _S("auto_scan", "bool", True, "Scans", "Scan schedule", "Automatic scan",

@@ -718,6 +718,28 @@ def test_uninstall():
           and [(m, p) for m, p in calls if m.endswith(".delete")] == [("item.delete", ["1", "2"]), ("dashboard.delete", ["7"])], calls)
 
 
+def test_approve():
+    tmp = tempfile.mkdtemp(prefix="spidermap-appr-")
+    sm.DEVICES_FILE, sm.EDITS_FILE = os.path.join(tmp, "devices.json"), os.path.join(tmp, "edits.json")
+    sm.AUDIT_FILE, sm.EVENTS_FILE, sm.LOCK_FILE = os.path.join(tmp, "audit.log"), os.path.join(tmp, "ev.json"), os.path.join(tmp, ".lock")
+    json.dump({"settings": {}, "devices": {}}, open(sm.DEVICES_FILE, "w"))
+    json.dump({"aa:bb:cc:dd:ee:09": {"approved": True, "by": "Admin", "at": 1}}, open(sm.EDITS_FILE, "w"))
+    sm.apply_edits()
+    dev = json.load(open(sm.DEVICES_FILE))["devices"]
+    ev = json.load(open(sm.EVENTS_FILE))[-1]["text"]
+    check("approve: written to devices.json, logged as 'approved'", dev == {"aa:bb:cc:dd:ee:09": {"approved": True}}
+          and "approved" in ev and json.loads(open(sm.AUDIT_FILE).read().splitlines()[-1])["changes"] == {"approved": [None, True]}, (dev, ev))
+    json.dump({"aa:bb:cc:dd:ee:09": {"approved": False, "by": "Admin", "at": 2}}, open(sm.EDITS_FILE, "w"))
+    sm.apply_edits()
+    check("approve: taking it back removes it", json.load(open(sm.DEVICES_FILE))["devices"]["aa:bb:cc:dd:ee:09"] == {})
+    real = sm.snmp_get
+    sm.snmp_get = lambda auth, target, oids: {oids[0]: 1000}
+    try:
+        check("speed: a port's current speed is read again on demand", sm.recheck_speed(None, "t", "5") == 1000)
+    finally:
+        sm.snmp_get = real
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -737,6 +759,7 @@ def main():
     test_reset()
     test_speed_providers()
     test_uninstall()
+    test_approve()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

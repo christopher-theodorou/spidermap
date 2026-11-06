@@ -132,7 +132,8 @@ svg line{transition:stroke .2s}
 #vlan-pop{position:fixed;z-index:40;width:280px;max-height:60vh;overflow:auto;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(10,10,40,.18);padding:10px 12px;font-size:13px}
 .vl-row{display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer}.vl-row .vl-c{margin-left:auto;color:var(--muted);font-size:12px}
 .ln.lw{stroke:var(--warn)}.ln.lc{stroke:var(--bad)}
-.ln.lag{stroke-width:4.5}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
+.ln.lag{stroke-width:4.5}.ln.guess{stroke-dasharray:2 4;stroke-linecap:round}
+.tag.t-stale{background:var(--bg);color:var(--muted);border:1px dashed var(--border)}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
 #mapctl{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:6;transition:right .25s}
 #mapctl button{width:34px;height:34px;border:0;border-radius:7px;background:none;color:var(--muted);font-size:17px;cursor:pointer;display:grid;place-items:center}
 #mapctl button:hover{background:var(--bg);color:var(--accent)}#mapctl button:focus-visible{outline:2px solid var(--accent)}
@@ -261,6 +262,7 @@ table{width:100%;border-collapse:collapse}
     <span><i class="dot" style="background:var(--ok)"></i> online</span>
     <span><i class="dot" style="background:var(--off)"></i> off / asleep</span>
     <span><i class="dot" style="background:var(--accent)"></i> new / unknown</span>
+    <span title="A link SpiderMap could not see directly: only through the gateway, behind another device, or where the device was last seen"><svg width="18" height="8" aria-hidden="true"><line x1="1" y1="4" x2="17" y2="4" stroke="currentColor" stroke-width="2" stroke-dasharray="2 4" stroke-linecap="round"/></svg> guessed link</span>
     <span><i class="dot" style="background:var(--warn)"></i> changed</span>
     <span><i class="dot" style="background:var(--bad)"></i> down</span>
   </span>
@@ -300,7 +302,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.6.0";
+const PAGE_VERSION = "0.6.1";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -448,6 +450,7 @@ function tags(n) {
   (n.flags || []).forEach(f => {
     if (f === "new") out.push('<span class="tag t-new">new</span>');
     else if (f === "unknown") out.push('<span class="tag t-unknown">unknown</span>');
+    else if (f === "stale") out.push('<span class="tag t-stale" title="Not seen for days">stale</span>');
     else if (f === "moved") out.push('<span class="tag t-moved">moved</span>');
     else if (f === "ip changed") out.push('<span class="tag t-ip">IP changed</span>');
   });
@@ -1036,6 +1039,7 @@ async function saveEdit(n) {
 // VLAN filter (per browser): null = all VLANs; otherwise the VLAN ids shown ("none" = devices without VLAN information)
 let VSEL = (() => { const v = store("nm-vlans"); return Array.isArray(v) ? new Set(v.map(String)) : null; })();
 const vlanOk = n => !VSEL || n.kind !== "device" || VSEL.has(n.vlan ? String(n.vlan) : "none");
+const GUESSED = ["arp", "behind", "remembered"];     // links SpiderMap could not see directly: drawn dotted
 function shownKids(id) {
   return (kids[id] || []).filter(k => {
     const n = byId[k];
@@ -1129,7 +1133,7 @@ function render() {
         xs.push(cc);
         // the child's own line: from the bus to the child
         const [x1, y1, x2, y2] = H ? [bus, cc, (d + 1) * HD + 62 - 27, cc] : [cc, bus, cc, bus + 36];
-        line(x1, y1, x2, y2, (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : ""), k, lk.w);
+        line(x1, y1, x2, y2, (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : "") + (GUESSED.includes(ch.via) ? " guess" : ""), k, lk.w);
         if (dur) svg += `<line class="fl" style="animation-duration:${dur}s" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
         if (ch.port) extra += H ? `<div class="pt" style="left:${(x1 + x2) / 2}px;top:${cc - 21}px">${esc(ch.port)}</div>`
                                : `<div class="pt" style="left:${cc}px;top:${bus + 12}px">${esc(ch.port)}</div>`;
@@ -1309,6 +1313,8 @@ function panel(id, quiet) {
   const acts = [];
   if (n.url && /^https?:\/\//i.test(n.url)) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open web UI</a>`);
   if (n.zbx) acts.push(`<a class="btn" href="${esc(DATA.zabbix_url)}?action=latest.view&filter_set=1&hostids%5B%5D=${encodeURIComponent(n.zbx)}" target="_top"><i class="ti ti-chart-line"></i>Show in Zabbix</a>`);
+  if (n.mac && (n.flags.includes("new") || n.flags.includes("unknown")) && ME.can.edit)
+    acts.push(`<button class="btn" id="approve" title="I know this device: it is no longer marked new or unknown"><i class="ti ti-circle-check"></i>Approve</button>`);
   if (n.mac) acts.push(`<button class="btn" id="cmac"><i class="ti ti-copy"></i>Copy MAC</button>`, `<button class="btn" id="edit"${ME.can.edit ? "" : ` disabled title="${esc(denied("edit"))}"`}><i class="ti ti-pencil"></i>Edit</button>`);
   if (acts.length) h += `<div class="acts">${acts.join("")}</div>`;
   issues(n).forEach(i => { h += `<div class="iss-line"><i class="ti ti-alert-triangle"></i> ${esc(i.text)}</div>`; });
@@ -1337,6 +1343,14 @@ function panel(id, quiet) {
   if (n.details && n.details.length) h += `<div class="sec">Details</div><table class="kv">${n.details.map(r => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join("")}</table>`;
   P.innerHTML = h; P.classList.add("open"); document.body.classList.add("panel-open");
   $("#pclose").onclick = closePanel;
+  const ap = $("#approve");
+  if (ap) ap.onclick = async () => {
+    ap.disabled = true;
+    const r = await postApi({ mac: n.mac, approved: true }); const j = await r.json().catch(() => ({}));
+    if (!j.ok) { ap.disabled = false; return toast(j.error || "Refused."); }
+    n.flags = n.flags.filter(f => f !== "new" && f !== "unknown"); render(); panel(n.id, true);
+    toast("Approved. It stays so after the next scan.");
+  };
   const cm = $("#cmac"); if (cm) cm.onclick = () => { navigator.clipboard && navigator.clipboard.writeText(n.mac); cm.innerHTML = '<i class="ti ti-check"></i>Copied'; };
   P.querySelectorAll("[data-go]").forEach(r => r.onclick = () => select(r.dataset.go, true));
   const isp = $("#inet-speed"); if (isp) isp.onclick = () => special("speed");

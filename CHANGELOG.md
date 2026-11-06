@@ -4,6 +4,25 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.6.1] - 2026-11-07
+
+### Added
+- **Where each link comes from.** A device's panel says how SpiderMap knows its connection: LLDP (the device
+  announced itself), the switch's MAC table, pinned in devices.json, the Proxmox API - or guessed: seen only through
+  the gateway (Wi-Fi or its LAN ports), behind another device, or where it was last seen. Guessed links are drawn
+  dotted (see the legend).
+- **Approve** on new and unknown devices (for users who may edit): they are no longer marked, after every scan.
+  Recorded in the audit log and the activity feed.
+- **Stale devices:** devices not seen for 7 days (Settings > General > Devices) are marked "stale" until they are
+  forgotten.
+
+### Fixed
+- A port that changed to a higher speed (e.g. 100 Mbps -> 1 Gbps) had its traffic ignored for up to 5 minutes:
+  SpiderMap now reads the port's speed again at once.
+- After a switch restart, new port numbers were picked up only at the next scheduled scan: a scan now starts right
+  away (at most every 10 minutes per switch), noted in the activity feed.
+- Stopped Proxmox guests no longer showed under a Proxmox host recognised automatically as a hypervisor (0.6.0).
+
 ## [0.6.0] - 2026-11-06
 
 ### Added
@@ -321,6 +340,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.6.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.1
 [0.6.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.0
 [0.5.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.3
 [0.5.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.2
