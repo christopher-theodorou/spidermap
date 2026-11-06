@@ -349,7 +349,7 @@ def test_dialog_settings():
           files == [f"spidermap.log.{dt.date.fromtimestamp(old).isoformat()}"], files)
 
 
-def _fake_router(loc_host="127.0.0.1", rate_down=12_500_000, rate_up=2_500_000):
+def _fake_router(loc_host="127.0.0.1", rate_down=12_500_000, rate_up=2_500_000, stuck=False, frozen=False, x64=False):
     """A UPnP router in threads: SSDP on a random UDP port, description and SOAP on a random HTTP port."""
     import http.server, socket, threading
     t0, state = time.time(), {"answer": True}
@@ -357,21 +357,28 @@ def _fake_router(loc_host="127.0.0.1", rate_down=12_500_000, rate_up=2_500_000):
     hport = httpd.server_address[1]
     desc = ('<root><device><modelName>Speedport Test</modelName><deviceList><device><serviceList><service>'
             '<serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>'
-            '<controlURL>/ctl</controlURL></service></serviceList></device></deviceList></device></root>')
+            '<SCPDURL>/scpd.xml</SCPDURL><controlURL>/ctl</controlURL></service></serviceList></device></deviceList></device></root>')
+    names = ["GetCommonLinkProperties", "GetTotalBytesSent", "GetTotalBytesReceived"] + (["X_GetTotalBytesReceived64", "X_GetTotalBytesSent64"] if x64 else [])
+    scpd = "<scpd><actionList>" + "".join(f"<action><name>{n}</name></action>" for n in names) + "</actionList></scpd>"
 
     class H(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
         def do_GET(self):
-            self.send_response(200); self.end_headers(); self.wfile.write(desc.encode())
+            self.send_response(200); self.end_headers(); self.wfile.write((scpd if "scpd" in self.path else desc).encode())
 
         def do_POST(self):
             if not state["answer"]:
                 self.send_response(500); self.end_headers(); return
             act = self.headers.get("SOAPAction", "").split("#")[-1].strip('"')
-            el = time.time() - t0
-            body = {"GetTotalBytesReceived": f"<NewTotalBytesReceived>{int(1e6 + el * rate_down) % 2**32}</NewTotalBytesReceived>",
+            el = 0 if frozen else time.time() - t0
+            if stuck and act.startswith("GetTotalBytes"):
+                body = f"<New{act[3:]}>2147483647</New{act[3:]}>"
+                self.send_response(200); self.end_headers(); self.wfile.write(f"<r>{body}</r>".encode()); return
+            body = {"X_GetTotalBytesReceived64": f"<NewTotalBytesReceived>{int(9e12 + el * rate_down)}</NewTotalBytesReceived>",
+                    "X_GetTotalBytesSent64": f"<NewTotalBytesSent>{int(5e12 + el * rate_up)}</NewTotalBytesSent>",
+                    "GetTotalBytesReceived": f"<NewTotalBytesReceived>{int(1e6 + el * rate_down) % 2**32}</NewTotalBytesReceived>",
                     "GetTotalBytesSent": f"<NewTotalBytesSent>{int(1e6 + el * rate_up)}</NewTotalBytesSent>",
                     "GetCommonLinkProperties": "<NewLayer1DownstreamMaxBitRate>300000000</NewLayer1DownstreamMaxBitRate>"}.get(act, "")
             self.send_response(200); self.end_headers(); self.wfile.write(f"<r>{body}</r>".encode())
@@ -385,6 +392,52 @@ def _fake_router(loc_host="127.0.0.1", rate_down=12_500_000, rate_up=2_500_000):
     threading.Thread(target=ssdp, daemon=True).start()
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return u.getsockname()[1], state
+
+
+def _upnp_with(sport):
+    real = sm.upnp_discover
+    sm.upnp_discover = lambda gw, timeout=1.5, port=None, mcast=None: real(gw, timeout, sport, "127.0.0.1")
+    return real
+
+
+def test_upnp_stuck():
+    data = {"nodes": [{"kind": "router", "ip": "127.0.0.1"}]}
+    sport, _ = _fake_router(stuck=True)
+    real = _upnp_with(sport)
+    try:
+        upnp = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
+        r = sm.read_upnp(upnp, data, {}, "auto", 0)
+        check("UPnP: counters stuck at 2,147,483,647 are not taken as 'no traffic'",
+              r is None and "2,147,483,647" in upnp["error"] and "switch port" in upnp["error"] and upnp["stuck_until"] == 600, upnp)
+        check("UPnP: a stuck router is asked again only after 10 minutes", sm.read_upnp(upnp, data, {}, "auto", 300) is None
+              and upnp["stuck_until"] == 600)
+    finally:
+        sm.upnp_discover = real
+    sport, _ = _fake_router(frozen=True)
+    real = _upnp_with(sport)
+    try:
+        upnp = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
+        for i in range(14):
+            sm.read_upnp(upnp, data, {}, "auto", i * 5, switch_rate=50e6)
+        check("UPnP: counters that do not move while the switch sees traffic are not used",
+              "do not change" in upnp["error"] and upnp.get("stuck_until"), upnp)
+        quiet = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
+        for i in range(14):
+            sm.read_upnp(quiet, data, {}, "auto", i * 5, switch_rate=0)
+        check("UPnP: a quiet line (no traffic anywhere) is not mistaken for frozen counters", not quiet.get("stuck_until"), quiet)
+    finally:
+        sm.upnp_discover = real
+    sport, _ = _fake_router(x64=True)
+    real = _upnp_with(sport)
+    try:
+        upnp, usage = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}, {}
+        sm.read_upnp(upnp, data, usage, "auto", 0)
+        time.sleep(2)
+        r = sm.read_upnp(upnp, data, usage, "auto", 10)
+        check("UPnP: a router's 64-bit counter is found in its action list and used",
+              upnp["svc"]["rx"] == "X_GetTotalBytesReceived64" and r and abs(r["rx"] / 1e6 - 100) < 8, (upnp["svc"], r))
+    finally:
+        sm.upnp_discover = real
 
 
 def test_upnp():
@@ -595,6 +648,47 @@ def test_speed_providers():
           not sm.validate_settings({"speedtest_provider": "cloudflare"})[1] and sm.validate_settings({"speedtest_provider": "nperf"})[1])
 
 
+def test_measure_wan():
+    S = sm.effective_settings({})
+    data = {"nodes": [{"kind": "router", "ip": "192.168.1.1"}]}
+    gw = {"name": "MikroTik", "_snmp": {"ip": "192.168.1.1"}, "_ips": ["192.168.1.1"], "_macros": {}}
+    sw = {"rx": 5e6, "tx": 1e6}
+    real = (sm.read_router_snmp, sm.read_upnp)
+    calls = []
+
+    def fake(snmp_ok, upnp_ok):
+        def rs(rsnmp, h, t0, usage, name=""):
+            calls.append("snmp")
+            rsnmp["error"] = "" if snmp_ok else "router MikroTik over SNMP: Timeout"
+            return {"rx": 90e6, "tx": 9e6} if snmp_ok else None
+
+        def ru(upnp, data, usage, source, t0, switch_rate=None):
+            calls.append("upnp")
+            upnp["error"] = "" if upnp_ok else "router not used: its byte counters stopped at 2,147,483,647"
+            return {"rx": 80e6, "tx": 8e6} if upnp_ok else None
+        sm.read_router_snmp, sm.read_upnp = rs, ru
+    try:
+        r = sm.measure_wan(dict(S, wan_source="switch"), data, [gw], sw, {}, {}, {}, 0)
+        check("WAN: 'switch port' chosen in Settings -> the switch port", r == (sw, "switch", ""), r)
+        fake(True, True); calls.clear()
+        r = sm.measure_wan(S, data, [gw], sw, {}, {}, {}, 0)
+        check("WAN: the gateway is an SNMP host -> its WAN over SNMP, UPnP not even asked", r[1] == "snmp" and calls == ["snmp"], (r, calls))
+        fake(False, True)
+        r = sm.measure_wan(S, data, [gw], sw, {}, {}, {}, 0)
+        check("WAN: SNMP fails -> the router over UPnP", r[1] == "upnp" and r[0]["rx"] == 80e6, r)
+        fake(False, False)
+        r = sm.measure_wan(S, data, [gw], sw, {}, {}, {}, 0)
+        check("WAN: nothing works -> no numbers (not the switch port), with both reasons",
+              r[0] is None and r[1] is None and "SNMP: Timeout" in r[2] and "2,147,483,647" in r[2], r)
+        r = sm.measure_wan(S, data, [], sw, {}, {}, {}, 0)
+        check("WAN: gateway not in Zabbix and UPnP stuck -> the reason says how to get exact figures",
+              r[0] is None and "add the gateway to Zabbix with an SNMP interface" in r[2], r)
+    finally:
+        sm.read_router_snmp, sm.read_upnp = real
+    check("WAN: the 0.5.1 setting 'auto' now means the router",
+          sm.effective_settings({"wan_source": "auto"})["wan_source"] == "router" and S["wan_source"] == "router")
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -608,6 +702,8 @@ def main():
     test_config_location()
     test_dialog_settings()
     test_upnp()
+    test_upnp_stuck()
+    test_measure_wan()
     test_outages()
     test_reset()
     test_speed_providers()

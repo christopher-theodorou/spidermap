@@ -4,6 +4,33 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.5.3] - 2026-11-06
+
+### Changed
+- **Throughput is the router's WAN, never a substitute.** When the router's WAN cannot be read, the card shows
+  "WAN unavailable ⚠" with the reason, monthly usage shows "-", no graph of old values is drawn, and the activity
+  feed says when measuring stops and starts again. The switch port to the gateway is used only when chosen in
+  Settings > Measurements (0.5.2 fell back to it by itself).
+
+### Added
+- **The router's WAN over SNMP**, the most exact source (64-bit counters that do not stop): used when the gateway
+  is a Zabbix host with an SNMP interface (MikroTik, OPNsense, pfSense, ...). SpiderMap finds the WAN interface from
+  the router's default route, or uses the name set in Settings > Measurements > *Router's WAN interface*. UPnP is
+  the second source. Collector health shows both.
+
+## [0.5.2] - 2026-11-06
+
+### Fixed
+- **Throughput showed zero with some routers.** Their UPnP byte counters stop at 2,147,483,647 (or 4,294,967,295)
+  after a few GB, and SpiderMap took the unchanging value as "no traffic". It now recognises stuck counters - and
+  counters that do not move while the switch sees traffic - and falls back to the switch port to the gateway, says
+  why on the card (amber "switch port ⚠") and in Collector health, and asks the router again every 10 minutes
+  (after a router restart its counters work again for a while).
+
+### Added
+- SpiderMap reads the list of actions the router offers and uses a **64-bit byte counter** where one exists
+  (these do not stop after a few GB).
+
 ## [0.5.1] - 2026-11-06
 
 ### Fixed
@@ -268,6 +295,8 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.5.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.3
+[0.5.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.2
 [0.5.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.1
 [0.5.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.0
 [0.4.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.4.0

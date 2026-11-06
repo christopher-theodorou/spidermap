@@ -293,7 +293,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.5.1";
+const PAGE_VERSION = "0.5.3";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -507,19 +507,25 @@ function gwCard() {
      + `<span style="color:${RI.down_since ? "var(--bad)" : upc};font-weight:600">${RI.down_since ? "down " + ago(RI.down_since).replace(" ago", "") : up == null ? "" : up.toFixed(up >= 99.995 ? 2 : 3) + " %" + (cov != null && cov < 99.5 ? `<small style="display:block;text-align:right;font-weight:400;font-size:10.5px;color:var(--muted)">monitored ${cov} %</small>` : "")}</span></div>`;
   h += row("IPv4 Address", esc(inet && inet.sub || "-"));
   const rootSw = DATA.nodes.find(n => n.kind === "switch" && n.flip && n.port_ref);
-  const fromRouter = live && RT.wan && RT.wan.src === "router" && RT.usage && RT.usage.wan && RT.usage.wan.m;
-  const mu = fromRouter ? RT.usage.wan.m
+  const WS = live && RT.wan_state ? RT.wan_state : null, routerMode = !WS || WS.mode !== "switch";
+  const fromRouter = live && routerMode && RT.usage && RT.usage.wan && RT.usage.wan.m;
+  const mu = fromRouter ? RT.usage.wan.m : routerMode && WS ? null      // the router's WAN only: no switch numbers instead
     : live && rootSw && RT.usage && RT.usage.m && RT.usage.m[rootSw.port_ref[0]] ? RT.usage.m[rootSw.port_ref[0]][String(rootSw.port_ref[1])] : (I.month ? [I.month.down, I.month.up] : null);
   const since0 = fromRouter ? RT.usage.wan_since : live && RT.usage ? RT.usage.since : null;
   const since = since0 && since0 > new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime() / 1000
     ? new Date(since0 * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "";
+  if (!mu && routerMode && WS) h += row("Monthly Data Usage", '<span style="color:var(--muted)">-</span>');
   if (mu) h += row("Monthly Data Usage", bytes(mu[0] + mu[1]) + (since ? ` <span style="color:var(--muted)">since ${esc(since)}</span>` : ""),
                    `↓ ${bytes(mu[0])} · ↑ ${bytes(mu[1])}, ` + (fromRouter ? "counted by the router (all internet traffic)" : "measured on the switch port to the gateway"));
-  const wsrc = live && RT.wan && RT.wan.src;
-  const wTitle = wsrc === "router" ? "Measured by the router itself (UPnP): all internet traffic, including Wi-Fi devices."
-    : "Measured on the switch port to the gateway. Devices on the gateway's own Wi-Fi / LAN ports are not included" + (live && RT.upnp && RT.upnp.error ? " (router: " + RT.upnp.error + ")" : "") + ".";
-  h += `<div class="gr" title="${esc(wTitle)}"><span>Throughput${wsrc ? `<small style="display:block;font-size:10.5px;color:var(--muted)">${wsrc === "router" ? "router" : "switch port"}</small>` : ""}</span><span>${wan ? `<span style="color:var(--accent)">↓ ${mbps(wan.down)}</span> &nbsp;<span style="color:var(--pur)">↑ ${mbps(wan.up)}</span>` : "-"}</span></div>`;
-  h += spark(wanRows, 1, 2);
+  const via = WS && WS.via, wanBad = WS && routerMode && !via;
+  const wTitle = via === "snmp" ? `The router's WAN interface over SNMP (${WS.router || ""}${WS.interface ? ", " + WS.interface : ""}): all internet traffic.`
+    : via === "upnp" ? "The router's own counters over UPnP: all internet traffic, including Wi-Fi devices."
+    : via === "switch" ? "The switch port to the gateway (chosen in Settings): devices on the gateway's own Wi-Fi / LAN ports are not included."
+    : wanBad ? "The WAN cannot be measured: " + (WS.error || "") + ". Options: add the gateway to Zabbix with an SNMP interface, turn UPnP on in the router, or choose the switch port in Settings > Measurements." : "";
+  const wLabel = via === "snmp" ? "router · SNMP" : via === "upnp" ? "router · UPnP" : via === "switch" ? "switch port" : wanBad ? "WAN unavailable ⚠" : "";
+  const wVal = WS && !via ? "-" : wan ? `<span style="color:var(--accent)">↓ ${mbps(wan.down)}</span> &nbsp;<span style="color:var(--pur)">↑ ${mbps(wan.up)}</span>` : "-";
+  h += `<div class="gr" title="${esc(wTitle)}"><span>Throughput${wLabel ? `<small style="display:block;font-size:10.5px;color:${wanBad ? "var(--warn)" : "var(--muted)"}">${wLabel}</small>` : ""}</span><span>${wVal}</span></div>`;
+  if (!wanBad) h += spark(wanRows, 1, 2);              // no graph of old values when the WAN cannot be measured
   const TG = live && RT.targets ? RT.targets : {};
   h += `<div class="tiles">${Object.entries(lat).map(([k, v]) => { const x = TG[k]; return `<div class="tile" title="${x ? `loss ${x.loss} % · jitter ${x.jit ?? "-"} ms` : ""}"><b style="color:${v == null ? "var(--bad)" : v > 80 ? "var(--warn)" : "var(--text)"}">${v == null ? "—" : Math.round(v) + "ms"}</b><span>${esc(k)}</span>${x && x.loss >= 5 ? `<small style="color:var(--warn)">loss ${x.loss}%</small>` : ""}</div>`; }).join("")}</div>`;
   // the speed test button stays visible at the bottom of the card, even when the card has to scroll
@@ -589,8 +595,14 @@ function healthHtml() {
   h += `<div class="sec">Data</div>` + row("Map", age(D.map) + (S.targets ? ` · ${S.targets} addresses scanned` : "")) + row("Status", age(D.live)) + row("Live traffic", age(D.realtime));
   if (H.disk) { const pct = H.disk.free / H.disk.total * 100; h += row("Free disk space", `<span class="${pct < 5 ? "badc" : pct < 15 ? "warnc" : ""}">${bytes(H.disk.free)} (${pct.toFixed(0)} %)</span>`); }
   h += row("Speed test", H.speedtest ? esc(H.speedtest) : '<span class="warnc">not installed</span>');
-  if (H.upnp && H.upnp.on) h += row("Router (UPnP)", H.upnp.ok ? okb(true, "ok" + (H.upnp.name ? " · " + esc(H.upnp.name) : "")) : '<span class="warnc">not answering</span>')
-    + (H.upnp.error ? `<div class="note warnc" style="margin-top:-4px">${esc(H.upnp.error)}</div>` : "");
+  const WH = H.wan;
+  if (WH && WH.mode !== "switch") {
+    if (WH.snmp) h += row("WAN over SNMP", !WH.snmp.error ? okb(true, `ok · ${esc(WH.snmp.router || "")}${WH.snmp.interface ? " · " + esc(WH.snmp.interface) : ""}`) : '<span class="warnc">not working</span>')
+      + (WH.snmp.error ? `<div class="note warnc" style="margin-top:-4px">${esc(WH.snmp.error)}</div>` : "");
+    else h += row("WAN over SNMP", '<span style="color:var(--muted)">the gateway is not an SNMP host in Zabbix</span>');
+    h += row("WAN over UPnP", WH.upnp.ok ? okb(true, "ok" + (WH.upnp.name ? " · " + esc(WH.upnp.name) : "")) : '<span class="warnc">not usable</span>')
+      + (WH.upnp.error ? `<div class="note warnc" style="margin-top:-4px">${esc(WH.upnp.error)}</div>` : "");
+  }
   const hist = (st.history || []).slice().reverse();
   if (hist.length) h += `<div class="sec">Recent scans</div><table class="lst">${hist.map(x => `<tr><td>${new Date(x.t * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</td><td>${x.job === "scan" ? "scan" : "refresh"}${x.by ? " · " + esc(x.by) : ""}</td><td>${okb(x.result === "ok", esc(x.result))}</td><td>${x.seconds} s</td></tr>`).join("")}</table>`;
   return h;

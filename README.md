@@ -99,9 +99,11 @@ Zabbix Super admins (by default) find a **Settings** button (the gear) on the ma
 Every change is checked in the browser and on the server, recorded in the audit log, and the previous version is
 kept, so a mistake is one click away from being undone.
 
-**Throughput from the router.** Devices on the router's own Wi-Fi never pass a switch, so SpiderMap reads the
-router's own WAN counters over **UPnP** (most home routers support it; turn on *UPnP* in the router if the card
-says "switch port"). Only the default gateway is asked.
+**Throughput is the router's WAN.** Devices on the router's own Wi-Fi never pass a switch, so SpiderMap reads the
+router itself: over **SNMP** when the gateway is a Zabbix host with an SNMP interface (exact 64-bit counters; the WAN
+interface is found from the default route, or set in Settings), otherwise over **UPnP** (many home routers; some stop
+counting after a few GB, which SpiderMap recognises). When neither works, the card says "WAN unavailable" and why,
+instead of showing other numbers.
 
 **Moving around the map.** The controls at the bottom right zoom, fit, turn the tree **vertical or horizontal**,
 **expand or collapse everything** and go **full screen**. The mouse wheel zooms (or scrolls, if you prefer), Shift +

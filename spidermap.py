@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.5.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.5.3"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -1236,9 +1236,26 @@ def upnp_wan_service(location):
         st = re.search(r"(?is)<serviceType>\s*(.*?)\s*</serviceType>", blk)
         ctl = re.search(r"(?is)<controlURL>\s*(.*?)\s*</controlURL>", blk)
         if st and ctl and "WANCommonInterfaceConfig" in st.group(1):
-            url = urljoin(base.group(1) if base else location, ctl.group(1))
-            if urlparse(url).hostname == urlparse(location).hostname:
-                return {"type": st.group(1), "url": url, "name": name.group(1)[:60] if name else ""}
+            root = base.group(1) if base else location
+            url = urljoin(root, ctl.group(1))
+            if urlparse(url).hostname != urlparse(location).hostname:
+                continue
+            svc = {"type": st.group(1), "url": url, "name": name.group(1)[:60] if name else "",
+                   "rx": "GetTotalBytesReceived", "tx": "GetTotalBytesSent"}
+            # a 64-bit byte counter, where the router offers one (it does not stop at 2 or 4 GB)
+            scpd = re.search(r"(?is)<SCPDURL>\s*(.*?)\s*</SCPDURL>", blk)
+            if scpd:
+                try:
+                    actions = re.findall(r"(?is)<action>\s*<name>\s*([^<\s]+)\s*</name>",
+                                         requests.get(urljoin(root, scpd.group(1)), timeout=5).text)
+                except requests.RequestException:
+                    actions = []
+                for key, rx in (("rx", r"(?i)bytes.*rec.*64|64.*bytes.*rec"), ("tx", r"(?i)bytes.*sent.*64|64.*bytes.*sent")):
+                    hit = next((a for a in actions if re.search(rx, a)), None)
+                    if hit:
+                        svc[key] = hit
+                svc["actions"] = actions[:40]
+            return svc
     return None
 
 
@@ -1252,14 +1269,17 @@ def upnp_call(svc, action):
     return r.text
 
 
+UPNP_STUCK = {2 ** 31 - 1, 2 ** 32 - 1}     # where some routers' 32-bit counters stop for good
+
+
 def upnp_counters(svc):
-    """[bytes received, bytes sent] on the router's WAN side."""
+    """[bytes received, bytes sent] on the router's WAN side (the 64-bit actions where the router has them)."""
     out = []
-    for action, field in (("GetTotalBytesReceived", "NewTotalBytesReceived"), ("GetTotalBytesSent", "NewTotalBytesSent")):
-        m = re.search(rf"<{field}>\s*(\d+)\s*</{field}>", upnp_call(svc, action))
+    for action in (svc.get("rx", "GetTotalBytesReceived"), svc.get("tx", "GetTotalBytesSent")):
+        m = re.search(r"<(New[A-Za-z0-9_]*)>\s*(\d+)\s*</\1>", upnp_call(svc, action))
         if not m:
             raise RuntimeError(f"the router did not answer {action}")
-        out.append(int(m.group(1)))
+        out.append(int(m.group(2)))
     return out
 
 
@@ -1273,7 +1293,89 @@ def upnp_link_mbps(svc):
     return max(v) / 1e6 if v else 0
 
 
-def read_upnp(upnp, data, usage, source, t0):
+def router_wan_ifindex(auth, target, name=""):
+    """(ifIndex, name) of the router's WAN: the interface called `name`, or the one with the default route."""
+    names = {k: str(v).strip('"') for k, v in (at.snmpwalk(auth, target, "1.3.6.1.2.1.31.1.1.1.1")
+                                                  or at.snmpwalk(auth, target, "1.3.6.1.2.1.2.2.1.2")).items()}
+    if name:
+        idx = next((i for i, n in names.items() if n.lower() == name.strip().lower()), None)
+        if not idx:
+            raise RuntimeError(f'the router has no interface "{name}" (it has: {", ".join(list(names.values())[:12])})')
+        return idx, names[idx]
+    for base, prefix in (("1.3.6.1.2.1.4.24.7.1.7", "1.4.0.0.0.0.0."),       # inetCidrRouteIfIndex: 0.0.0.0/0
+                         ("1.3.6.1.2.1.4.24.4.1.5", "0.0.0.0.0.0.0.0.")):    # ipCidrRouteIfIndex: 0.0.0.0 mask 0.0.0.0
+        rows = at.snmpwalk(auth, target, base)
+        hit = next((str(v).strip() for k, v in rows.items() if k.startswith(prefix) and str(v).strip().isdigit()
+                    and str(v).strip() != "0"), None)
+        if hit:
+            return hit, names.get(hit, "")
+    raise RuntimeError("the router does not say which interface has the default route: "
+                       "set the router's WAN interface in Settings > Measurements")
+
+
+def read_router_snmp(rs, h, t0, usage, wan_name=""):
+    """One reading of the router's WAN interface over SNMP: {"rx", "tx"} in bit/s, or None (rs["error"] says why)."""
+    try:
+        auth, target = at.snmp_auth(h["_snmp"], h["_macros"])
+        if not rs.get("idx") or t0 >= rs.get("redetect", 0) or rs.get("name_set") != wan_name:
+            idx, nm = router_wan_ifindex(auth, target, wan_name)
+            sp = snmp_get(auth, target, [f"1.3.6.1.2.1.31.1.1.1.15.{idx}"]).get(f"1.3.6.1.2.1.31.1.1.1.15.{idx}", 0)
+            rs.update(idx=idx, ifname=nm, speed=sp, redetect=t0 + 3600, name_set=wan_name, prev=None, router=h["name"])
+        i = rs["idx"]
+        oid = {"up": "1.3.6.1.2.1.1.3.0", "in": f"1.3.6.1.2.1.31.1.1.1.6.{i}", "out": f"1.3.6.1.2.1.31.1.1.1.10.{i}",
+               "in32": f"1.3.6.1.2.1.2.2.1.10.{i}", "out32": f"1.3.6.1.2.1.2.2.1.16.{i}", "disc": f"1.3.6.1.2.1.31.1.1.1.19.{i}"}
+        v = snmp_get(auth, target, list(oid.values()))
+    except Exception as e:  # noqa: BLE001
+        rs.update(error=f"router {h['name']} over SNMP: {str(e)[:160]}", idx=None, redetect=t0 + 60)
+        return None
+    is32 = v.get(oid["in"]) is None
+    rx, tx = (v.get(oid["in32"]), v.get(oid["out32"])) if is32 else (v.get(oid["in"]), v.get(oid["out"]))
+    if rx is None or tx is None:
+        rs.update(error=f"router {h['name']} does not answer for its WAN interface {rs.get('ifname') or rs['idx']}",
+                  idx=None, redetect=t0 + 60)
+        return None
+    cur = (time.monotonic(), rx, tx, v.get(oid["up"]), v.get(oid["disc"]), is32)
+    r_rx, r_tx, drx, dtx, why = counter_rate(rs.get("prev"), cur, rs.get("speed", 0))
+    rs.update(prev=cur, error="")
+    if why is not None:
+        return None
+    w = usage.setdefault("wan", {})
+    for per in ("d", "m"):
+        u = w.setdefault(per, [0, 0])
+        u[0] += drx
+        u[1] += dtx
+    usage.setdefault("wan_since", now())
+    return {"rx": r_rx, "tx": r_tx}
+
+
+def measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0):
+    """The WAN throughput: (rate or None, "snmp" | "upnp" | "switch" | None, reason when there is no rate).
+    The router's WAN by default - SNMP when the gateway is an SNMP host in Zabbix, else UPnP. No other numbers are
+    put in its place: without a router reading the result is None, with the reason."""
+    if S["wan_source"] == "switch":
+        return sw_wan, ("switch" if sw_wan else None), ("" if sw_wan else "no traffic data for the switch port to the gateway")
+    gw_ip = next((n.get("ip") for n in data["nodes"] if n.get("kind") == "router" and n.get("ip")), None)
+    gh = next((h for h in hosts if h.get("_snmp") and gw_ip and gw_ip in (h.get("_ips") or [h["_snmp"].get("ip")])), None)
+    why = []
+    if gh:
+        r = read_router_snmp(rsnmp, gh, t0, usage, S["wan_interface"])
+        if r:
+            return r, "snmp", ""
+        if rsnmp.get("prev") and not rsnmp.get("error"):
+            return None, "snmp", "first reading, measuring…"        # a baseline, not a problem
+        why.append(rsnmp.get("error") or "the router's SNMP reading failed")
+    r = read_upnp(upnp, data, usage, "router", t0, max(sw_wan["rx"], sw_wan["tx"]) if sw_wan else None)
+    if r:
+        return r, "upnp", ""
+    if upnp.get("svc") and upnp.get("prev") and not upnp.get("stuck_until"):
+        return None, "upnp", "first reading, measuring…"
+    why.append(upnp.get("error") or "the router does not answer UPnP")
+    if not gh:
+        why.append("for exact WAN figures add the gateway to Zabbix with an SNMP interface")
+    return None, None, "; ".join(why)
+
+
+def read_upnp(upnp, data, usage, source, t0, switch_rate=None):
     """One reading of the router's WAN counters. Returns {"rx", "tx"} in bit/s, or None. Finds the router again when
     needed (every 10 min while it does not answer), and adds the traffic to the day / month totals."""
     gw_ip = next((n.get("ip") for n in data["nodes"] if n.get("kind") == "router" and n.get("ip")), None)
@@ -1286,7 +1388,7 @@ def read_upnp(upnp, data, usage, source, t0):
             upnp["link"] = upnp_link_mbps(upnp["svc"]) if upnp["svc"] else 0
         except Exception as e:  # noqa: BLE001
             upnp["error"] = str(e)[:200]
-    if not upnp["svc"]:
+    if not upnp["svc"] or t0 < upnp.get("stuck_until", 0):
         return None
     try:
         rx_b, tx_b = upnp_counters(upnp["svc"])
@@ -1296,6 +1398,20 @@ def read_upnp(upnp, data, usage, source, t0):
         if upnp["fails"] >= 3:                         # find it again (new address, router restarted)
             upnp.update(svc=None, prev=None, next=t0 + 60)
         return None
+    stuck = None
+    if rx_b in UPNP_STUCK or tx_b in UPNP_STUCK:
+        stuck = f"its byte counters stopped at {max(rx_b, tx_b):,}: the router's firmware stops counting after a few GB"
+    elif upnp["prev"] and (rx_b, tx_b) == upnp["prev"][1:3] and switch_rate and switch_rate > 1e6:
+        upnp["still"] = upnp.get("still", 0) + 1                      # the switch sees traffic, the router counts none
+        if upnp["still"] >= 12:
+            stuck = "its byte counters do not change while the switch sees traffic"
+    else:
+        upnp["still"] = 0
+    if stuck:
+        upnp.update(prev=None, still=0, stuck_until=t0 + 600,
+                    error=f"router not used: {stuck} - throughput from the switch port (checked again in 10 min)")
+        return None
+    upnp.pop("stuck_until", None)
     cur = (time.monotonic(), rx_b, tx_b, None, None, max(rx_b, tx_b) < 2 ** 32)   # many routers count in 32 bits
     rx, tx, drx, dtx, why = counter_rate(upnp["prev"], cur, upnp["link"])
     upnp.update(prev=cur, fails=0, error="")
@@ -2368,6 +2484,7 @@ def rt_loop(api):
     sched = Scheduler()
     api_state, snmp_state, health, last_health = {}, {}, {}, 0
     upnp = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
+    rsnmp, wan_bad, hosts = {}, {}, []
     last_ookla = 0
     try:
         publish_settings()
@@ -2391,8 +2508,10 @@ def rt_loop(api):
             threading.Thread(target=lambda: (ookla_servers(refresh=True), publish_settings()), daemon=True).start()
         if t0 - last_health > 30:
             health, last_health = health_report(api_state, snmp_state), t0
-            health["upnp"] = {"ok": bool(upnp["svc"]), "name": (upnp["svc"] or {}).get("name", ""), "error": upnp["error"],
-                              "on": S["wan_source"] != "switch"}
+            health["wan"] = {"mode": S["wan_source"], "snmp": {"router": rsnmp.get("router"), "interface": rsnmp.get("ifname"),
+                                                                "error": rsnmp.get("error", "")} if rsnmp else None,
+                             "upnp": {"ok": bool(upnp["svc"]) and not upnp.get("stuck_until"),
+                                      "name": (upnp["svc"] or {}).get("name", ""), "error": upnp["error"]}}
         save_json(os.path.join(DATA_DIR, STATUS), sched.status(int(t0), S, health))
         if sched.restart:
             print("map reset: restarting the service", flush=True)
@@ -2508,9 +2627,18 @@ def rt_loop(api):
                 del lst[:-RT_KEEP]
         root = next((n for n in data["nodes"] if n.get("kind") == "switch" and n.get("flip") and n.get("port_ref")), None)
         sw_wan = ports.get(root["port_ref"][0], {}).get(str(root["port_ref"][1])) if root else None
-        upnp_rate = read_upnp(upnp, data, usage, S["wan_source"], t0) if S["wan_source"] != "switch" else None
-        wan = upnp_rate or (sw_wan if S["wan_source"] != "router" else None)
-        wan_src = "router" if upnp_rate else ("switch" if wan else None)
+        wan, wan_src, wan_err = measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0)
+        # tell once when the WAN cannot be measured (after a minute), and when it can again
+        if S["wan_source"] == "router":
+            if wan_src is None and not wan_bad.get("since"):
+                wan_bad["since"] = t0
+            if wan_src is None and t0 - wan_bad.get("since", t0) >= 60 and not wan_bad.get("said"):
+                wan_bad["said"] = True
+                evs.append(ev("internet", "warn", f"WAN throughput cannot be measured: {wan_err}", "inet"))
+            if wan_src is not None:
+                if wan_bad.get("said"):
+                    evs.append(ev("internet", "ok", f"WAN throughput is measured again (router, {wan_src.upper()})", "inet"))
+                wan_bad.clear()
         if wan:
             hist["wan"].append([t, round(wan["rx"]), round(wan["tx"])])
             del hist["wan"][:-RT_KEEP]
@@ -2592,8 +2720,9 @@ def rt_loop(api):
         save_json(os.path.join(DATA_DIR, RT), {
             "t": t, "every": every, "ports": ports, "flaps": flaps,
             "wan": {"down": wan["rx"], "up": wan["tx"], "src": wan_src} if wan else None,
-            "upnp": {"ok": bool(upnp["svc"]), "name": (upnp["svc"] or {}).get("name", ""), "error": upnp["error"],
-                     "link_mbps": upnp["link"]} if S["wan_source"] != "switch" else None,
+            "wan_state": {"mode": S["wan_source"], "via": wan_src, "error": wan_err,
+                          "router": rsnmp.get("router") if wan_src == "snmp" else (upnp["svc"] or {}).get("name", ""),
+                          "interface": rsnmp.get("ifname", "") if wan_src == "snmp" else ""},
             "latency": {k: v["ms"] for k, v in targets.items() if k != "Gateway"}, "targets": targets,
             "inet": {"up": not inet.get("down_since"), "down_since": inet.get("down_since"),
                      "last_outage": inet["outages"][-1] if inet["outages"] else None,
@@ -3096,9 +3225,13 @@ SETTINGS_SCHEMA = [
     _S("lock_positions", "bool", False, "Topology", "Layout", "Lock node positions", preview="0.6",
        help="Nodes you moved by hand keep their place after a new scan."),
     # ---- Measurements
-    _S("wan_source", "choice", "auto", "Measurements", "Traffic", "Throughput source",
-       choices=[["auto", "Router (UPnP), else the switch port"], ["router", "Router (UPnP) only"], ["switch", "Switch port to the gateway"]],
-       help="The router's own counters include Wi-Fi devices that never pass a switch. UPnP must be on in the router."),
+    _S("wan_source", "choice", "router", "Measurements", "Traffic", "Throughput source",
+       choices=[["router", "The router's WAN (SNMP, else UPnP)"], ["switch", "Switch port to the gateway"]],
+       help="The router's WAN: read over SNMP when the gateway is a Zabbix host with an SNMP interface (best: 64-bit "
+            "counters), else over UPnP. When neither works, the card shows a warning instead of other numbers."),
+    _S("wan_interface", "str", "", "Measurements", "Traffic", "Router's WAN interface", maxlen=40,
+       help="SNMP only. The interface name on the router, e.g. ether1, pppoe-out1, igb0. Empty: the interface of the "
+            "default route."),
     _S("link_thickness", "bool", False, "Measurements", "Traffic", "Link thickness by traffic"),
     _S("units", "choice", "bits", "Measurements", "Traffic", "Units",
        choices=[["bits", "bits/s"], ["bytes", "bytes/s"], ["percent", "% of capacity"]]),
@@ -3178,6 +3311,8 @@ def effective_settings(settings):
         v = _get(settings, key, None)
         if key == "permissions.view" and v is None:
             v = settings.get("view_min_user_type")                     # before 0.4.0
+        if key == "wan_source" and v == "auto":
+            v = "router"                                               # 0.5.1: "auto" meant the router first
         if key == "auto_scan" and v is None and "discovery_paused" in settings:
             v = not settings["discovery_paused"]                       # first 0.5.0 drafts
         if f.get("locked"):
