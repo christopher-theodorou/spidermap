@@ -191,7 +191,14 @@ def run(base, inbox, data):
     rs = json.load(open(os.path.join(inbox, "settings.request")))
     passed += chk("reset: Super admin, written for the service", code == 200 and rs.get("reset") == {"keep_devices": False, "keep_speedtests": True}
                   and rs.get("by") == "Admin", (code, rs))
-    extra += 6
+    c1, _ = req(O, US, '{"action":"place","place":{"key":"SW|Port 1","kind":"switch"}}', H)
+    c2, _ = req(G, SA, '{"action":"place","place":"x"}', H)
+    passed += chk("map edit: normal user refused, not an object refused", c1 == 403 and c2 == 400, (c1, c2))
+    c3, _ = req(O, AD, '{"action":"place","place":{"key":"SW|Port 1","kind":"switch","evil":1}}', H)
+    pr = json.load(open(os.path.join(inbox, "settings.request")))
+    passed += chk("map edit: Admin may (edit permission), only known fields reach the service",
+                  c3 == 200 and pr.get("place") == {"key": "SW|Port 1", "kind": "switch"} and pr.get("by") == "netadmin", (c3, pr))
+    extra += 8
     return passed, len(cases) + extra
 
 

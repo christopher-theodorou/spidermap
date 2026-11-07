@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.6.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.7.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -90,6 +90,9 @@ TYPE_ICON = {"router": "router", "switch": "server-2", "ap": "access-point", "un
              "hypervisor": "server-cog", "industrial": "building-factory-2", "mediaconv": "arrows-exchange",
              "oob": "terminal-2"}
 
+PLACE_KINDS = {"switch": ("Unmanaged switch", "server-2"), "ap": ("Access point", "access-point"),
+               "hypervisor": ("Hypervisor", "server-cog"), "bridge": ("Wi-Fi bridge", "antenna"), "hub": ("Hub", "sitemap"),
+               "other": ("Other device", "box")}
 VIA_TEXT = {"lldp": "LLDP (the device announced itself)", "mac": "MAC table of the switch", "manual": "pinned in devices.json",
             "proxmox": "Proxmox API", "arp": "guessed: seen only through the gateway (Wi-Fi or its LAN ports)",
             "behind": "guessed: behind another device", "remembered": "guessed: where it was last seen"}
@@ -604,6 +607,7 @@ def full_scan(api, community=None, quiet=False):
     S = effective_settings(cfg.get("settings", {}))
     scan_progress(2, "starting")
     at.SNMP_WALK.update(timeout_s=S["snmp_timeout_ms"] / 1000, retries=S["snmp_retries"], max_rep=S["snmp_max_repetitions"])
+    zp.CDP_ON = S["topo_cdp"]
     nets = S["scan_subnets"] or sorted({str(ipaddress.ip_network(f"{h['_snmp']['ip']}/24", strict=False))
                                         for h in switches if h["_snmp"].get("ip")})
     targets = list(scan_targets(nets, S["scan_exclude"]))
@@ -834,6 +838,12 @@ def full_scan(api, community=None, quiet=False):
     add("inet", None, name="Internet", sub=public_ip or "public IP", icon="world", kind="inet",
         status="up" if public_ip else "down", details=[["Public IP", public_ip or "unknown"]])
 
+    def dtype(mac):
+        """A device's type, the same way device_node() decides it."""
+        d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
+        return c.get("type") or (g and g["kind"]) or classify(f"{dname(mac)} {d.get('dns', '')}", vendor_of(mac), mac,
+                                                              S["device_types_off"])
+
     def device_node(mac, parent, port_ref=None, port_lbl="", via=""):
         d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
         ip, name = d.get("ip", ""), dname(mac)
@@ -973,6 +983,7 @@ def full_scan(api, community=None, quiet=False):
                 return {"k": "port", "sw": sid, "port": p["name"]}
         return None
 
+    places, done_places = cfg.get("places", {}) or {}, set()
     port_groups = {}
     for mac, d in sorted(sdev.items(), key=lambda x: x[0]):
         loc = (d.get("loc") if mac in online else None) or pin_loc(mac) or d.get("loc")
@@ -986,12 +997,47 @@ def full_scan(api, community=None, quiet=False):
     for (sid, pname), macs in sorted(port_groups.items(), key=lambda x: (x[0][0], pos_of(*x[0]))):
         pr, lbl = [sid, pid_of(sid, pname)], plabel(sid, pname)
         live_macs = [m for m in macs if m in online]
-        if len(live_macs) > 1 and (sid, pname) not in host_port:
+        pkey = f"{sw_name[sid]}|{_pinfo.get((sid, pname), {}).get('base') or lbl}"
+        place = places.get(pkey)
+        if place and place.get("kind") != "none":        # confirmed or named on the map (Edit)
             gid = f"g-{sid}-{pid_of(sid, pname)}"
-            add(gid, "s-" + sid, name=f"{lbl} devices", sub=f"{len(macs)} devices", icon="sitemap", kind="group",
-                status="up", port=lbl, port_ref=pr, details=[["Connection", f"{sw_name[sid]} · {lbl}"]])
+            add(gid, "s-" + sid, name=place.get("name") or PLACE_KINDS[place["kind"]][0], icon=PLACE_KINDS[place["kind"]][1],
+                sub=f"{lbl} · {len(live_macs)} device{'' if len(live_macs) == 1 else 's'} now", kind="group",
+                type=place["kind"], confirmed=True, place=pkey, status="up", port=lbl, port_ref=pr, via="manual",
+                details=[["Connection", f"{sw_name[sid]} · {lbl}"], ["Type", PLACE_KINDS[place["kind"]][0]]]
+                + [[k_.title(), place[k_]] for k_ in ("model", "location") if place.get(k_)]
+                + [["Link from", "confirmed on the map"]])
             for m in macs:
                 device_node(m, gid, via="mac")
+                placed.add(m)
+            done_places.add(pkey)
+            continue
+        not_a_device = bool(place and place.get("kind") == "none")     # "Not a device" on the map: the plain group
+        if len(live_macs) > 1 and (sid, pname) not in host_port:
+            # several devices on one port: behind an access point / hypervisor that is one of them,
+            # or behind a switch nobody manages (inferred: drawn dashed)
+            hub = next((m for m in live_macs if dtype(m) in ("ap", "hypervisor")), None)   # not "unifi": a Cloud Key is no AP
+            if hub and not not_a_device:
+                hn = device_node(hub, "s-" + sid, pr, lbl, "mac")
+                placed.add(hub)
+                for m in macs:
+                    if m != hub:
+                        device_node(m, hn["id"], via="behind")
+                        placed.add(m)
+                continue
+            gid = f"g-{sid}-{pid_of(sid, pname)}"
+            if S["infer_switches"] and not not_a_device:
+                add(gid, "s-" + sid, name="Unmanaged switch", sub=f"{lbl} · {len(macs)} devices", icon="server-2",
+                    kind="group", inferred=True, place=pkey, status="up", port=lbl, port_ref=pr, via="mac",
+                    details=[["Connection", f"{sw_name[sid]} · {lbl}"],
+                             ["Why", f"{len(live_macs)} devices answer on this one port, without LLDP: probably a "
+                                     "switch SpiderMap cannot read (or a hub, or a Wi-Fi bridge)"]])
+            else:
+                add(gid, "s-" + sid, name=f"{lbl} devices", sub=f"{len(macs)} devices", icon="sitemap", kind="group",
+                    status="up", port=lbl, port_ref=pr, place=pkey if not_a_device else None,
+                    details=[["Connection", f"{sw_name[sid]} · {lbl}"]])
+            for m in macs:
+                device_node(m, gid, via="behind" if S["infer_switches"] and not not_a_device else "mac")
                 placed.add(m)
         else:
             for m in macs:
@@ -1003,6 +1049,18 @@ def full_scan(api, community=None, quiet=False):
                     n["status"], n["sub"] = "asleep", "asleep"
                 placed.add(m)
 
+    for pkey, place in places.items():
+        if pkey in done_places or place.get("kind") in (None, "none") or "|" not in pkey:
+            continue
+        swn, plab = pkey.split("|", 1)
+        sid = next((k for k, v in sw_name.items() if v == swn), None)
+        prt = next((p for p in sw[sid]["ports"] if p.get("base", p["label"]) == plab), None) if sid in sw else None
+        if prt:
+            add(f"g-{sid}-{prt['pid']}", "s-" + sid, name=place.get("name") or PLACE_KINDS[place["kind"]][0],
+                icon=PLACE_KINDS[place["kind"]][1], sub=f"{prt['label']} · no devices now", kind="group", type=place["kind"],
+                confirmed=True, place=pkey, status="up" if prt["status"] == "up" else "off", port=prt["label"],
+                port_ref=[sid, prt["pid"]], via="manual", details=[["Connection", f"{swn} · {prt['label']}"]])
+
     # devices behind another device (gateway Wi-Fi, Proxmox guests, ...)
     for host_mac, macs in behind.items():
         parent = "wifi" if host_mac == gw_mac else by_mac.get(host_mac)
@@ -1012,6 +1070,25 @@ def full_scan(api, community=None, quiet=False):
             if m not in placed:
                 device_node(m, parent, via="arp" if parent == "wifi" else "proxmox" if m in guest_by_mac else "behind")
                 placed.add(m)
+
+    # "Connected through" (Edit): a device placed behind another one, e.g. a media converter - a manual link
+    for m, c in dcfg.items():
+        target = str(c.get("behind") or "").lower()
+        if not target or m not in by_mac or target not in by_mac or target == m:
+            continue
+        nid, tid = by_mac[m], by_mac[target]
+        up, loop = tid, False
+        while up:                                         # never behind something that is behind it
+            if up == nid:
+                loop = True
+                break
+            up = nodes.get(up, {}).get("parent")
+        if loop:
+            continue
+        n = nodes[nid]
+        n["parent"], n["via"], n["behind"] = tid, "manual", target
+        n["details"] = [x for x in n["details"] if x[0] != "Link from"] + [["Link from", VIA_TEXT["manual"] + " (connected through "
+                                                                            + nodes[tid]["name"] + ")"]]
 
     # stopped Proxmox guests the network never saw
     pve_node = next((n for n in nodes.values() if n.get("type") in ("server", "hypervisor") and "proxmox" in n["name"].lower()), None)
@@ -1049,7 +1126,7 @@ def full_scan(api, community=None, quiet=False):
                 clients.setdefault(pid_of(sid, pa), []).append(sw_name[b])
         switches_out[sid] = {"name": sw_name[sid], "ports": [
             {"id": p["pid"], "n": p.get("pos", 0), "label": p["label"], "kind": p.get("kind", "port"),
-             "media": p.get("media", ""), "vlans": p.get("vlans") if S["topo_vlans"] else None,
+             "media": p.get("media", ""), "base": p.get("base", p["label"]), "vlans": p.get("vlans") if S["topo_vlans"] else None,
              "lag": next((q["pid"] for q in sw[sid]["ports"] if str(q.get("ifindex")) == str(p.get("lag"))), None),
              "full": p["name"], "status": p["status"], "speed_mbps": p.get("speed_mbps", 0),
              "speed": p["speed"], "alias": p["alias"], "ifindex": p.get("ifindex"),
@@ -1193,7 +1270,7 @@ def apply_edits():
     return merged
 
 
-AUDIT_FIELDS = ("name", "type", "url", "pin", "important", "approved")
+AUDIT_FIELDS = ("name", "type", "url", "pin", "important", "approved", "behind")
 
 
 def _merge_edits(edits):
@@ -1532,6 +1609,28 @@ def ping_stats(ip, count=4):
             "jit": round(float(q.group(2)), 1) if q else None}
 
 
+def zabbix_problems(api, hostids):
+    """{hostid: {"sev": worst severity 0-5, "list": [[name, severity, since], ...]}} for triggers in problem state.
+    SpiderMap's own triggers (new devices etc.) are left out: they are notifications, not problems of the host."""
+    hostids = sorted(h for h in hostids if h)
+    if not hostids:
+        return {}
+    trig = api.call("trigger.get", {"hostids": hostids, "filter": {"value": 1}, "monitored": True, "skipDependent": True,
+                                    "expandDescription": True, "output": ["description", "priority", "lastchange"],
+                                    "selectHosts": ["hostid"], "selectTags": "extend", "sortfield": "priority",
+                                    "sortorder": "DESC"})
+    out = {}
+    for tr in trig:
+        if any(tg.get("tag") == "source" and tg.get("value") == "autotopo" for tg in tr.get("tags", [])):
+            continue
+        for h in tr.get("hosts", []):
+            e = out.setdefault(h["hostid"], {"sev": 0, "list": []})
+            e["sev"] = max(e["sev"], int(tr["priority"]))
+            if len(e["list"]) < 8:
+                e["list"].append([tr["description"][:160], int(tr["priority"]), int(tr.get("lastchange") or 0)])
+    return out
+
+
 ZBX_PORT_KEYS = [("net.if.status[", "st"), ("net.if.in.errors[", "ein"), ("net.if.out.errors[", "eout"),
                  ("net.if.in[", "rx"), ("net.if.out[", "tx")]
 
@@ -1756,8 +1855,15 @@ def live_refresh(api):
     except Exception:  # noqa: BLE001
         pass
 
+    problems = {}
+    if setting("zabbix_triggers"):
+        try:
+            problems = zabbix_problems(api, {n["zbx"] for n in data["nodes"] if n.get("zbx")})
+        except Exception as e:  # noqa: BLE001
+            print("zabbix problems:", e, flush=True)
     save_json(os.path.join(DATA_DIR, LIVE), {
         "generated": t, "ports": ports, "nodes": nstat, "stats": stats, "cable": cable, "unusual": unusual,
+        "problems": problems,
         "warnings": warn,
         "inet": dict(inet, latency=lat, wan=wan,
                      month={"down": gw_use[0], "up": gw_use[1]} if gw_use else None),
@@ -2138,7 +2244,7 @@ SETTINGS_OUT = "spidermap_settings.json"  # in DATA_DIR, for users with the sett
 ACCESS = "access.json"                    # in DATA_DIR, read by spidermap.php at every request
 SCAN_REQ, CANCEL_REQ, SETTINGS_REQ = (os.path.join(INBOX, f) for f in ("scan.request", "scan.cancel", "settings.request"))
 JOB_TIMEOUT = {"scan": 900, "live": 180}
-DEVICE_FIELDS = {"name": str, "type": str, "url": str, "pin": str, "important": bool, "approved": bool}
+DEVICE_FIELDS = {"name": str, "type": str, "url": str, "pin": str, "important": bool, "approved": bool, "behind": str}
 ADVANCED_SETTINGS = {"port_media": dict, "aliases": dict, "manual_links": list, "core_switch": str, "speedtest_server": str}
 
 
@@ -2277,6 +2383,33 @@ def apply_settings_request(req):
         add_events([ev("audit", "info", f"{by} imported settings and {len(devs)} devices")])
         res.update(ok=True, message=f"Imported {len(devs)} devices and the settings.")
         return res
+    if "place" in req:
+        pl = req["place"] if isinstance(req["place"], dict) else {}
+        key, kind = str(pl.get("key") or ""), str(pl.get("kind") or "")
+        dm = load_json(os.path.join(DATA_DIR, DATA), {}) or {}
+        known = {f"{x.get('name')}|{p.get('base', p.get('label'))}" for x in (dm.get("switches") or {}).values() for p in x.get("ports", [])}
+        if key not in known:
+            res["errors"] = ["That switch port is not on the map."]
+            return res
+        if kind not in PLACE_KINDS and kind not in ("none", "remove"):
+            res["errors"] = ["Unknown kind of device."]
+            return res
+        vals = {k_: str(pl.get(k_) or "").strip()[:60] for k_ in ("name", "model", "location")}
+        if any(re.search(r"[<>\x00-\x1f]", v) for v in vals.values()):
+            res["errors"] = ["No < > or control characters, please."]
+            return res
+        config_backup(cfg, by, "before a map edit")
+        places = cfg.setdefault("places", {})
+        if kind == "remove":
+            places.pop(key, None)
+        else:
+            places[key] = {"kind": kind, **{k_: v for k_, v in vals.items() if v}}
+        save_json(DEVICES_FILE, cfg)
+        what = "removed" if kind == "remove" else ("not a device" if kind == "none" else PLACE_KINDS[kind][0] + (f" “{vals['name']}”" if vals["name"] else ""))
+        audit("place", by, {"port": key, "kind": kind, **vals})
+        add_events([ev("audit", "info", f"{by} set {key.replace('|', ' ')}: {what}")])
+        res.update(ok=True, rescan=True, message="Saved. The map shows it after the scan that starts now.")
+        return res
     if "reset" in req:
         opt = req["reset"] if isinstance(req["reset"], dict) else {}
         keep_dev, keep_sp = opt.get("keep_devices", True) is not False, opt.get("keep_speedtests", True) is not False
@@ -2341,7 +2474,7 @@ def publish_settings():
     save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
 
 
-DISPLAY_KEYS = ("wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
+DISPLAY_KEYS = ("default_view", "zabbix_triggers", "wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
 
 
 def in_scan_window(S, dt):
@@ -2458,6 +2591,8 @@ class Scheduler:
                     self.cancel(n, "map reset")
                 self.poll()
             self.config_result = apply_settings_request(req)
+            if self.config_result.get("rescan"):
+                self.start("scan", "map edit")
             if self.config_result.get("restart"):
                 self.jobs["scan"]["last_start"] = 0          # scan right after the restart
                 self.restart = True
@@ -3167,6 +3302,14 @@ if (!is_array($in)) deny(400, 'Bad request');
 $ROLE = [1 => 'Zabbix users', 2 => 'Zabbix admins', 3 => 'Zabbix Super admins'];
 
 $act = (string)($in['action'] ?? '');
+if ($act === 'place') {                                // a switch / AP / ... between a port and its devices, set on the map
+  if ($user['type'] < perm('edit')) deny(403, 'Only ' . $ROLE[perm('edit')] . ' can change the map.');
+  if (!is_array($in['place'] ?? null)) deny(400, 'Bad request');
+  $body = ['place' => array_intersect_key($in['place'], array_flip(['key', 'kind', 'name', 'model', 'location']))];
+  $rid = (string)($in['rid'] ?? '');
+  write_request('settings.request', $body + ['by' => $user['name'], 'at' => time()] + (preg_match('/^[a-z0-9]{6,24}$/', $rid) ? ['rid' => $rid] : []));
+  echo json_encode(['ok' => true, 'queued' => 'place']); exit;
+}
 if ($act === 'speedtest') {
   if ($user['type'] < perm('speedtest')) deny(403, 'Only ' . $ROLE[perm('speedtest')] . ' can start a speed test.');
   // who asked is recorded in the activity feed and the audit log
@@ -3213,6 +3356,11 @@ foreach (['name', 'type', 'url', 'pin'] as $k)
 if (isset($e['url']) && $e['url'] !== '' && !preg_match('#^https?://#i', $e['url'])) deny(400, 'Web UI address must start with http:// or https://');
 if (array_key_exists('important', $in)) $e['important'] = (bool)$in['important'];
 if (array_key_exists('approved', $in)) $e['approved'] = (bool)$in['approved'];
+if (array_key_exists('behind', $in)) {                // "connected through": another device's MAC, or empty
+  $b = strtolower(trim((string)$in['behind']));
+  if ($b !== '' && !preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $b)) deny(400, 'Connected through: not a MAC address');
+  $e['behind'] = $b;
+}
 $fh = @fopen(STATE_DIR . '/edits.json', 'c+');
 if (!$fh) deny(500, 'Cannot write ' . STATE_DIR . '/edits.json');
 flock($fh, LOCK_EX);
@@ -3285,7 +3433,8 @@ SETTINGS_SCHEMA = [
     # ---- General
     _S("map_name", "str", "", "General", "General settings", "Map name", maxlen=60, help="Shown in the header and the browser tab."),
     _S("default_view", "choice", "physical", "General", "General settings", "Default view",
-       choices=[["physical", "Physical topology"], ["l3", "Logical topology (L3)", "planned"], ["vlan", "By VLAN", "planned"]]),
+       choices=[["physical", "Physical (switches and ports)"], ["l3", "Logical (by subnet)"]],
+       help="Which view the map opens with. The button in the map controls switches between them."),
     _S("page_refresh_s", "choice", 60, "General", "General settings", "Map refresh",
        choices=[[10, "10 seconds"], [30, "30 seconds"], [60, "1 minute"], [0, "Manually"]],
        help="How often open pages reload the map. Live traffic keeps its own interval (Measurements)."),
@@ -3295,8 +3444,8 @@ SETTINGS_SCHEMA = [
     _S("show_offline", "bool", True, "General", "General settings", "Show offline devices",
        help="Devices that do not answer are shown in grey instead of being hidden from the map."),
     _S("ip_labels", "bool", True, "General", "General settings", "IP labels on nodes"),
-    _S("zabbix_triggers", "bool", False, "General", "General settings", "Link with Zabbix triggers", preview="0.7",
-       help="Nodes change colour with the severity of the host's active problems."),
+    _S("zabbix_triggers", "bool", True, "General", "General settings", "Link with Zabbix triggers",
+       help="Nodes that are Zabbix hosts get a coloured ring with the severity of their active problems."),
     _S("flag_hours", "int", 24, "General", "Devices", "Mark new and moved devices for", range=[1, 720], unit="h"),
     _S("stale_days", "int", 7, "General", "Devices", "Mark devices not seen for", range=[1, 365], unit="days",
        help="They stay on the map, marked 'stale', until they are forgotten."),
@@ -3331,7 +3480,8 @@ SETTINGS_SCHEMA = [
     _S("snmp_timeout_ms", "int", 3000, "SNMP", "Packet size", "Timeout", range=[500, 10000], unit="ms"),
     # ---- Topology
     _S("topo_lldp", "bool", True, "Topology", "Link sources", "LLDP"),
-    _S("topo_cdp", "bool", False, "Topology", "Link sources", "CDP (Cisco)", preview="0.7"),
+    _S("topo_cdp", "bool", True, "Topology", "Link sources", "CDP (Cisco)",
+       help="Cisco Discovery Protocol, for Cisco devices without LLDP. LLDP is used first where a port has both."),
     _S("topo_vlans", "bool", True, "Topology", "Link sources", "VLANs (Q-BRIDGE-MIB)",
        help="Reads the VLANs of each switch port and of each device, for the VLAN filter on the map. Switches without "
             "Q-BRIDGE-MIB simply show no VLANs."),
@@ -3340,9 +3490,11 @@ SETTINGS_SCHEMA = [
             "placed on switch ports."),
     _S("topo_arp", "bool", True, "Topology", "Link sources", "ARP tables",
        help="IP addresses from the switches' and routers' ARP tables, in addition to this server's own."),
+    _S("infer_switches", "bool", True, "Topology", "Link sources", "Find hidden switches",
+       help="Several devices on one port without LLDP: drawn behind an 'Unmanaged switch' (dashed), or behind the "
+            "access point or hypervisor that is one of them."),
     _S("layout", "choice", "tree", "Topology", "Layout", "Map layout",
        choices=[["tree", "Hierarchical (tree)"], ["force", "Free (force-directed)", "planned"], ["radial", "Radial", "planned"]]),
-    _S("group_subnet", "bool", False, "Topology", "Layout", "Group by subnet", preview="0.7"),
     _S("lock_positions", "bool", False, "Topology", "Layout", "Lock node positions", preview="0.7",
        help="Nodes you moved by hand keep their place after a new scan."),
     # ---- Device types (the tab shows a card with a switch per category)

@@ -56,6 +56,26 @@ OID = {
     "vfdb": "1.3.6.1.2.1.17.7.1.4.2.1.3", "lagof": "1.2.840.10006.300.43.1.2.1.1.13",
 }
 VLANS = {}          # hostid -> {vlan id: name}, from the last scan of each switch
+CDP_ON = False      # set from Settings > Topology > CDP
+CDP = {"addr": "1.3.6.1.4.1.9.9.23.1.2.1.1.4", "id": "1.3.6.1.4.1.9.9.23.1.2.1.1.6", "port": "1.3.6.1.4.1.9.9.23.1.2.1.1.7"}
+
+
+def cdp_records(names, dev_ids, dev_ports, addrs):
+    """CDP neighbours (CISCO-CDP-MIB, index ifIndex.deviceIndex) in the same form as at.lldp_neighbors()."""
+    out = []
+    for suffix, dev in dev_ids.items():
+        parts = str(suffix).split(".")
+        if len(parts) < 2:
+            continue
+        ifx = parts[0]
+        raw = str(dev).strip('"')
+        sysname = re.sub(r"\(.*\)$", "", raw).strip()             # some devices add their serial number in brackets
+        hexes = re.findall(r"[0-9A-Fa-f]{2}", str(addrs.get(suffix, "")))
+        ip = ".".join(str(int(x, 16)) for x in hexes[:4]) if len(hexes) >= 4 else ""
+        local = names.get(ifx, f"port {ifx}")
+        out.append({"local_port": local, "local_names": [local], "sysname": sysname, "chassis": "",
+                    "remote_port": str(dev_ports.get(suffix, "")).strip('"'), "mgmt_ip": ip, "via": "cdp"})
+    return out
 ENUM = {"up": "1", "down": "2", "testing": "3", "unknown": "4", "dormant": "5",
         "notPresent": "6", "lowerLayerDown": "7",
         "ethernetCsmacd": "6", "gigabitEthernet": "117", "ieee8023adLag": "161"}
@@ -261,7 +281,16 @@ def scan_switch(h, community, hosts):
     hw_media = entity_media(auth, target)
 
     lldp = {}
-    for nb in at.lldp_neighbors(auth, target):
+    neighbours = at.lldp_neighbors(auth, target)
+    if CDP_ON:                                           # Cisco: CDP neighbours too, where LLDP has none
+        try:
+            cdp = cdp_records(names, at.snmpwalk(auth, target, CDP["id"]), at.snmpwalk(auth, target, CDP["port"]),
+                              at.snmpwalk(auth + ["-Ox"], target, CDP["addr"]))
+        except Exception:  # noqa: BLE001
+            cdp = []
+        have = {norm(n["local_port"]) for n in neighbours}
+        neighbours += [c for c in cdp if norm(c["local_port"]) not in have]
+    for nb in neighbours:
         peer = at.match_host(nb, hosts)
         for n in {norm(x) for x in (nb["local_names"] or [nb["local_port"]])}:
             lldp.setdefault(n, []).append((nb, peer))

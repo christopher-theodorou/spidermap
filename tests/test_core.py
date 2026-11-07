@@ -311,7 +311,7 @@ def test_config_location():
 def test_dialog_settings():
     import datetime as dt
     V = sm.validate_settings
-    check("dialog: a preview setting (v0.6) cannot be switched on", V({"zabbix_triggers": True})[1] and V({"topo_cdp": True})[1])
+    check("dialog: a preview setting cannot be switched on", V({"lock_positions": True})[1] and not V({"zabbix_triggers": True})[1])
     check("dialog: read-only SNMP is always on", V({"snmp_readonly": False})[1] and sm.effective_settings({"snmp_readonly": False})["snmp_readonly"] is True)
     check("dialog: planned options are refused, offered ones accepted",
           V({"layout": "force"})[1] and V({"default_view": "vlan"})[1] and not V({"layout": "tree", "units": "percent"})[1])
@@ -740,6 +740,38 @@ def test_approve():
         sm.snmp_get = real
 
 
+def test_070():
+    class Api:
+        def call(self, m, p=None):
+            return [{"description": "Interface Gi0/1 down", "priority": "4", "lastchange": "100", "hosts": [{"hostid": "11"}], "tags": []},
+                    {"description": "Network: new device(s)", "priority": "2", "lastchange": "90", "hosts": [{"hostid": "11"}],
+                     "tags": [{"tag": "source", "value": "autotopo"}]},
+                    {"description": "High CPU", "priority": "2", "lastchange": "80", "hosts": [{"hostid": "12"}], "tags": []}]
+    pr = sm.zabbix_problems(Api(), {"11", "12"})
+    check("Zabbix problems: worst severity per host, SpiderMap's own alerts left out",
+          pr == {"11": {"sev": 4, "list": [["Interface Gi0/1 down", 4, 100]]}, "12": {"sev": 2, "list": [["High CPU", 2, 80]]}}, pr)
+    check("Zabbix problems: no hosts, no question to Zabbix", sm.zabbix_problems(Api(), set()) == {})
+    import spidermap_ports as zp
+    cdp = zp.cdp_records({"10101": "Gi0/1"}, {"10101.3": '"SW-Core.example.com(FOC1234X)"'}, {"10101.3": '"GigabitEthernet1/0/24"'},
+                         {"10101.3": "0A 00 00 02"})
+    check("CDP: neighbour name (serial removed), its port and address, in LLDP's form",
+          cdp == [{"local_port": "Gi0/1", "local_names": ["Gi0/1"], "sysname": "SW-Core.example.com", "chassis": "",
+                   "remote_port": "GigabitEthernet1/0/24", "mgmt_ip": "10.0.0.2", "via": "cdp"}], cdp)
+    _sandbox()
+    json.dump({"switches": {"1": {"name": "SW-Core", "ports": [{"label": "Port 7 (SFP+)", "base": "Port 7"}]}}},
+              open(os.path.join(sm.DATA_DIR, sm.DATA), "w"))
+    r = sm.apply_settings_request({"by": "Admin", "place": {"key": "SW-Core|Port 7", "kind": "switch", "name": "Office switch"}})
+    cfg = json.load(open(sm.DEVICES_FILE))
+    check("map edit: a switch confirmed on a port is saved, a scan is asked for",
+          r["ok"] and r.get("rescan") and cfg["places"] == {"SW-Core|Port 7": {"kind": "switch", "name": "Office switch"}}, (r, cfg))
+    bad = [sm.apply_settings_request({"by": "A", "place": pl}) for pl in
+           ({"key": "SW-Core|Port 99", "kind": "switch"}, {"key": "SW-Core|Port 7", "kind": "printer"},
+            {"key": "SW-Core|Port 7", "kind": "switch", "name": "<script>"})]
+    check("map edit: unknown port, unknown kind and HTML are refused", all(not b["ok"] for b in bad), bad)
+    r = sm.apply_settings_request({"by": "Admin", "place": {"key": "SW-Core|Port 7", "kind": "remove"}})
+    check("map edit: Remove takes it away again", r["ok"] and json.load(open(sm.DEVICES_FILE))["places"] == {}, r)
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -760,6 +792,7 @@ def main():
     test_speed_providers()
     test_uninstall()
     test_approve()
+    test_070()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

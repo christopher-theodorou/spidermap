@@ -4,6 +4,30 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.7.0] - 2026-11-07
+
+### Added
+- **Hidden switches.** Several devices on one switch port without LLDP: if one of them is an access point or a
+  hypervisor, the others are drawn behind it; otherwise they are drawn behind an "Unmanaged switch", outlined dashed
+  because it is inferred (Settings > Topology > *Find hidden switches*).
+- **Edit the map** (users who may edit): on an inferred switch *Confirm and name* (name, model, location), *It's
+  something else* (access point, hypervisor, Wi-Fi bridge, hub, other) or *Not a device*; on any device on a switch
+  port *Add an unmanaged switch here*. Stored by switch and port, separate from the devices: SpiderMap still places
+  every device by what the switches report, the edit only says what sits in between. A scan starts right away.
+- **Connected through** (Edit): a device placed behind another one, e.g. a media converter or powerline adapter.
+  A link that would make a loop is ignored.
+- **Zabbix problems on the map:** nodes that are Zabbix hosts get a ring in the colour of their worst active problem
+  and a tag with the number; the panel lists them with a link to Zabbix. SpiderMap's own alerts are not counted.
+- **CDP** for Cisco devices without LLDP (LLDP first where a port has both).
+- **Logical view by subnet:** a button in the map controls switches between the physical view and one group per
+  subnet under the gateway; Settings > General > *Default view* chooses which one opens.
+
+### Changed
+- One button expands or collapses the whole map (it shows which one it will do).
+
+### Fixed
+- An open form in the side panel (Edit) could be rebuilt by the automatic refresh while typing.
+
 ## [0.6.1] - 2026-11-07
 
 ### Added
@@ -340,6 +364,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.7.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.0
 [0.6.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.1
 [0.6.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.0
 [0.5.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.5.3
