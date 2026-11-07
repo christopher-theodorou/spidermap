@@ -132,6 +132,7 @@ svg line{transition:stroke .2s}
 #vlan-pop{position:fixed;z-index:40;width:280px;max-height:60vh;overflow:auto;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(10,10,40,.18);padding:10px 12px;font-size:13px}
 .vl-row{display:flex;align-items:center;gap:8px;padding:5px 2px;cursor:pointer}.vl-row .vl-c{margin-left:auto;color:var(--muted);font-size:12px}
 .ln.lw{stroke:var(--warn)}.ln.lc{stroke:var(--bad)}
+body.free .tn{cursor:grab}body.free .tn:active{cursor:grabbing}
 .tn.prob .ic{box-shadow:0 0 0 3px var(--pc)}.tn.inferred .ic{border:2px dashed var(--muted)}
 .pl-row{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px}
 .pl-row i{width:10px;height:10px;border-radius:2px;display:block}
@@ -272,6 +273,7 @@ table{width:100%;border-collapse:collapse}
   <span class="sp"></span>
   <span class="stat" id="s-time"></span>
   <input class="search" id="q" placeholder="Name, IP or MAC" aria-label="Search devices">
+  <button class="btn tb" id="b-lang" title="Ελληνικά" aria-label="Language" style="font-weight:600;font-size:12px;min-width:34px">ΕΛ</button>
   <button class="btn tb" id="b-vlan" title="Show VLANs" aria-label="Show VLANs" aria-haspopup="true" style="display:none"><i class="ti ti-filter"></i><span class="bd" id="vlan-bd" style="display:none"></span></button>
   <button class="btn tb" id="b-act" title="Activity" aria-label="Activity"><i class="ti ti-bell"></i><span class="bd" id="act-bd" style="display:none"></span></button>
   <button class="btn" id="b-ppl" title="Who's online" aria-label="Who's online"><i class="ti ti-users"></i></button>
@@ -289,6 +291,8 @@ table{width:100%;border-collapse:collapse}
     <button id="zfit" title="Fit to screen (0)" aria-label="Fit to screen"><i class="ti ti-focus-centered"></i></button>
     <span class="sep"></span>
     <button id="b-view" title="Logical view (by subnet)" aria-label="Switch between the physical and the logical view"><i class="ti ti-network"></i></button>
+    <button id="b-layout" title="Free layout: drag nodes" aria-label="Switch between the tree and the free layout"><i class="ti ti-hand-move"></i></button>
+    <button id="b-relayout" title="Reset layout" aria-label="Reset layout" style="display:none"><i class="ti ti-restore"></i></button>
     <button id="b-orient" title="Horizontal view" aria-label="Switch between vertical and horizontal view"><i class="ti ti-arrow-autofit-right"></i></button>
     <button id="b-fold" title="Expand all" aria-label="Expand all"><i class="ti ti-arrows-diagonal"></i></button>
     <span class="sep"></span>
@@ -305,7 +309,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.7.0";
+const PAGE_VERSION = "0.7.1";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -941,7 +945,7 @@ function smWire() {
 }
 
 /* ---------- display settings for everyone (Settings > General / Measurements) ---------- */
-let DISP = { default_view: "physical", zabbix_triggers: true, wheel: "zoom", map_name: "", page_refresh_s: 60, show_offline: true, ip_labels: true, link_thickness: false, units: "bits", load_warn: 70, load_crit: 90 };
+let DISP = { language: "en", layout: "tree", default_view: "physical", zabbix_triggers: true, wheel: "zoom", map_name: "", page_refresh_s: 60, show_offline: true, ip_labels: true, link_thickness: false, units: "bits", load_warn: 70, load_crit: 90 };
 let mapTimer = null, liveTimer = null;
 function setRefresh(sec) {
   clearInterval(mapTimer); clearInterval(liveTimer);
@@ -955,6 +959,8 @@ function applyDisplay() {
   const mn = $("#map-name"); if (mn) mn.textContent = DISP.map_name ? "· " + DISP.map_name : "";
   if (JSON.parse(before).page_refresh_s !== DISP.page_refresh_s) setRefresh(DISP.page_refresh_s);
   if (JSON.parse(before).default_view !== DISP.default_view && !VIEW && DATA) { viewIcon(); index(); }
+  if (JSON.parse(before).layout !== DISP.layout && !LAYOUT) layoutIcon();
+  if (JSON.parse(before).language !== DISP.language && !LANG) { langButton(); translate(document.body); }
   if (DATA) { render(); gwCard(); }
 }
 function portSpeed(ref) {
@@ -1172,10 +1178,15 @@ function vlanMenu() {
 function W(id) { const c = shownKids(id); return (!c.length || isFolded(id)) ? 1 : c.reduce((a, k) => a + W(k), 0); }
 // orientation of the tree: "v" (levels downwards) or "h" (levels to the right), per browser
 let ORIENT = store("nm-orient") === "h" ? "h" : "v";
+// layout: "tree", or "free" (straight links, nodes dragged by hand keep their place; per browser, per view and orientation)
+let LAYOUT = store("nm-layout"), POS = store("nm-pos") || {};
+const curLayout = () => LAYOUT || DISP.layout || "tree";
+const posKey = () => curView() + "|" + ORIENT;
 const HV = 118, HD = 250;                                // horizontal: space per node across, per level
 function render() {
   const roots = Object.values(byId).filter(n => !n.parent || !byId[n.parent]).map(n => n.id);
-  const stage = $("#stage"), seen = new Set(), H = ORIENT === "h";
+  const stage = $("#stage"), seen = new Set(), H = ORIENT === "h", FREE = curLayout() === "free", MY = POS[posKey()] || {};
+  const edges = [];
   let svg = "", extra = "", maxd = 0, left = 0;
   const flowDur = l => { if (!l || l.st === 2) return 0; const m = ((l.rx || 0) + (l.tx || 0)) / 1e6; return m > 50 ? .35 : m > 5 ? .7 : m > .5 ? 1.3 : m > .005 ? 2.6 : 0; };
   function line(x1, y1, x2, y2, cls, child, w) { svg += `<line class="ln ${cls}" data-c="${esc(child || "")}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"${w ? ` style="stroke-width:${w.toFixed(1)}"` : ""}/>`; }
@@ -1183,7 +1194,8 @@ function render() {
   function place(id, l, d) {
     const n = byId[id];
     // x, y: the node's anchor - vertical: top centre; horizontal: centre of the icon
-    const x = H ? d * HD + 62 : l + W(id) * span / 2, y = H ? l + W(id) * span / 2 : d * ROW + 10;
+    let x = H ? d * HD + 62 : l + W(id) * span / 2, y = H ? l + W(id) * span / 2 : d * ROW + 10;
+    if (FREE && MY[id]) [x, y] = MY[id];                // moved by hand: it stays there
     pos[id] = { x, y }; maxd = Math.max(maxd, d); seen.add(id);
     const ex = x - 52, ey = H ? y - 24 : y;
     let e = els[id];
@@ -1206,7 +1218,8 @@ function render() {
     const pOff = s === "up" || n.kind !== "device" ? "" : "off";
     // the bus: a line that joins the children; vertical: under the node, horizontal: right of it
     const bus = H ? x + HD - 92 : y + ROW - 36;
-    if (H) line(x + 27, y, bus - 10, y, pOff, "p:" + id);
+    if (FREE) { /* straight lines are drawn once every node has its place */ }
+    else if (H) line(x + 27, y, bus - 10, y, pOff, "p:" + id);
     else line(x, y + (tags(n) ? 104 : 90), x, bus - 10, pOff, "p:" + id);
     if (!isFolded(id)) {
       let cl = l; const xs = [];
@@ -1217,6 +1230,7 @@ function render() {
         xs.push(cc);
         // the child's own line: from the bus to the child
         const [x1, y1, x2, y2] = H ? [bus, cc, (d + 1) * HD + 62 - 27, cc] : [cc, bus, cc, bus + 36];
+        if (FREE) { edges.push({ p: id, c: k, cls: (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : "") + (GUESSED.includes(ch.via) ? " guess" : ""), w: lk.w, dur, port: ch.port }); place(k, cl, d + 1); cl += W(k) * span; return; }
         line(x1, y1, x2, y2, (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : "") + (GUESSED.includes(ch.via) ? " guess" : ""), k, lk.w);
         if (dur) svg += `<line class="fl" style="animation-duration:${dur}s" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
         if (ch.port) extra += H ? `<div class="pt" style="left:${(x1 + x2) / 2}px;top:${cc - 21}px">${esc(ch.port)}</div>`
@@ -1224,7 +1238,12 @@ function render() {
         place(k, cl, d + 1); cl += W(k) * span;
       });
       const a = Math.min(...xs), b = Math.max(...xs);
-      if (b > a) H ? line(bus, a, bus, b, "", "bus:" + id) : line(a, bus, b, bus, "", "bus:" + id);
+      if (b > a && !FREE) H ? line(bus, a, bus, b, "", "bus:" + id) : line(a, bus, b, bus, "", "bus:" + id);
+    }
+    if (FREE) {                                           // the +/- sits right of the icon
+      extra += `<div class="tg" data-t="${esc(id)}" style="left:${x + 30}px;top:${(H ? y : y + 24) - 10}px">${isFolded(id) ? "+" : "−"}</div>`;
+      if (isFolded(id)) extra += `<div class="cnt" style="left:${x + 54}px;top:${(H ? y : y + 24) - 8}px">${c.length}</div>`;
+      return;
     }
     extra += H ? `<div class="tg" data-t="${esc(id)}" style="left:${bus - 10}px;top:${y - 10}px">${isFolded(id) ? "+" : "−"}</div>`
                : `<div class="tg" data-t="${esc(id)}" style="left:${x - 10}px;top:${bus - 10}px">${isFolded(id) ? "+" : "−"}</div>`;
@@ -1232,9 +1251,20 @@ function render() {
                                  : `<div class="cnt" style="left:${x + 14}px;top:${bus - 8}px">${c.length}</div>`;
   }
   roots.forEach(r => { place(r, left, 0); left += W(r) * span; });
+  if (FREE) {                                             // straight links between the icons' centres
+    const ctr = id => [pos[id].x, H ? pos[id].y : pos[id].y + 24];
+    edges.forEach(e => {
+      if (!pos[e.p] || !pos[e.c]) return;
+      const [x1, y1] = ctr(e.p), [x2, y2] = ctr(e.c);
+      line(x1, y1, x2, y2, e.cls, e.c, e.w);
+      if (e.dur) svg += `<line class="fl" style="animation-duration:${e.dur}s" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+      if (e.port) extra += `<div class="pt" style="left:${(x1 + x2) / 2}px;top:${(y1 + y2) / 2 - 10}px">${esc(e.port)}</div>`;
+    });
+  }
   Object.keys(els).forEach(id => { if (!seen.has(id)) { const e = els[id]; delete els[id]; e.style.opacity = 0; setTimeout(() => e.remove(), 300); } });
   stage.querySelectorAll("svg,.tg,.pt,.cnt").forEach(x => x.remove());
-  const w = H ? (maxd + 1) * HD + 40 : left, h = H ? left + 40 : (maxd + 1) * ROW + 20;
+  let w = H ? (maxd + 1) * HD + 40 : left, h = H ? left + 40 : (maxd + 1) * ROW + 20;
+  if (FREE) Object.values(pos).forEach(p => { w = Math.max(w, p.x + 120); h = Math.max(h, p.y + 140); });
   stage.insertAdjacentHTML("afterbegin", `<svg width="${w}" height="${h}" style="position:absolute;left:0;top:0;overflow:visible;pointer-events:none">${svg}</svg>`);
   stage.insertAdjacentHTML("beforeend", extra);
   stage.style.width = w + "px"; stage.style.height = h + "px";
@@ -1290,6 +1320,15 @@ $("#zfit").onclick = () => fit(true);
 function orientIcon() { const b = $("#b-orient"); b.title = ORIENT === "h" ? "Vertical view" : "Horizontal view"; b.innerHTML = `<i class="ti ti-${ORIENT === "h" ? "arrow-autofit-down" : "arrow-autofit-right"}"></i>`; }
 $("#b-orient").onclick = () => { ORIENT = ORIENT === "h" ? "v" : "h"; store("nm-orient", ORIENT); orientIcon(); if (DATA) { render(); fit(true); } };
 orientIcon();
+function layoutIcon() {
+  const f = curLayout() === "free", b = $("#b-layout");
+  b.title = f ? "Tree layout" : "Free layout: drag nodes"; b.innerHTML = `<i class="ti ti-${f ? "binary-tree" : "hand-move"}"></i>`;
+  $("#b-relayout").style.display = f ? "" : "none";
+  document.body.classList.toggle("free", f);
+}
+$("#b-layout").onclick = () => { LAYOUT = curLayout() === "free" ? "tree" : "free"; store("nm-layout", LAYOUT); layoutIcon(); if (DATA) { render(); fit(true); } };
+$("#b-relayout").onclick = () => { if (!confirm("Put every node back in its tree position?")) return; delete POS[posKey()]; store("nm-pos", POS); if (DATA) { render(); fit(true); } };
+layoutIcon();
 function viewIcon() { const b = $("#b-view"), l3 = curView() === "l3"; b.title = l3 ? "Physical view (switches and ports)" : "Logical view (by subnet)"; b.innerHTML = `<i class="ti ti-${l3 ? "server-2" : "network"}"></i>`; }
 $("#b-view").onclick = () => { VIEW = curView() === "l3" ? "physical" : "l3"; store("nm-view", VIEW); viewIcon(); if (DATA) { closePanel(); index(); render(); fit(true); } };
 viewIcon();
@@ -1375,8 +1414,143 @@ document.addEventListener("keydown", e => {
   else if (e.key === "0") fit(true);
 });
 
+/* ---------- Greek (Ελληνικά): a dictionary applied to the page's own texts; names and addresses are never translated ---------- */
+const EL = {
+  // header, legend, toolbar, map controls
+  "online": "σε σύνδεση", "off / asleep": "εκτός / σε αναμονή", "new / unknown": "νέα / άγνωστη", "changed": "άλλαξε", "down": "εκτός λειτουργίας",
+  "guessed link": "εκτιμώμενη σύνδεση", "Name, IP or MAC": "Όνομα, IP ή MAC", "Activity": "Δραστηριότητα", "Who's online": "Ποιος είναι συνδεδεμένος",
+  "Top talkers": "Μεγαλύτερη κίνηση", "Run speed test": "Τεστ ταχύτητας", "Export device list (CSV)": "Εξαγωγή λίστας συσκευών (CSV)",
+  "Collector health": "Υγεία συλλέκτη", "Settings": "Ρυθμίσεις", "Show VLANs": "Εμφάνιση VLAN", "Zoom in (+)": "Μεγέθυνση (+)", "Zoom out (−)": "Σμίκρυνση (−)",
+  "Fit to screen (0)": "Προσαρμογή στην οθόνη (0)", "Expand all": "Ανάπτυξη όλων", "Collapse all": "Σύμπτυξη όλων", "Full screen": "Πλήρης οθόνη",
+  "Leave full screen": "Έξοδος από πλήρη οθόνη", "Horizontal view": "Οριζόντια προβολή", "Vertical view": "Κάθετη προβολή",
+  "Logical view (by subnet)": "Λογική προβολή (ανά υποδίκτυο)", "Physical view (switches and ports)": "Φυσική προβολή (switches και θύρες)",
+  "Free layout: drag nodes": "Ελεύθερη διάταξη: σύρετε τους κόμβους", "Tree layout": "Διάταξη δέντρου", "Reset layout": "Επαναφορά διάταξης",
+  "Discovery paused": "Η ανακάλυψη σε παύση", "partial": "μερικός", "service stopped?": "η υπηρεσία σταμάτησε;", "Loading…": "Φόρτωση…",
+  // gateway card
+  "Gateway": "Πύλη", "Gateway IP": "IP πύλης", "Gateway ping": "Ping πύλης", "Internet online": "Internet σε σύνδεση", "Internet down": "Internet εκτός",
+  "IPv4 Address": "Διεύθυνση IPv4", "Monthly Data Usage": "Μηνιαία κατανάλωση", "Throughput": "Ρυθμαπόδοση", "ISP Speed Test": "Τεστ ταχύτητας παρόχου",
+  "router · SNMP": "router · SNMP", "router · UPnP": "router · UPnP", "switch port": "θύρα switch", "WAN unavailable ⚠": "WAN μη διαθέσιμο ⚠",
+  "Internet": "Internet", "Wi-Fi / LAN": "Wi-Fi / LAN", "Unmanaged switch": "Μη διαχειριζόμενο switch",
+  // panels
+  "Ports": "Θύρες", "Port clients": "Συσκευές θυρών", "Port": "Θύρα", "Client": "Συσκευή", "Speed": "Ταχύτητα", "Traffic": "Κίνηση",
+  "IP": "IP", "MAC": "MAC", "Manufacturer": "Κατασκευαστής", "Type": "Τύπος", "Connection": "Σύνδεση", "Link from": "Προέλευση σύνδεσης",
+  "Moved from": "Μετακινήθηκε από", "Previous IP": "Προηγούμενη IP", "Ports up": "Ενεργές θύρες", "Subnet": "Υποδίκτυο",
+  "Edit": "Επεξεργασία", "Copy MAC": "Αντιγραφή MAC", "Copied": "Αντιγράφηκε", "Approve": "Έγκριση", "Open web UI": "Άνοιγμα διαχείρισης",
+  "Open in Zabbix": "Άνοιγμα στο Zabbix", "Zabbix problems": "Προβλήματα Zabbix", "Map": "Χάρτης", "Save": "Αποθήκευση", "Cancel": "Ακύρωση",
+  "Remove": "Αφαίρεση", "Confirm and name": "Επιβεβαίωση και όνομα", "It's something else": "Είναι κάτι άλλο", "Not a device": "Δεν είναι συσκευή",
+  "Add an unmanaged switch here": "Προσθήκη μη διαχειριζόμενου switch εδώ", "Kind": "Είδος", "Name": "Όνομα", "Model": "Μοντέλο", "Location": "Τοποθεσία",
+  "Connected through": "Συνδέεται μέσω", "(where SpiderMap sees it)": "(όπου τη βλέπει το SpiderMap)", "Type (icon)": "Τύπος (εικονίδιο)",
+  "Web UI address": "Διεύθυνση διαχείρισης", "Important": "Σημαντική", "Pin to port": "Καρφίτσωμα σε θύρα",
+  "unknown": "άγνωστη", "new": "νέα", "moved": "μετακινήθηκε", "stale": "παλιά", "ip changed": "άλλαξε IP", "important": "σημαντική", "asleep": "σε αναμονή",
+  // health, speed test, activity
+  "Service": "Υπηρεσία", "Discovery": "Ανακάλυψη", "Jobs": "Εργασίες", "Full scan": "Πλήρης σάρωση", "Status refresh": "Ανανέωση κατάστασης",
+  "Connections": "Συνδέσεις", "Zabbix API": "Zabbix API", "Data": "Δεδομένα", "Status": "Κατάσταση", "Live traffic": "Ζωντανή κίνηση",
+  "Free disk space": "Ελεύθερος χώρος δίσκου", "Speed test": "Τεστ ταχύτητας", "Recent scans": "Πρόσφατες σαρώσεις", "Run again": "Ξανά",
+  "Responsiveness": "Απόκριση", "Latency under load": "Καθυστέρηση υπό φορτίο", "Bufferbloat": "Bufferbloat", "History": "Ιστορικό",
+  "download": "λήψη", "upload": "αποστολή", "All": "Όλα", "Devices": "Συσκευές", "Changes": "Αλλαγές", "Warnings": "Προειδοποιήσεις",
+  "Security": "Ασφάλεια", "Mark all as read": "Σήμανση όλων ως αναγνωσμένα", "No VLAN information": "Χωρίς πληροφορία VLAN", "None": "Κανένα",
+  "Switches and the gateway are always shown.": "Τα switches και η πύλη εμφανίζονται πάντα.",
+  // settings dialog
+  "SpiderMap settings": "Ρυθμίσεις SpiderMap", "General": "Γενικά", "Scans": "Σαρώσεις", "SNMP": "SNMP", "Topology": "Τοπολογία",
+  "Wireless & WAN": "Ασύρματα & WAN", "Device types": "Τύποι συσκευών", "Measurements": "Μετρήσεις", "Logging": "Καταγραφή",
+  "All changes are saved": "Όλες οι αλλαγές είναι αποθηκευμένες", "Collector status": "Κατάσταση συλλέκτη", "Running": "Σε λειτουργία",
+  "Scans paused": "Σαρώσεις σε παύση", "Not answering": "Δεν απαντά", "Last scan took": "Διάρκεια τελευταίας σάρωσης", "Next scan at": "Επόμενη σάρωση σε",
+  "Progress": "Πρόοδος", "Idle": "Αδρανής", "Scan now": "Σάρωση τώρα", "Cancel scan": "Ακύρωση σάρωσης", "Pause scans": "Παύση σαρώσεων",
+  "Resume scans": "Συνέχιση σαρώσεων", "Scan window": "Παράθυρο σαρώσεων", "Backup": "Αντίγραφο ασφαλείας", "Export": "Εξαγωγή", "Import…": "Εισαγωγή…",
+  "Reset": "Επαναφορά", "Reset map…": "Επαναφορά χάρτη…", "Reset map": "Επαναφορά χάρτη", "Restore": "Επαναφορά", "Recent events": "Πρόσφατα συμβάντα",
+  "Credentials": "Διαπιστευτήρια", "SNMP settings": "Ρυθμίσεις SNMP", "Topology discovery": "Ανακάλυψη τοπολογίας", "Language": "Γλώσσα",
+  "English": "English", "Saved.": "Αποθηκεύτηκε.", "Nothing changed.": "Δεν άλλαξε τίποτα.",
+  // settings labels and choices (from the server)
+  "% of capacity": "% χωρητικότητας", "1 hour": "1 ώρα", "1 minute": "1 λεπτό", "1 year": "1 έτος", "10 seconds": "10 δευτερόλεπτα", "14 days": "14 ημέρες",
+  "15 minutes": "15 λεπτά", "2 minutes": "2 λεπτά", "30 days": "30 ημέρες", "30 minutes": "30 λεπτά", "30 seconds": "30 δευτερόλεπτα", "5 minutes": "5 λεπτά",
+  "5 seconds": "5 δευτερόλεπτα", "6 hours": "6 ώρες", "60 days": "60 ημέρες", "7 days": "7 ημέρες", "90 days": "90 ημέρες", "ARP tables": "Πίνακες ARP",
+  "Access": "Πρόσβαση", "Access point": "Access point", "Access to settings": "Πρόσβαση στις ρυθμίσεις", "Admins and Super admins": "Admins και Super admins",
+  "Allowed networks": "Επιτρεπόμενα δίκτυα", "Automatic scan": "Αυτόματη σάρωση", "CDP (Cisco)": "CDP (Cisco)", "Daily speed test at": "Ημερήσιο τεστ ταχύτητας στις",
+  "Debug": "Αποσφαλμάτωση", "Default view": "Προεπιλεγμένη προβολή", "Discovery via ICMP": "Ανακάλυψη μέσω ICMP", "Errors only": "Μόνο σφάλματα",
+  "Find hidden switches": "Εύρεση κρυφών switches", "Firewalls & gateways": "Firewalls & πύλες", "Forget unknown devices after": "Διαγραφή άγνωστων συσκευών μετά από",
+  "Free: drag nodes where you want them": "Ελεύθερη: σύρετε τους κόμβους όπου θέλετε", "General settings": "Γενικές ρυθμίσεις", "Hub": "Hub",
+  "Hypervisor": "Hypervisor", "Hypervisors": "Hypervisors", "ICMP payload size": "Μέγεθος ICMP payload", "IP cameras & NVR": "IP κάμερες & NVR",
+  "IP labels on nodes": "Ετικέτες IP στους κόμβους", "IP phones & PBX": "IP τηλέφωνα & τηλεφωνικά κέντρα", "Industrial & IoT": "Βιομηχανικά & IoT",
+  "Information": "Πληροφορίες", "Keep history": "Διατήρηση ιστορικού", "Keep log files": "Διατήρηση αρχείων καταγραφής", "Keep who-was-online": "Διατήρηση παρουσίας",
+  "Layout": "Διάταξη", "Link sources": "Πηγές συνδέσεων", "Link thickness by traffic": "Πάχος συνδέσεων ανάλογα με την κίνηση",
+  "Link with Zabbix triggers": "Σύνδεση με triggers του Zabbix", "Load critical": "Κρίσιμος φόρτος", "Load warning": "Προειδοποίηση φόρτου",
+  "Log level": "Επίπεδο καταγραφής", "Logical (by subnet)": "Λογική (ανά υποδίκτυο)", "MAC tables (FDB)": "Πίνακες MAC (FDB)", "Manually": "Χειροκίνητα",
+  "Map layout": "Διάταξη χάρτη", "Map name": "Όνομα χάρτη", "Map refresh": "Ανανέωση χάρτη", "Mark devices not seen for": "Σήμανση συσκευών που δεν φάνηκαν για",
+  "Mark new and moved devices for": "Σήμανση νέων και μετακινημένων για", "Most addresses per scan": "Μέγιστες διευθύνσεις ανά σάρωση", "Mouse wheel": "Ροδέλα ποντικιού",
+  "NAS & storage": "NAS & αποθήκευση", "Never scan": "Ποτέ σάρωση", "ONT / provider modem": "ONT / modem παρόχου", "Ookla server": "Διακομιστής Ookla",
+  "Other device": "Άλλη συσκευή", "Out-of-band management": "Out-of-band διαχείριση", "Packet limit": "Όριο πακέτων", "Packet size": "Μέγεθος πακέτων",
+  "Parallel checks": "Παράλληλοι έλεγχοι", "Physical (switches and ports)": "Φυσική (switches και θύρες)", "Powerline & media converters": "Powerline & media converters",
+  "Printers": "Εκτυπωτές", "Read-only SNMP": "Μόνο ανάγνωση SNMP", "Retries": "Επαναλήψεις", "Router's WAN interface": "Διεπαφή WAN του router",
+  "SNMP collection": "Συλλογή SNMP", "Scan only off-peak": "Σαρώσεις μόνο εκτός αιχμής", "Scan schedule": "Προγραμματισμός σαρώσεων",
+  "Scan window from": "Παράθυρο σαρώσεων από", "Scan window until": "Παράθυρο σαρώσεων έως", "Scrolls the map": "Μετακινεί τον χάρτη",
+  "Show offline devices": "Εμφάνιση συσκευών εκτός σύνδεσης", "Speed test provider": "Πάροχος τεστ ταχύτητας", "Super admins only": "Μόνο Super admins",
+  "Switch port to the gateway": "Θύρα switch προς την πύλη", "The router's WAN (SNMP, else UPnP)": "Το WAN του router (SNMP, αλλιώς UPnP)",
+  "Throughput source": "Πηγή ρυθμαπόδοσης", "Timeout": "Χρονικό όριο", "Traffic measurements": "Μετρήσεις κίνησης", "Tree": "Δέντρο",
+  "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
+  "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
+  "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
+  "Max-repetitions": "Max-repetitions", "Categories switched off": "Απενεργοποιημένες κατηγορίες",
+};
+const EL_RX = [
+  [/^(\d+) online$/, "$1 σε σύνδεση"], [/^(\d+) offline$/, "$1 εκτός σύνδεσης"], [/^(\d+) new \/ unknown$/, "$1 νέες / άγνωστες"],
+  [/^(\d+) devices?( now)?$/, (m, n, now) => n + (n === "1" ? " συσκευή" : " συσκευές") + (now ? " τώρα" : "")],
+  [/^(\d+) unsaved changes?$/, "$1 μη αποθηκευμένες αλλαγές"], [/^(\d+) on your network$/, "$1 στο δίκτυό σας"], [/^none found$/, "δεν βρέθηκε καμία"],
+  [/^(\d+) (min|h|d) ago$/, (m, n, u) => `πριν ${n} ${{ min: "λεπ.", h: "ώρ.", d: "ημ." }[u]}`], [/^(\d+) s ago$/, "πριν $1 δευτ."], [/^just now$/, "μόλις τώρα"],
+  [/^Scan (\d\d:\d\d)$/, "Σάρωση $1"], [/^Scanning… (.*)$/, "Σάρωση… $1"], [/^(\d+) problems?$/, (m, n) => n + (n === "1" ? " πρόβλημα" : " προβλήματα")],
+  [/^Port (\d+.*)$/, "Θύρα $1"], [/^Ports · (\d+) of (\d+) up$/, "Θύρες · $1 από $2 ενεργές"], [/^History · last (\d+)$/, "Ιστορικό · τελευταία $1"],
+  [/^Last: (.*)$/, "Τελευταίο: $1"], [/^since (.*)$/, "από $1"], [/^monitored (.*)$/, "παρακολούθηση $1"], [/^(\d+) clients$/, "$1 συσκευές"],
+];
+let LANG = store("nm-lang");
+const curLang = () => LANG || DISP.language || "en";
+const NOT_TR = "h1, .nm, #panel h2, .vl-row span:first-of-type, input, textarea, select option[data-raw], .sm-chip, code, pre";
+function trText(t) {
+  const k = t.trim(); if (!k || k.length > 200) return null;
+  if (EL[k]) return t.replace(k, EL[k]);
+  for (const [rx, to] of EL_RX) if (rx.test(k)) return t.replace(k, k.replace(rx, to));
+  return null;
+}
+function translate(root) {
+  if (curLang() !== "el" || !root) return;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = w.nextNode(); n; n = w.nextNode()) {
+    const p = n.parentElement; if (!p || p.closest(NOT_TR) || /^(SCRIPT|STYLE)$/.test(p.tagName)) continue;
+    const v = trText(n.nodeValue); if (v !== null && v !== n.nodeValue) n.nodeValue = v;
+  }
+  (root.querySelectorAll ? root.querySelectorAll("[title],[aria-label],[placeholder]") : []).forEach(el => {
+    if (el.closest(".nm")) return;
+    for (const a of ["title", "aria-label", "placeholder"]) { const v = el.getAttribute(a); const t = v && trText(v); if (t && t !== v) el.setAttribute(a, t); }
+  });
+}
+let trPending = false;
+new MutationObserver(() => { if (curLang() !== "el" || trPending) return; trPending = true; requestAnimationFrame(() => { trPending = false; translate(document.body); }); })
+  .observe(document.body, { childList: true, subtree: true, characterData: true });
+function langButton() { const b = $("#b-lang"); if (b) { b.textContent = curLang() === "el" ? "EN" : "ΕΛ"; b.title = curLang() === "el" ? "English" : "Ελληνικά"; } document.documentElement.lang = curLang(); }
+
 /* ---------- clicks ---------- */
+let nodeDrag = null, justDragged = false;
+$("#stage").addEventListener("pointerdown", e => {
+  const el = e.target.closest(".tn"); if (!el || curLayout() !== "free" || !DATA) return;
+  const id = el.dataset.id, p = pos[id]; if (!p) return;
+  nodeDrag = { id, sx: e.clientX, sy: e.clientY, x: p.x, y: p.y, moved: false, pid: e.pointerId };
+  e.stopPropagation();
+});
+window.addEventListener("pointermove", e => {
+  if (!nodeDrag || e.pointerId !== nodeDrag.pid) return;
+  const dx = (e.clientX - nodeDrag.sx) / view.k, dy = (e.clientY - nodeDrag.sy) / view.k;
+  if (!nodeDrag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+  nodeDrag.moved = true;
+  const k = posKey(); POS[k] = POS[k] || {};
+  POS[k][nodeDrag.id] = [Math.max(52, Math.round(nodeDrag.x + dx)), Math.max(30, Math.round(nodeDrag.y + dy))];
+  if (!nodeDrag.raf) nodeDrag.raf = requestAnimationFrame(() => { if (nodeDrag) nodeDrag.raf = 0; render(); });
+});
+const endNodeDrag = e => {
+  if (!nodeDrag || (e.pointerId !== undefined && e.pointerId !== nodeDrag.pid)) return;
+  if (nodeDrag.moved) { justDragged = true; store("nm-pos", POS); }
+  nodeDrag = null;
+};
+window.addEventListener("pointerup", endNodeDrag); window.addEventListener("pointercancel", endNodeDrag);
 $("#stage").addEventListener("click", e => {
+  if (justDragged) { justDragged = false; return; }       // the end of a drag is not a click
   const t = e.target.closest(".tg");
   if (t) { const id = t.dataset.t; folded[id] = !isFolded(id); store("nm-folded", folded); render(); return; }
   const n = e.target.closest(".tn"); if (n) select(n.dataset.id);
@@ -1655,6 +1829,8 @@ setRefresh(60); every(loadRT, 5000); every(loadEvents, 20000); every(loadPresenc
 document.addEventListener("visibilitychange", () => { if (!document.hidden) { load(); loadLive(); loadRT(); loadStatus(); } });
 $("#b-hlt").onclick = () => special("health");
 $("#b-vlan").onclick = () => { if (DATA) vlanMenu(); };
+$("#b-lang").onclick = () => { LANG = curLang() === "el" ? "en" : "el"; store("nm-lang", LANG); location.reload(); };   // back to English: a fresh page
+langButton(); translate(document.body);
 smWire();
 $("#b-set").onclick = () => smOpen();
 $("#s-time").onclick = () => special("health");

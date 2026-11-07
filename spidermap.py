@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.7.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.7.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -2474,7 +2474,7 @@ def publish_settings():
     save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
 
 
-DISPLAY_KEYS = ("default_view", "zabbix_triggers", "wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
+DISPLAY_KEYS = ("language", "layout", "default_view", "zabbix_triggers", "wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
 
 
 def in_scan_window(S, dt):
@@ -3431,6 +3431,9 @@ def _S(key, typ, default, tab, group, label, **kw):
 _LEVEL3 = [[1, "Zabbix users"], [2, "Zabbix admins"], [3, "Zabbix Super admins"]]
 SETTINGS_SCHEMA = [
     # ---- General
+    _S("language", "choice", "en", "General", "General settings", "Language",
+       choices=[["en", "English"], ["el", "Ελληνικά"]],
+       help="The language the map opens in. Everyone can switch for themselves with the EN / ΕΛ button in the header."),
     _S("map_name", "str", "", "General", "General settings", "Map name", maxlen=60, help="Shown in the header and the browser tab."),
     _S("default_view", "choice", "physical", "General", "General settings", "Default view",
        choices=[["physical", "Physical (switches and ports)"], ["l3", "Logical (by subnet)"]],
@@ -3494,9 +3497,9 @@ SETTINGS_SCHEMA = [
        help="Several devices on one port without LLDP: drawn behind an 'Unmanaged switch' (dashed), or behind the "
             "access point or hypervisor that is one of them."),
     _S("layout", "choice", "tree", "Topology", "Layout", "Map layout",
-       choices=[["tree", "Hierarchical (tree)"], ["force", "Free (force-directed)", "planned"], ["radial", "Radial", "planned"]]),
-    _S("lock_positions", "bool", False, "Topology", "Layout", "Lock node positions", preview="0.7",
-       help="Nodes you moved by hand keep their place after a new scan."),
+       choices=[["tree", "Tree"], ["free", "Free: drag nodes where you want them"]],
+       help="Free: links are straight lines and every node you move keeps its place after new scans (per browser). "
+            "The button in the map controls switches for you; 'Reset layout' starts again from the tree."),
     # ---- Device types (the tab shows a card with a switch per category)
     _S("device_types_off", "list", [], "Device types", "Device types", "Categories switched off"),
     # ---- Measurements

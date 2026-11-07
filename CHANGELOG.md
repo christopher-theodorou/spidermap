@@ -4,6 +4,16 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.7.1] - 2026-11-07
+
+### Added
+- **Free layout:** a button in the map controls switches between the tree and a free layout with straight links,
+  where you drag nodes where you want them. Moved nodes keep their place after every scan (per browser, per view and
+  orientation); *Reset layout* starts again from the tree. Settings > Topology > *Map layout* sets the default.
+- **Greek** (Ελληνικά): the EN / ΕΛ button in the header switches the language for you; Settings > General >
+  *Language* sets the default for everyone. Device and switch names, addresses and your own texts are never
+  translated; a few rare messages may still appear in English.
+
 ## [0.7.0] - 2026-11-07
 
 ### Added
@@ -364,6 +374,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.7.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.1
 [0.7.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.0
 [0.6.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.1
 [0.6.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.0
