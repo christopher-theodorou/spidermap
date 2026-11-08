@@ -75,8 +75,12 @@ Configuration goes to `/etc/spidermap`, data to `/var/lib/spidermap`; `zabbix.en
 *Administration → General → Other → Security → Iframe sandboxing exceptions*
 
 ```
-allow-scripts allow-same-origin allow-popups allow-downloads
+allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-downloads
 ```
+
+`allow-popups-to-escape-sandbox` makes the device pages you open from the map (*Open web UI*) normal tabs. Without
+it they inherit the dashboard's sandbox, and logins on them (UniFi OS, Proxmox, ...) do nothing because the sandbox
+blocks their forms. The map itself stays sandboxed.
 
 Then open **Dashboards → SpiderMap**, or the page directly at `http://<zabbix>/zabbix/spidermap.php`
 (Zabbix Super admins by default, see [Security](#security)).

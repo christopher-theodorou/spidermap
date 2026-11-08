@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.8.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.8.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state

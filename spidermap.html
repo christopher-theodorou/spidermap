@@ -136,6 +136,9 @@ body.free .tn{cursor:grab}body.free .tn:active{cursor:grabbing}
 .tn.prob .ic{box-shadow:0 0 0 3px var(--pc)}.tn.inferred .ic{border:2px dashed var(--muted)}
 .pl-row{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px}
 .pl-row i{width:10px;height:10px;border-radius:2px;display:block}
+/* dragging the map is not selecting text, and icons are not images to drag away */
+#canvas,#canvas *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none}
+#canvas{cursor:grab}#canvas.drag{cursor:grabbing}
 .ln.lag{stroke-width:4.5}.ln.redundant{stroke:var(--muted);stroke-dasharray:9 6;stroke-width:1.5}.ln.guess{stroke-dasharray:2 4;stroke-linecap:round}
 .tag.t-stale{background:var(--bg);color:var(--muted);border:1px dashed var(--border)}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
 #mapctl{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:6;transition:right .25s}
@@ -309,7 +312,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.8.0";
+const PAGE_VERSION = "0.8.1";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -489,7 +492,7 @@ function tags(n) {
   });
   return out.join("");
 }
-function iconHtml(n) { return n.logo ? `<img src="${esc(n.logo)}" alt="">` : `<i class="ti ti-${esc(n.icon || "help-circle")}" aria-hidden="true"></i>`; }
+function iconHtml(n) { return n.logo ? `<img src="${esc(n.logo)}" alt="" draggable="false">` : `<i class="ti ti-${esc(n.icon || "help-circle")}" aria-hidden="true"></i>`; }
 
 /* ---------- small graphs ---------- */
 function spark(rows, a, b, max) {
@@ -1396,8 +1399,11 @@ cv.addEventListener("wheel", e => {
   else zoom(dy < 0 ? 1.12 : .89, e.clientX - r.left, e.clientY - r.top);                                          // mouse wheel
   apply(false);
 }, { passive: false });
+cv.addEventListener("selectstart", e => e.preventDefault());
+cv.addEventListener("dragstart", e => e.preventDefault());
 cv.addEventListener("pointerdown", e => {
   if (e.target.closest(".tn,.tg,#mapctl")) return;
+  if (e.pointerType === "mouse") e.preventDefault();    // no text selection while panning
   pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try { cv.setPointerCapture(e.pointerId); } catch (_) { /* not every browser */ }
   if (pts.size === 1) { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }; cv.classList.add("drag"); }
@@ -1562,6 +1568,7 @@ $("#stage").addEventListener("pointerdown", e => {
   const el = e.target.closest(".tn"); if (!el || curLayout() !== "free" || !DATA) return;
   const id = el.dataset.id, p = pos[id]; if (!p) return;
   nodeDrag = { id, sx: e.clientX, sy: e.clientY, x: p.x, y: p.y, moved: false, pid: e.pointerId };
+  if (e.pointerType === "mouse") e.preventDefault();
   e.stopPropagation();
 });
 window.addEventListener("pointermove", e => {
@@ -1625,7 +1632,7 @@ function panel(id, quiet) {
   const placeKey = n.place || (n.kind === "device" && n.port_ref && String(n.parent || "").startsWith("s-") ? portKey(n.port_ref) : null);
   if (placeKey && ME.can.edit && curView() !== "l3") h += `<div class="sec">Map</div><div id="pl-box">${placeButtons(n)}</div>`;
   const acts = [];
-  if (n.url && /^https?:\/\//i.test(n.url)) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener"><i class="ti ti-external-link"></i>Open web UI</a>`);
+  if (n.url && /^https?:\/\//i.test(n.url)) acts.push(`<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer" title="Opens in a new tab. Inside the Zabbix dashboard this needs the iframe exception allow-popups-to-escape-sandbox (see the README)."><i class="ti ti-external-link"></i>Open web UI</a>`);
   if (n.zbx) acts.push(`<a class="btn" href="${esc(DATA.zabbix_url)}?action=latest.view&filter_set=1&hostids%5B%5D=${encodeURIComponent(n.zbx)}" target="_top"><i class="ti ti-chart-line"></i>Show in Zabbix</a>`);
   if (n.mac && (n.flags.includes("new") || n.flags.includes("unknown")) && ME.can.edit)
     acts.push(`<button class="btn" id="approve" title="I know this device: it is no longer marked new or unknown"><i class="ti ti-circle-check"></i>Approve</button>`);

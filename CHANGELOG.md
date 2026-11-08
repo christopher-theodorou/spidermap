@@ -4,6 +4,16 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.8.1] - 2026-11-08
+
+### Fixed
+- Dragging the map selected the labels and icons it passed over (blue highlight), and an icon could be dragged away
+  like an image. The map is no longer selectable and its icons are not draggable.
+- *Open web UI* from the map inside the Zabbix dashboard: logins on the opened page (e.g. UniFi OS on a Cloud Key)
+  did nothing, because the new tab inherited the dashboard's iframe sandbox, which blocks forms. Add
+  `allow-popups-to-escape-sandbox` to Zabbix's iframe sandboxing exceptions (Administration > General > Security);
+  the README shows the full line. The map itself stays sandboxed.
+
 ## [0.8.0] - 2026-11-08
 
 ### Added
@@ -404,6 +414,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.8.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.1
 [0.8.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.0
 [0.7.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.2
 [0.7.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.1
