@@ -772,6 +772,71 @@ def test_070():
     check("map edit: Remove takes it away again", r["ok"] and json.load(open(sm.DEVICES_FILE))["places"] == {}, r)
 
 
+def _fake_unifi(mode):
+    import http.server, threading
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def send(self, code, body, hdr=None):
+            b = json.dumps(body).encode()
+            self.send_response(code)
+            for k, v in (hdr or {}).items():
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+            ok = body.get("username") == "ro" and body.get("password") == "pw"
+            if self.path == "/api/auth/login" and mode == "os":
+                return self.send(200 if ok else 401, {}, {"X-CSRF-Token": "t", "Set-Cookie": "TOKEN=a; Path=/"} if ok else {})
+            if self.path == "/api/login" and mode == "classic":
+                return self.send(200 if ok else 400, {}, {"Set-Cookie": "unifises=x; Path=/"} if ok else {})
+            self.send(404, {})
+
+        def do_GET(self):
+            pre = "/proxy/network" if mode == "os" else ""
+            authed = ("TOKEN=a" in self.headers.get("Cookie", "") and self.headers.get("X-CSRF-Token") == "t") if mode == "os" \
+                else "unifises=x" in self.headers.get("Cookie", "")
+            if not authed:
+                return self.send(401, {})
+            data = {f"{pre}/api/s/default/stat/device": [{"type": "uap", "mac": "aa:00:00:00:00:01", "name": "AP"}],
+                    f"{pre}/api/s/default/stat/sta": [{"mac": "bb:00:00:00:00:01", "ap_mac": "aa:00:00:00:00:01"}]}.get(self.path)
+            self.send(200, {"data": data}) if data is not None else self.send(404, {})
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def test_unifi():
+    for mode, kind in (("os", "UniFi OS"), ("classic", "UniFi Network")):
+        url = _fake_unifi(mode)
+        r = sm.unifi_fetch(url, "default", "ro", "pw")
+        check(f"UniFi: {kind} login, APs and clients", r["kind"] == kind and r["devices"][0]["type"] == "uap"
+              and r["clients"][0]["ap_mac"] == "aa:00:00:00:00:01", r)
+    url = _fake_unifi("os")
+    msgs = []
+    for args in ((url, "default", "ro", "bad"), (url, "office", "ro", "pw")):
+        try:
+            sm.unifi_fetch(*args)
+            msgs.append("")
+        except RuntimeError as e:
+            msgs.append(str(e))
+    check("UniFi: a wrong password and a wrong site give clear reasons",
+          "refused the login" in msgs[0] and "site 'office'" in msgs[1], msgs)
+    tmp = _sandbox()
+    sm.SECRETS_FILE = os.path.join(tmp, "secrets.json")
+    sm.apply_settings_request({"by": "Admin", "settings": {"unifi_url": "https://10.0.0.5", "unifi_user": "ro", "unifi_password": "S3cret!"}})
+    sm.publish_settings()
+    pub = open(os.path.join(sm.DATA_DIR, "spidermap_settings.json")).read()
+    check("UniFi: the password is kept apart - not in devices.json, not on the page, not in the audit log",
+          "S3cret" not in open(sm.DEVICES_FILE).read() and "S3cret" not in pub and "S3cret" not in open(sm.AUDIT_FILE).read()
+          and json.load(open(sm.SECRETS_FILE))["unifi_password"] == "S3cret!" and json.loads(pub)["secrets_set"]["unifi_password"])
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -793,6 +858,7 @@ def main():
     test_uninstall()
     test_approve()
     test_070()
+    test_unifi()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

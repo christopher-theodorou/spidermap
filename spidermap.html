@@ -309,7 +309,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.7.1";
+const PAGE_VERSION = "0.7.2";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -638,6 +638,8 @@ function healthHtml() {
   h += `<div class="sec">Data</div>` + row("Map", age(D.map) + (S.targets ? ` · ${S.targets} addresses scanned` : "")) + row("Status", age(D.live)) + row("Live traffic", age(D.realtime));
   if (H.disk) { const pct = H.disk.free / H.disk.total * 100; h += row("Free disk space", `<span class="${pct < 5 ? "badc" : pct < 15 ? "warnc" : ""}">${bytes(H.disk.free)} (${pct.toFixed(0)} %)</span>`); }
   h += row("Speed test", H.speedtest ? esc(H.speedtest) : '<span class="warnc">not installed</span>');
+  if (H.unifi) h += row("UniFi controller", H.unifi.ok ? okb(true, `ok · ${esc(H.unifi.kind || "")} · ${H.unifi.aps} APs · ${H.unifi.clients} wireless clients placed`) : '<span class="warnc">not working</span>')
+    + (H.unifi.error ? `<div class="note warnc" style="margin-top:-4px">${esc(H.unifi.error)}</div>` : "");
   const WH = H.wan;
   if (WH && WH.mode !== "switch") {
     if (WH.snmp) h += row("WAN over SNMP", !WH.snmp.error ? okb(true, `ok · ${esc(WH.snmp.router || "")}${WH.snmp.interface ? " · " + esc(WH.snmp.interface) : ""}`) : '<span class="warnc">not working</span>')
@@ -714,6 +716,9 @@ function smField(f) {
     const opts = f.choices.slice();
     if (!opts.some(c => c[0] === v)) opts.push([v, `${v}${f.unit ? " " + f.unit : ""}`]);
     ctl = `<select class="sm-sel" ${attrs}>${opts.map(c => `<option value="${esc(c[0])}" ${c[0] === v ? "selected" : ""}${c[2] ? " disabled" : ""}>${esc(c[1])}${c[2] ? " (planned)" : ""}</option>`).join("")}</select>`;
+  } else if (f.type === "secret") {                       // never shown again: only "set"
+    const set = SETTINGS.secrets_set && SETTINGS.secrets_set[f.key];
+    ctl = `<input class="sm-field" type="password" autocomplete="new-password" ${attrs} value="${esc(v || "")}" placeholder="${set ? "set · type to change" : ""}">`;
   } else if (f.type === "cidrs" || f.type === "ips") {
     ctl = `<div class="sm-chips${SM.errors[f.key] ? " bad" : ""}" data-chips="${esc(f.key)}">${(v || []).map((x, i) => `<span class="sm-chip">${esc(x)}<button data-rm="${i}" aria-label="Remove ${esc(x)}">×</button></span>`).join("")}<input ${attrs} placeholder="${f.type === "cidrs" ? "Add network" : "Add address"}" spellcheck="false" autocomplete="off"></div>`;
   } else if (f.type === "int" && f.stepper) {
@@ -759,8 +764,6 @@ const SM_PREVIEW = {
   "Wireless & WAN": [["Links between buildings (PtP / PtMP)", [["Wireless link detection", "Matches both ends of a link through the remote station's MAC in the registration table, so it does not look like a cable."],
       ["Vendor profiles", "MikroTik, Ubiquiti, Cambium, Mimosa, Siklu, LigoWave: signal, capacity, distance and frequency from each vendor's MIB."],
       ["Signal warning / critical", "Thresholds in dBm, and how wireless links are drawn on the map."]]],
-    ["Access points", [["Data source", "SNMP & LLDP, or the UniFi, Omada, Aruba Instant / Central and Ruckus controllers (read-only account)."],
-      ["Wireless clients and mesh links", "Clients on the map, and wireless uplinks between APs."]]],
     ["WAN & satellite", [["Starlink", "Latency, obstruction, speeds and outages from the dish's local gRPC API (Starlink has no SNMP)."],
       ["4G / 5G routers", "Teltonika, MikroTik LTE, Huawei, ZTE: RSRP / SINR, provider and cell."],
       ["Active WAN in failover", "Which connection carries the traffic right now, e.g. fibre or Starlink."]]],
@@ -779,11 +782,11 @@ const SM_PREVIEW = {
     ["Powerline & media converters", "Managed models", "Vendor tools where available"],
     ["Out-of-band management", "iLO, iDRAC, IPMI, console servers", "Separate management network"]] };
 function smPreview(tab) {
-  let h = `<h3>${esc(tab)}<span class="sm-badge new">New in v0.7</span></h3><div class="sm-note" style="margin:0 0 14px"><i class="ti ti-info-circle"></i><span>Planned for SpiderMap 0.7.0. Shown here so you can see what is coming; nothing in this tab is active yet.</span></div>`;
+  let h = `<h3>${esc(tab)}</h3><div class="sm-note" style="margin:0 0 14px"><i class="ti ti-info-circle"></i><span>Planned for SpiderMap 0.7.3. Shown here so you can see what is coming; nothing below is active yet.</span></div>`;
   if (tab === "Device types")
     return h + `<div class="sm-grid">${SM_PREVIEW[tab].map(c => `<div class="sm-cat"><b>${esc(c[0])}</b>${esc(c[1])}<div style="margin-top:6px">Detection: ${esc(c[2])}</div></div>`).join("")}</div>`;
   for (const [g, items] of SM_PREVIEW[tab])
-    h += `<h4>${esc(g)}</h4>` + items.map(([l, d]) => `<div class="sm-row sw dis"><span class="lb">${esc(l)}${smInfo(d)}<span class="sm-mini">v0.7</span></span><label class="sm-switch"><input type="checkbox" disabled aria-label="Not available yet"><span></span></label></div>`).join("");
+    h += `<h4>${esc(g)}</h4>` + items.map(([l, d]) => `<div class="sm-row sw dis"><span class="lb">${esc(l)}${smInfo(d)}<span class="sm-mini">v0.7.3</span></span><label class="sm-switch"><input type="checkbox" disabled aria-label="Not available yet"><span></span></label></div>`).join("");
   return h;
 }
 function smLogRows() {
@@ -795,7 +798,7 @@ function smLogRows() {
   return rows.slice(0, 12).map(r => `<div><span>${new Date(r[0] * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span><b class="${r[1] === "ERROR" ? "badc" : ""}" style="color:${r[1] === "ERROR" ? "" : "var(--sm-text)"}">${r[1]}</b><span>${esc(r[2])}</span></div>`).join("") || '<div><span></span><span></span><span style="color:var(--muted)">Nothing yet.</span></div>';
 }
 function smTab(tab) {
-  if (tab === "Wireless & WAN") return smPreview(tab);
+  if (tab === "Wireless & WAN") return `<h3>Wireless & WAN</h3>${smGroups(tab)}<div class="sm-sep" style="margin:22px 0 4px"></div>` + smPreview(tab).replace(/^<h3>[^]*?<\/h3>/, `<h4>Coming in 0.7.3<span class="sm-mini">v0.7.3</span></h4>`);
   if (tab === "Device types") {
     const off = SM.draft.device_types_off || [], cats = SETTINGS.device_categories || [];
     const cnt = k => DATA ? DATA.nodes.filter(n => n.kind === "device" && n.type === k).length : 0;
@@ -861,6 +864,7 @@ function smSet(k, raw) {
   else if (f.type === "time") { v = String(raw).trim(); if (v && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(v)) e = "Use HH:MM, e.g. 03:30."; else if (v.length === 4) v = "0" + v; }
   else if (f.type === "digits") { v = String(raw).trim(); if (v && !/^\d{1,8}$/.test(v)) e = "Numbers only."; }
   else if (f.type === "str") { v = String(raw); if (/[<>]/.test(v)) e = "No < or > please."; }
+  else if (f.type === "secret") { v = String(raw); }
   SM.draft[k] = v;
   if (e) SM.errors[k] = e; else delete SM.errors[k];
   const cross = "Must be higher than the warning.", w = SM.draft.load_warn, c = SM.draft.load_crit;
@@ -1489,7 +1493,9 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Categories switched off": "Απενεργοποιημένες κατηγορίες",
+  "Max-repetitions": "Max-repetitions", "UniFi controller": "Ελεγκτής UniFi", "Controller address": "Διεύθυνση ελεγκτή", "Site": "Site",
+  "User": "Χρήστης", "Password": "Κωδικός", "Certificate fingerprint": "Αποτύπωμα πιστοποιητικού", "set · type to change": "ορίστηκε · πληκτρολογήστε για αλλαγή",
+  "Wi-Fi": "Wi-Fi", "Wireless clients": "Ασύρματες συσκευές", "Coming in 0.7.3": "Έρχεται στην 0.7.3", "Categories switched off": "Απενεργοποιημένες κατηγορίες",
 };
 const EL_RX = [
   [/^(\d+) online$/, "$1 σε σύνδεση"], [/^(\d+) offline$/, "$1 εκτός σύνδεσης"], [/^(\d+) new \/ unknown$/, "$1 νέες / άγνωστες"],

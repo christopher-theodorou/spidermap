@@ -4,6 +4,17 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.7.2] - 2026-11-07
+
+### Added
+- **UniFi** (Settings > Wireless & WAN): with a read-only local user on the controller - UniFi OS (Cloud Key Gen2,
+  UDM) or the older controller - access points get their name, model and icon, and every wireless client is drawn
+  under its access point (link source "UniFi"), with its network name and signal. Your own names and "connected
+  through" always win. Independent of Zabbix: its own settings, not Zabbix macros. Collector health shows the
+  controller's state.
+- **Secrets kept apart:** the controller's password is stored only in `/etc/spidermap/secrets.json` (readable by the
+  service only); it is never sent to the page, written to the audit log or exported.
+
 ## [0.7.1] - 2026-11-07
 
 ### Added
@@ -374,6 +385,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.7.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.2
 [0.7.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.1
 [0.7.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.0
 [0.6.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.6.1

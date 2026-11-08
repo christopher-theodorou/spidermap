@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.7.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.7.2"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -93,7 +93,7 @@ TYPE_ICON = {"router": "router", "switch": "server-2", "ap": "access-point", "un
 PLACE_KINDS = {"switch": ("Unmanaged switch", "server-2"), "ap": ("Access point", "access-point"),
                "hypervisor": ("Hypervisor", "server-cog"), "bridge": ("Wi-Fi bridge", "antenna"), "hub": ("Hub", "sitemap"),
                "other": ("Other device", "box")}
-VIA_TEXT = {"lldp": "LLDP (the device announced itself)", "mac": "MAC table of the switch", "manual": "pinned in devices.json",
+VIA_TEXT = {"unifi": "UniFi controller (a wireless client of this access point)","lldp": "LLDP (the device announced itself)", "mac": "MAC table of the switch", "manual": "pinned in devices.json",
             "proxmox": "Proxmox API", "arp": "guessed: seen only through the gateway (Wi-Fi or its LAN ports)",
             "behind": "guessed: behind another device", "remembered": "guessed: where it was last seen"}
 VIA_GUESSED = ("arp", "behind", "remembered")
@@ -1090,6 +1090,44 @@ def full_scan(api, community=None, quiet=False):
         n["details"] = [x for x in n["details"] if x[0] != "Link from"] + [["Link from", VIA_TEXT["manual"] + " (connected through "
                                                                             + nodes[tid]["name"] + ")"]]
 
+    # UniFi: access points, and every wireless client under its AP (its own credentials - not from Zabbix)
+    if S["unifi_url"] and S["unifi_user"]:
+        try:
+            uf = unifi_fetch(S["unifi_url"], S["unifi_site"] or "default", S["unifi_user"],
+                             load_secrets().get("unifi_password", ""), S["unifi_fingerprint"])
+            aps = {str(d.get("mac", "")).lower(): d for d in uf["devices"] if d.get("type") == "uap"}
+            moved = 0
+            for amac, d in aps.items():
+                if amac in by_mac:
+                    n = nodes[by_mac[amac]]
+                    n["type"], n["icon"] = "ap", TYPE_ICON["ap"]
+                    if not dcfg.get(amac, {}).get("name") and d.get("name"):
+                        n["name"] = d["name"]
+                    n["details"] += [["Model", d.get("model", "-")], ["Wireless clients", str(d.get("num_sta", "-"))]]
+            for c in uf["clients"]:
+                cm, am = str(c.get("mac", "")).lower(), str(c.get("ap_mac", "")).lower()
+                if c.get("is_wired") or cm not in by_mac or am not in by_mac or cm == am:
+                    continue
+                n, tid = nodes[by_mac[cm]], by_mac[am]
+                up, loop = tid, False
+                while up:
+                    if up == n["id"]:
+                        loop = True
+                        break
+                    up = nodes.get(up, {}).get("parent")
+                if loop or n.get("via") == "manual":           # your "connected through" wins
+                    continue
+                n["parent"], n["via"], n["port"] = tid, "unifi", ""
+                if not dcfg.get(cm, {}).get("name") and (c.get("name") or c.get("hostname")) and n["name"] in (cm, n.get("ip")):
+                    n["name"] = c.get("name") or c.get("hostname")
+                n["details"] = [x for x in n["details"] if x[0] != "Link from"] + [
+                    ["Link from", VIA_TEXT["unifi"]], ["Wi-Fi", f"{c.get('essid', '-')} · {c.get('signal', '-')} dBm"]]
+                moved += 1
+            report["unifi"] = {"ok": True, "kind": uf["kind"], "aps": len(aps), "clients": moved}
+        except Exception as e:  # noqa: BLE001
+            report["unifi"] = {"ok": False, "error": str(e)[:200]}
+            report["warnings"].append(f"UniFi controller: {str(e)[:150]}")
+
     # stopped Proxmox guests the network never saw
     pve_node = next((n for n in nodes.values() if n.get("type") in ("server", "hypervisor") and "proxmox" in n["name"].lower()), None)
     if pve_node:
@@ -1460,6 +1498,36 @@ def upnp_link_mbps(svc):
         return 0
     v = [int(n) for n in re.findall(r"<NewLayer1(?:Downstream|Upstream)MaxBitRate>\s*(\d+)\s*<", x)]
     return max(v) / 1e6 if v else 0
+
+
+def unifi_fetch(url, site, user, password, fingerprint=""):
+    """APs and clients from a UniFi controller (read-only user). UniFi OS first (Cloud Key Gen2+, UDM), then the older
+    controller API. Returns {"kind", "devices", "clients"}."""
+    s = requests.Session()
+    fp = re.sub(r"[^0-9a-fA-F]", "", fingerprint or "").lower()
+    requests.packages.urllib3.disable_warnings()
+    s.verify = False
+    if fp:
+        s.mount("https://", _PinnedAdapter(fp))
+    url = url.rstrip("/")
+    login = {"username": user, "password": password}
+    r = s.post(url + "/api/auth/login", json={**login, "remember": False}, timeout=10, verify=False)
+    if r.status_code in (401, 403):                          # UniFi OS answered: the user or password is wrong
+        raise RuntimeError("the controller refused the login: check the user and password (a local user, role View only)")
+    if r.status_code == 200:
+        kind, base, hdr = "UniFi OS", url + "/proxy/network", {"X-CSRF-Token": r.headers.get("X-CSRF-Token", "")}
+    else:
+        r = s.post(url + "/api/login", json=login, timeout=10, verify=False)
+        if r.status_code != 200:
+            raise RuntimeError(f"the controller refused the login (HTTP {r.status_code}): check the address, user and password")
+        kind, base, hdr = "UniFi Network", url, {}
+    out = {"kind": kind}
+    for what in ("device", "sta"):
+        rr = s.get(f"{base}/api/s/{site}/stat/{what}", headers=hdr, timeout=15, verify=False)
+        if rr.status_code != 200:
+            raise RuntimeError(f"stat/{what}: HTTP {rr.status_code} (is the site '{site}' right?)")
+        out["devices" if what == "device" else "clients"] = rr.json().get("data", [])
+    return out
 
 
 def router_wan_ifindex(auth, target, name=""):
@@ -2340,10 +2408,16 @@ def apply_settings_request(req):
             else:
                 ns[k] = v
         ns.pop("discovery_paused", None)
-        changed = {k: [old[k], v] for k, v in effective_settings(ns).items() if old[k] != v}
-        if not changed:
+        changed = {k: [old[k], v] for k, v in effective_settings(ns).items() if old[k] != v and k not in SECRET_KEYS}
+        if any(k in clean for k in SECRET_KEYS) and not changed:
+            changed = {}                                          # only a password: still saved below
+        if not changed and not any(k in clean for k in SECRET_KEYS):
             res.update(ok=True, message="Nothing changed.")
             return res
+        secrets = {k: ns.pop(k) for k in SECRET_KEYS if k in ns}          # secrets never go into devices.json
+        if secrets:
+            save_secrets({**load_secrets(), **secrets})
+            changed.update({k: ["(set)", "(changed)"] for k in secrets})
         config_backup(cfg, by, "before settings change")
         save_json(DEVICES_FILE, new_cfg)
         audit("settings", by, {"changes": changed})
@@ -2465,7 +2539,9 @@ def publish_settings():
     st = cfg.get("settings", {})
     save_json(os.path.join(DATA_DIR, SETTINGS_OUT), {
         "schema": SETTINGS_SCHEMA,
-        "values": effective_settings(st), "effective_permissions": permissions(st),
+        "values": {k: ("" if k in SECRET_KEYS else v) for k, v in effective_settings(st).items()},
+        "secrets_set": {k: bool(load_secrets().get(k)) for k in SECRET_KEYS},
+        "effective_permissions": permissions(st),
         "advanced": {k: st[k] for k in ADVANCED_SETTINGS if k in st},
         "device_categories": [{"key": k, "title": t, "examples": e, "detect": d, "icon": TYPE_ICON.get(ty, "help-circle")}
                               for k, ty, t, e, d, _rx in DEVICE_CATEGORIES],
@@ -2687,7 +2763,7 @@ def health_report(api_state, snmp_state):
         switches[sid] = dict(x)
     for sid, x in snmp_state.items():
         switches.setdefault(sid, {"name": x.get("name", sid)})["realtime"] = x
-    return {"api": api_state, "switches": switches, "scan": {k: rep.get(k) for k in
+    return {"api": api_state, "switches": switches, "unifi": rep.get("unifi"), "scan": {k: rep.get(k) for k in
             ("started", "finished", "partial", "warnings", "nodes", "online", "targets")},
             "disk": {"path": EDITS_DIR, "free": disk.free, "total": disk.total}, "data_age": ages,
             "speedtest": "ookla" if os.path.isfile(OOKLA) else ("speedtest-cli" if shutil.which("speedtest-cli") else None)}
@@ -3502,6 +3578,17 @@ SETTINGS_SCHEMA = [
             "The button in the map controls switches for you; 'Reset layout' starts again from the tree."),
     # ---- Device types (the tab shows a card with a switch per category)
     _S("device_types_off", "list", [], "Device types", "Device types", "Categories switched off"),
+    # ---- Wireless & WAN: UniFi controller (read-only user; independent of Zabbix)
+    _S("unifi_url", "str", "", "Wireless & WAN", "UniFi controller", "Controller address", maxlen=120,
+       help="e.g. https://192.168.1.5 (UniFi OS: Cloud Key Gen2, UDM) or https://192.168.1.5:8443 (older controllers). "
+            "Empty: no UniFi."),
+    _S("unifi_site", "str", "default", "Wireless & WAN", "UniFi controller", "Site", maxlen=40),
+    _S("unifi_user", "str", "", "Wireless & WAN", "UniFi controller", "User", maxlen=60,
+       help="A local user with the role View only."),
+    _S("unifi_password", "secret", "", "Wireless & WAN", "UniFi controller", "Password",
+       help="Stored only on the server (/etc/spidermap/secrets.json); never shown again or exported."),
+    _S("unifi_fingerprint", "str", "", "Wireless & WAN", "UniFi controller", "Certificate fingerprint", maxlen=100,
+       help="SHA-256 of the controller's certificate (works with its own self-signed one). Empty: not checked."),
     # ---- Measurements
     _S("wan_source", "choice", "router", "Measurements", "Traffic", "Throughput source",
        choices=[["router", "The router's WAN (SNMP, else UPnP)"], ["switch", "Switch port to the gateway"]],
@@ -3581,6 +3668,22 @@ def _get(settings, key, default=None):
     return settings.get(key, default)
 
 
+SECRET_KEYS = ("unifi_password",)
+SECRETS_FILE = os.path.join(CONF_DIR, "secrets.json")        # root:spidermap 640 - never published, never exported
+
+
+def load_secrets():
+    return load_json(SECRETS_FILE, {}) if os.path.exists(SECRETS_FILE) else {}
+
+
+def save_secrets(sec):
+    save_json(SECRETS_FILE, sec)
+    try:
+        os.chmod(SECRETS_FILE, 0o640)
+    except OSError:
+        pass
+
+
 def effective_settings(settings):
     """Every schema setting with its current value (or default)."""
     out = {}
@@ -3620,6 +3723,10 @@ def validate_settings(new, current=None):
             if typ == "bool":
                 if not isinstance(v, bool):
                     raise ValueError("must be on or off")
+            elif typ == "secret":
+                v = str(v)
+                if len(v) > 128 or re.search(r"[\x00-\x1f]", v):
+                    raise ValueError("at most 128 characters, no control characters")
             elif typ == "list":
                 if not isinstance(v, list) or any(x not in DEVICE_CATEGORY_KEYS for x in v):
                     raise ValueError("unknown category")
