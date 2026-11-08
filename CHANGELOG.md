@@ -4,6 +4,25 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.8.0] - 2026-11-08
+
+### Added
+- **Evidence for every link between switches:** LLDP / CDP, spanning tree (the switch names the bridge and port at
+  the other end), LACP (the aggregation partner) and your confirmation, shown in the switch's panel. **Without LLDP
+  the switch tree is now built from spanning tree or LACP.** Your confirmation outranks everything else.
+- **Redundant cables:** ports that spanning tree blocks are real cables no MAC table shows; they are drawn as
+  dashed lines between the switches ("STP blocked").
+- **Link-state correlation:** ports on two switches that go down and up together (not when many ports change at
+  once) become **suggested links** in the switches' panels, with Confirm / Reject. A rejected suggestion never comes
+  back; *Confirm this link* and *Remove confirmation* work on every link between switches.
+- **Speed and duplex:** a speed mismatch between the two ends of a link, and half duplex on a port, are warnings.
+- **PoE:** ports that deliver power (class), PoE faults and the switch's total; a device on a PoE port says so
+  (often an access point, camera or phone).
+- **IPv6 neighbours** from the switches and routers, and the **TTL** of each device's ping reply: how many hops
+  away, and a hint at its operating system (64 / 128 / 255).
+- All of it from optional standard tables (BRIDGE-MIB, EtherLike-MIB, IEEE8023-LAG-MIB, POWER-ETHERNET-MIB,
+  IP-MIB): switches without them work as before.
+
 ## [0.7.2] - 2026-11-07
 
 ### Added
@@ -385,6 +404,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.8.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.0
 [0.7.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.2
 [0.7.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.1
 [0.7.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.0

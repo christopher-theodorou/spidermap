@@ -64,6 +64,14 @@ itself logs to the journal (`journalctl -u spidermap`).
 `dot1qTpFdbPort`) and IEEE8023-LAG-MIB (`dot3adAggPortAttachedAggID`), in `scan_switch()` and `vlan_tables()`.
 Both are optional: a switch without them is scanned as before.
 
+**Evidence model (0.8):** links between switches are collected in `sw_link` with their evidence in `link_ev`:
+LLDP/CDP first, then STP (the designated bridge and port of a non-designated port name the far end, via the other
+switch's bridge MAC and bridge-port table in `zp.BRIDGE`), LACP (partner system ID = the other switch's bridge MAC),
+and confirmed links from `devices.json` (`"links"`), which replace anything else for that pair. STP-blocked ports
+become `extra_links` (redundant cables). Link-state correlation: `link_state_pairs()` / `update_hints()` count ports
+on different switches that change state together (state file `spidermap_link_hints.json`); `link_suggestions()`
+turns pairs seen at least twice into suggestions, without linked or rejected pairs.
+
 **Device types:** `DEVICE_CATEGORIES` in `spidermap.py` (key, type, title, examples, how it is detected, regex on
 name / DNS name / manufacturer) is checked before the older `CLASSIFY` rules; categories in `device_types_off` are
 skipped. The Settings > Device types tab is built from it.

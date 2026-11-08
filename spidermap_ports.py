@@ -57,6 +57,45 @@ OID = {
 }
 VLANS = {}          # hostid -> {vlan id: name}, from the last scan of each switch
 CDP_ON = False      # set from Settings > Topology > CDP
+BRIDGE = {}         # hostid -> {"mac": bridge MAC, "root": root bridge MAC, "rootport": bridge port, "bport": {bp: ifIndex}}
+V6 = {}             # hostid -> {mac: [IPv6 addresses]} from the switch's / router's neighbour table
+POE_TOTAL = {}      # hostid -> watts the switch delivers over PoE
+TTL = {}            # ip -> TTL of its ping reply, from the last sweep
+FACTS = {           # optional standard tables: duplex, STP, LACP partner, PoE, IPv6 neighbours
+    "duplex": "1.3.6.1.2.1.10.7.2.1.19", "stp_base": "1.3.6.1.2.1.17.1.1", "stp_root": "1.3.6.1.2.1.17.2.5",
+    "stp_rootport": "1.3.6.1.2.1.17.2.7", "stp_state": "1.3.6.1.2.1.17.2.15.1.3", "stp_dbridge": "1.3.6.1.2.1.17.2.15.1.8",
+    "stp_dport": "1.3.6.1.2.1.17.2.15.1.9", "lacp_psys": "1.2.840.10006.300.43.1.2.1.1.9",
+    "lacp_pport": "1.2.840.10006.300.43.1.2.1.1.17", "poe_status": "1.3.6.1.2.1.105.1.1.1.6",
+    "poe_class": "1.3.6.1.2.1.105.1.1.1.10", "poe_total": "1.3.6.1.2.1.105.1.3.1.1.4", "ip6": "1.3.6.1.2.1.4.35.1.4",
+}
+STP_STATE = {"1": "disabled", "2": "blocking", "3": "listening", "4": "learning", "5": "forwarding", "6": "broken"}
+
+
+def hexbytes(v):
+    return [int(x, 16) for x in re.findall(r"[0-9A-Fa-f]{2}", str(v or ""))]
+
+
+def mac_of(v):
+    """A MAC from a hex value: 6 bytes, or the last 6 of a bridge ID (2 bytes priority + MAC)."""
+    b = hexbytes(v)
+    return ":".join(f"{x:02x}" for x in b[-6:]) if len(b) >= 6 else ""
+
+
+def ip6_neighbours(rows):
+    """ipNetToPhysicalPhysAddress rows (index ifIndex.2.16.<16 bytes>) -> {mac: [IPv6]}."""
+    import ipaddress
+    out = {}
+    for suffix, val in rows.items():
+        parts = str(suffix).split(".")
+        if len(parts) >= 19 and parts[1] == "2" and parts[2] == "16":
+            try:
+                ip = str(ipaddress.IPv6Address(bytes(int(x) for x in parts[3:19])))
+            except ValueError:
+                continue
+            m = mac_of(val)
+            if m and not ip.startswith("ff"):
+                out.setdefault(m, []).append(ip)
+    return out
 CDP = {"addr": "1.3.6.1.4.1.9.9.23.1.2.1.1.4", "id": "1.3.6.1.4.1.9.9.23.1.2.1.1.6", "port": "1.3.6.1.4.1.9.9.23.1.2.1.1.7"}
 
 
@@ -120,8 +159,11 @@ def sweep_ips(ips, timeout_ms=1000, parallel=64, size=56, pps=0):
     def ping(ip):
         pace()
         try:
-            subprocess.run(["ping", "-n", "-c", "1", "-W", wait, "-s", str(int(size)), ip],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout_ms / 1000 + 3)
+            r = subprocess.run(["ping", "-n", "-c", "1", "-W", wait, "-s", str(int(size)), ip],
+                               capture_output=True, text=True, timeout=timeout_ms / 1000 + 3)
+            m = re.search(r"ttl=(\d+)", r.stdout)
+            if m:
+                TTL[ip] = int(m.group(1))                 # hop count and an OS hint (64 / 128 / 255)
         except Exception:  # noqa: BLE001
             pass
     with cf.ThreadPoolExecutor(max(1, min(int(parallel), 256))) as ex:
@@ -267,6 +309,35 @@ def scan_switch(h, community, hosts):
             if vid:
                 mac_vlan.setdefault(ifx, {})[mac] = vid
     VLANS[h["hostid"]] = {k: v for k, v in vnames.items() if 0 < k < 4095}
+    # ---- facts from optional standard tables (each one best effort)
+    fx = {}
+    for k in ("duplex", "stp_state", "poe_status", "poe_class", "poe_total"):
+        try:
+            fx[k] = at.snmpwalk(auth, target, FACTS[k])
+        except Exception:  # noqa: BLE001
+            fx[k] = {}
+    for k in ("stp_base", "stp_root", "stp_rootport", "stp_dbridge", "stp_dport", "lacp_psys", "lacp_pport", "ip6"):
+        try:
+            fx[k] = at.snmpwalk(auth + ["-Ox"], target, FACTS[k])
+        except Exception:  # noqa: BLE001
+            fx[k] = {}
+    own = mac_of(next(iter(fx["stp_base"].values()), ""))
+    rp = hexbytes(next(iter(fx["stp_rootport"].values()), ""))
+    BRIDGE[h["hostid"]] = {"mac": own, "root": mac_of(next(iter(fx["stp_root"].values()), "")),
+                           "rootport": str(int.from_bytes(bytes(rp), "big")) if rp else "", "bport": dict(bport)}
+    stp = {}
+    for bp, st in fx["stp_state"].items():
+        dp = hexbytes(fx["stp_dport"].get(bp, ""))
+        stp[bport.get(bp, bp)] = {"state": STP_STATE.get(str(st).strip(), str(st)), "dbridge": mac_of(fx["stp_dbridge"].get(bp, "")),
+                                  "dport": str((int.from_bytes(bytes(dp), "big") & 0x0FFF)) if dp else ""}
+    V6[h["hostid"]] = ip6_neighbours(fx["ip6"])
+    POE_TOTAL[h["hostid"]] = sum(int(v) for v in fx["poe_total"].values() if str(v).strip().isdigit())
+    poe = {}
+    for suffix, st in fx["poe_status"].items():               # index: group . port (often the ifIndex)
+        port = str(suffix).split(".")[-1]
+        cls = fx["poe_class"].get(suffix, "")
+        poe[port] = {"on": str(st).strip() == "3", "fault": str(st).strip() in ("4", "6"),
+                     "class": int(cls) - 1 if str(cls).strip().isdigit() and int(cls) > 0 else None}
     by_ifx = {bport.get(bp, bp): v for bp, v in vports.items()}     # bridge port -> ifIndex
     try:
         lag_of = {k: num(v) for k, v in w("lagof").items() if num(v) not in ("", "0") and num(v) != k}
@@ -310,6 +381,9 @@ def scan_switch(h, community, hosts):
             "speed": (f"{sp / 1000:g} Gbps" if sp >= 1000 else f"{sp} Mbps") if status == "up" and sp else "",
             "lldp": lldp.get(norm(name), []), "macs": sorted(macs.get(idx, set())),
             "vlans": by_ifx.get(idx), "mac_vlans": mac_vlan.get(idx, {}), "lag": lag_of.get(idx),
+            "duplex": {"2": "half", "3": "full"}.get(str(fx["duplex"].get(idx, "")).strip()), "stp": stp.get(idx),
+            "lacp_partner": (mac_of(fx["lacp_psys"].get(idx, "")) or None) if mac_of(fx["lacp_psys"].get(idx, "")) not in ("", "00:00:00:00:00:00") else None,
+            "poe": poe.get(idx),
         })
     return ports, arp
 

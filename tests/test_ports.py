@@ -221,11 +221,21 @@ def _fake_walks(with_vlans=True):
     return W
 
 
+def _fake_facts():
+    return {"duplex": {"1": "3", "2": "2"}, "stp_base": {"0": "00 11 22 33 44 55"}, "stp_root": {"0": "80 00 00 aa bb cc dd ee"},
+            "stp_rootport": {"0": "00 01"}, "stp_state": {"1": "5", "8": "2"}, "stp_dbridge": {"1": "80 00 00 aa bb cc dd ee", "8": "80 00 00 aa bb cc dd ee"},
+            "stp_dport": {"1": "80 05", "8": "80 07"}, "lacp_psys": {"6": "00 66 77 88 99 aa", "7": "00 00 00 00 00 00"},
+            "lacp_pport": {}, "poe_status": {"1.3": "3", "1.4": "4"}, "poe_class": {"1.3": "4"}, "poe_total": {"1": "23"},
+            "ip6": {"3.2.16.254.128.0.0.0.0.0.0.2.0.0.255.254.0.0.3": "AA BB CC 00 00 03"}}
+
+
 def scan_fake(with_vlans=True):
     W = _fake_walks(with_vlans)
     rev = {v: k for k, v in zp.OID.items()}
     real = (zp.at.snmpwalk, zp.at.snmp_auth, zp.at.lldp_neighbors, zp.entity_media)
-    zp.at.snmpwalk = lambda auth, target, oid: W.get(rev.get(oid), {})
+    F = _fake_facts() if with_vlans else {}
+    revf = {v: k for k, v in zp.FACTS.items()}
+    zp.at.snmpwalk = lambda auth, target, oid: W.get(rev.get(oid)) if rev.get(oid) in W else F.get(revf.get(oid), {})
     zp.at.snmp_auth = lambda *a, **k: (zp.at.SnmpAuth(), "udp:10.0.0.2:161")
     zp.at.lldp_neighbors = lambda *a, **k: []
     zp.entity_media = lambda *a, **k: {}
@@ -254,6 +264,21 @@ def test_vlans_and_lag():
     check("VLANs: port bitmaps, also printed with a prefix", zp.portlist("80 01") == [1, 16] and zp.portlist("Hex-STRING: C0") == [1, 2])
 
 
+def test_facts():
+    P, _ = scan_fake()
+    g = lambda i: P[f"GigabitEthernet0/0/{i}"]  # noqa: E731
+    b = zp.BRIDGE["99"]
+    check("facts: bridge MAC, root bridge and root port from BRIDGE-MIB",
+          b["mac"] == "00:11:22:33:44:55" and b["root"] == "00:aa:bb:cc:dd:ee" and b["rootport"] == "1", b)
+    check("facts: STP state and the designated bridge / port per port",
+          g(1)["stp"] == {"state": "forwarding", "dbridge": "00:aa:bb:cc:dd:ee", "dport": "5"} and g(8)["stp"]["state"] == "blocking", (g(1)["stp"], g(8)["stp"]))
+    check("facts: duplex (full / half)", g(1)["duplex"] == "full" and g(2)["duplex"] == "half" and g(3)["duplex"] is None)
+    check("facts: LACP partner MAC; an all-zero partner is no partner", g(6)["lacp_partner"] == "00:66:77:88:99:aa" and g(7)["lacp_partner"] is None)
+    check("facts: PoE delivering (class 3), a PoE fault, total watts",
+          g(3)["poe"] == {"on": True, "fault": False, "class": 3} and g(4)["poe"]["fault"] and zp.POE_TOTAL["99"] == 23, (g(3)["poe"], g(4)["poe"]))
+    check("facts: IPv6 neighbours by MAC", zp.V6["99"] == {"aa:bb:cc:00:00:03": ["fe80::200:ff:fe00:3"]}, zp.V6["99"])
+
+
 def test_device_types():
     cases = [("idrac-7XK2", "Dell Inc.", "oob"), ("pve1", "Dell Inc.", "hypervisor"), ("esx01", "VMware", "hypervisor"),
              ("", "American Power Conversion", "ups"), ("nvr-office", "Hikvision", "camera"), ("SIP-T46U", "Yealink", "voip"),
@@ -276,6 +301,7 @@ def main():
     test_sfp()
     test_vlans_and_lag()
     test_device_types()
+    test_facts()
     test_report()
     test_counters()
     test_zabbix_items()

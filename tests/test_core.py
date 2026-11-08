@@ -837,6 +837,39 @@ def test_unifi():
           and json.load(open(sm.SECRETS_FILE))["unifi_password"] == "S3cret!" and json.loads(pub)["secrets_set"]["unifi_password"])
 
 
+def test_080():
+    ch = [(100, "A", "1", 2), (103, "B", "7", 2), (104, "B", "8", 1)]
+    check("link state: two ports on different switches going down together are a pair (not the one going up)",
+          sm.link_state_pairs(ch) == {(("A", "1"), ("B", "7"))}, sm.link_state_pairs(ch))
+    mass = [(200 + i, f"S{i % 3}", str(i), 2) for i in range(8)]
+    check("link state: a moment when many ports change at once (power cut) proves nothing", sm.link_state_pairs(mass) == set())
+    hints = {}
+    sm.update_hints(hints, ch, 105)
+    sm.update_hints(hints, ch, 110)                       # the same event seen again: not counted twice
+    sm.update_hints(hints, [(500, "A", "1", 1), (502, "B", "7", 1)], 505)
+    check("link state: each event counted once", hints == {"A|1|B|7": {"n": 2, "last": 505}}, hints)
+    data = {"switches": {"A": {"name": "SW-A", "ports": [{"id": "1", "base": "Port 1"}]}, "B": {"name": "SW-B", "ports": [{"id": "7", "base": "Port 7"}]},
+                         "C": {"name": "SW-C", "ports": [{"id": "2", "base": "Port 2"}]}},
+            "nodes": [{"kind": "switch", "sw": "C", "port_ref": ["A", "9"]}]}
+    sug = sm.link_suggestions(hints, data, [])
+    check("suggestions: by name, with the reason", sug == [{"a": ["SW-A", "Port 1"], "b": ["SW-B", "Port 7"], "n": 2,
+                                                          "why": "went down and up together 2 times"}], sug)
+    check("suggestions: a rejected pair is never suggested again",
+          sm.link_suggestions(hints, data, [{"a": ["SW-B", "Port 7"], "b": ["SW-A", "Port 1"], "state": "rejected"}]) == [])
+    check("suggestions: switches already linked are not suggested", sm.link_suggestions({"A|1|C|2": {"n": 5, "last": 1}}, data, []) == [])
+    _sandbox()
+    json.dump(data, open(os.path.join(sm.DATA_DIR, sm.DATA), "w"))
+    r = sm.apply_settings_request({"by": "Admin", "link": {"a": ["SW-A", "Port 1"], "b": ["SW-B", "Port 7"], "state": "confirmed"}})
+    check("link: a confirmed link is stored and a scan asked for", r["ok"] and r.get("rescan")
+          and json.load(open(sm.DEVICES_FILE))["links"] == [{"a": ["SW-A", "Port 1"], "b": ["SW-B", "Port 7"], "state": "confirmed"}], r)
+    bad = [sm.apply_settings_request({"by": "A", "link": lk}) for lk in
+           ({"a": ["SW-A", "Port 9"], "b": ["SW-B", "Port 7"], "state": "confirmed"}, {"a": ["SW-A", "Port 1"], "b": ["SW-A", "Port 1"], "state": "confirmed"},
+            {"a": ["SW-A", "Port 1"], "b": ["SW-B", "Port 7"], "state": "maybe"})]
+    check("link: unknown port, the same switch twice and an unknown choice are refused", all(not b["ok"] for b in bad), bad)
+    sm.apply_settings_request({"by": "Admin", "link": {"a": ["SW-B", "Port 7"], "b": ["SW-A", "Port 1"], "state": "remove"}})
+    check("link: remove the decision (either order of the ends)", json.load(open(sm.DEVICES_FILE))["links"] == [])
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -859,6 +892,7 @@ def main():
     test_approve()
     test_070()
     test_unifi()
+    test_080()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

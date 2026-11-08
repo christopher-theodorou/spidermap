@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.7.2"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.8.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -93,7 +93,8 @@ TYPE_ICON = {"router": "router", "switch": "server-2", "ap": "access-point", "un
 PLACE_KINDS = {"switch": ("Unmanaged switch", "server-2"), "ap": ("Access point", "access-point"),
                "hypervisor": ("Hypervisor", "server-cog"), "bridge": ("Wi-Fi bridge", "antenna"), "hub": ("Hub", "sitemap"),
                "other": ("Other device", "box")}
-VIA_TEXT = {"unifi": "UniFi controller (a wireless client of this access point)","lldp": "LLDP (the device announced itself)", "mac": "MAC table of the switch", "manual": "pinned in devices.json",
+VIA_TEXT = {"stp": "spanning tree (the switch names its neighbour)", "lacp": "LACP (the link aggregation partner)",
+            "unifi": "UniFi controller (a wireless client of this access point)","lldp": "LLDP (the device announced itself)", "mac": "MAC table of the switch", "manual": "pinned in devices.json",
             "proxmox": "Proxmox API", "arp": "guessed: seen only through the gateway (Wi-Fi or its LAN ports)",
             "behind": "guessed: behind another device", "remembered": "guessed: where it was last seen"}
 VIA_GUESSED = ("arp", "behind", "remembered")
@@ -659,7 +660,10 @@ def full_scan(api, community=None, quiet=False):
             arp.setdefault(mac, (ip, "STALE"))
         say(f"  {h['name']}: {len(ports)} ports, {sum(p['status'] == 'up' for p in ports)} up")
     scan_progress(82, "building the map")
-    vlan_names, mac_vlan = {}, {}
+    vlan_names, mac_vlan, v6_of = {}, {}, {}
+    for sid in sw:
+        for m_, ips_ in zp.V6.get(sid, {}).items():
+            v6_of.setdefault(m_, []).extend(ips_)
     if S["topo_vlans"]:
         for sid, s_ in sw.items():
             vlan_names.update(zp.VLANS.get(sid, {}))
@@ -889,6 +893,17 @@ def full_scan(api, community=None, quiet=False):
                ["Connection", conn or "-"]]
         if via:
             det.append(["Link from", VIA_TEXT.get(via, via)])
+        if v6_of.get(mac):
+            det.append(["IPv6", ", ".join(sorted(set(v6_of[mac]))[:3])])
+        if ip and zp.TTL.get(ip):
+            t_ = zp.TTL[ip]
+            base = min((b for b in (64, 128, 255) if b >= t_), default=255)
+            det.append(["TTL", f"{t_} · {base - t_} hop{'' if base - t_ == 1 else 's'} away · "
+                               + {64: "Linux, macOS, Android, iOS", 128: "Windows", 255: "network device"}[base]])
+        pp_ = next((q for q in sw[port_ref[0]]["ports"] if q["pid"] == port_ref[1]), None) if port_ref else None
+        if pp_ and (pp_.get("poe") or {}).get("on"):
+            det.append(["Power", "PoE" + (f", class {pp_['poe']['class']}" if pp_["poe"].get("class") is not None else "")
+                                 + " - often an access point, camera or phone"])
         if mac_vlan.get(mac):
             det.append(["VLAN", f"{mac_vlan[mac]} · {vlan_names.get(mac_vlan[mac], 'VLAN ' + str(mac_vlan[mac]))}"])
         if g:
@@ -917,6 +932,48 @@ def full_scan(api, community=None, quiet=False):
     gw_id = by_mac.get(gw_mac, "inet")
 
     # switches in BFS order from the root switch
+    # ---- evidence for each link between switches: LLDP/CDP (above), STP, LACP, and your confirmations
+    link_ev = {k: ["LLDP/CDP"] for k in sw_link}
+    bmac = {zp.BRIDGE[k]["mac"]: k for k in sw if zp.BRIDGE.get(k, {}).get("mac")}
+    redundant = []
+
+    def port_by_if(k, ifx):
+        return next((q for q in sw[k]["ports"] if str(q.get("ifindex")) == str(ifx)), None)
+
+    def add_link(a, b, pa, pb, src):
+        if (a, b) not in sw_link:
+            sw_link[(a, b)] = (pa, pb)
+        if src not in link_ev.setdefault((a, b), []):
+            link_ev[(a, b)].append(src)
+    for a in sw:
+        for p in sw[a]["ports"]:
+            st = p.get("stp") or {}
+            b = bmac.get(st.get("dbridge"))
+            if b and b != a:                                    # the far end of this cable is switch b
+                rb = port_by_if(b, zp.BRIDGE[b]["bport"].get(st.get("dport"), ""))
+                pb = rb["name"] if rb else ""
+                if st.get("state") == "blocking":               # a real cable that carries no traffic: redundant
+                    redundant.append((a, p["name"], b, pb))
+                else:
+                    add_link(a, b, p["name"], pb, "STP")
+                    if pb:
+                        add_link(b, a, pb, p["name"], "STP")
+            lb = bmac.get(p.get("lacp_partner"))
+            if lb and lb != a:
+                add_link(a, lb, p["name"], "", "LACP")
+    by_name = {v: k for k, v in sw_name.items()}
+    for L in cfg.get("links", []) or []:
+        if L.get("state") != "confirmed":
+            continue
+        a, b = by_name.get((L.get("a") or [None])[0]), by_name.get((L.get("b") or [None])[0])
+        if a in sw and b in sw and a != b:
+            pa = next((q["name"] for q in sw[a]["ports"] if q.get("base", q["label"]) == L["a"][1]), "")
+            pb = next((q["name"] for q in sw[b]["ports"] if q.get("base", q["label"]) == L["b"][1]), "")
+            sw_link.pop((a, b), None)                           # your confirmation outranks everything else
+            sw_link.pop((b, a), None)
+            add_link(a, b, pa, pb, "confirmed")
+            add_link(b, a, pb, pa, "confirmed")
+
     order, parent_of = [], {}
     if root_sw:
         queue, seen = [root_sw], {root_sw}
@@ -929,19 +986,30 @@ def full_scan(api, community=None, quiet=False):
                     parent_of[b] = (cur, pa, pb)
                     queue.append(b)
         order += [s for s in sw if s not in seen]
+    for b_, (a_, pa_, pb_) in parent_of.items():
+        x, y = _pinfo.get((a_, pa_), {}), _pinfo.get((b_, pb_), {})
+        if x.get("speed") and y.get("speed") and x["speed"] != y["speed"]:
+            report["warnings"].append(f"Speed mismatch: {sw_name[a_]} {plabel(a_, pa_)} at {x['speed']}, "
+                                      f"{sw_name[b_]} {plabel(b_, pb_)} at {y['speed']}")
+    for k_ in sw:
+        for p in sw[k_]["ports"]:
+            if p.get("status") == "up" and p.get("duplex") == "half" and re.search(r"(\d+) ?([MG])", p.get("speed", "")):
+                report["warnings"].append(f"Half duplex: {sw_name[k_]} {plabel(k_, p['name'])} ({p['speed']}) - "
+                                          "usually a duplex mismatch with the device on the other end")
     for sid in order:
         h = sw[sid]["host"]
         up = sum(p["status"] == "up" for p in sw[sid]["ports"])
         if sid in parent_of:
             par, pa, pb = parent_of[sid]
             rb = next((p for p in sw[sid]["ports"] if zp.norm(p["name"]) == zp.norm(pb)), None)
-            parent, lbl = "s-" + par, f"{plabel(par, pa)} ↔ {rb['label'].replace('Port ', '') if rb else pb}"
+            parent, lbl = "s-" + par, f"{plabel(par, pa)}" + (f" ↔ {rb['label'].replace('Port ', '') if rb else pb}" if (rb or pb) else "")
             pref = [par, pid_of(par, pa)]
             # a link aggregation: name the LAG, and draw the link as one thicker link
             mine = _pinfo.get((par, pa), {})
             agg = next((q for q in sw[par]["ports"] if mine.get("lag") and str(q.get("ifindex")) == str(mine["lag"])), None) \
                 or (mine if mine.get("kind") == "lag" else None)
-            link_via = "lldp"
+            ev_ = link_ev.get((par, sid)) or link_ev.get((sid, par)) or []
+            link_via = "manual" if "confirmed" in ev_ else "lldp" if "LLDP/CDP" in ev_ else "stp" if "STP" in ev_ else "lacp" if "LACP" in ev_ else "lldp"
             if agg:
                 members = [q["label"].replace("Port ", "") for q in sw[par]["ports"] if str(q.get("lag")) == str(agg.get("ifindex"))]
                 lbl = f"{agg['label']}" + (f" ({'+'.join(members)})" if members else "") + f" ↔ {rb['label'].replace('Port ', '') if rb else pb}"
@@ -955,6 +1023,10 @@ def full_scan(api, community=None, quiet=False):
             pref = [sid, pid_of(sid, gw_loc[1])] if gw_loc and sid == root_sw else None
         add("s-" + sid, parent, name=h["name"], sub="." + h["_snmp"]["ip"].split(".")[-1], icon="server-2",
             kind="switch", sw=sid, status="up", port=lbl, port_ref=pref, zbx=sid, flip=sid not in parent_of, link=link_kind, via=link_via,
+            evidence=(link_ev.get((parent_of[sid][0], sid)) or link_ev.get((sid, parent_of[sid][0])) or []) if sid in parent_of else [],
+            link_ends=[[sw_name[parent_of[sid][0]], _pinfo.get((parent_of[sid][0], parent_of[sid][1]), {}).get("base") or parent_of[sid][1]],
+                       [sw_name[sid], _pinfo.get((sid, parent_of[sid][2]), {}).get("base") or parent_of[sid][2]]]
+            if sid in parent_of and parent_of[sid][2] else None,
             url=f"http://{h['_snmp']['ip']}",
             details=[["IP", h["_snmp"]["ip"]], ["Ports up", f"{up} of {len(sw[sid]['ports'])}"]])
 
@@ -1164,7 +1236,8 @@ def full_scan(api, community=None, quiet=False):
                 clients.setdefault(pid_of(sid, pa), []).append(sw_name[b])
         switches_out[sid] = {"name": sw_name[sid], "ports": [
             {"id": p["pid"], "n": p.get("pos", 0), "label": p["label"], "kind": p.get("kind", "port"),
-             "media": p.get("media", ""), "base": p.get("base", p["label"]), "vlans": p.get("vlans") if S["topo_vlans"] else None,
+             "media": p.get("media", ""), "base": p.get("base", p["label"]), "duplex": p.get("duplex"),
+             "stp": (p.get("stp") or {}).get("state"), "poe": p.get("poe"), "vlans": p.get("vlans") if S["topo_vlans"] else None,
              "lag": next((q["pid"] for q in sw[sid]["ports"] if str(q.get("ifindex")) == str(p.get("lag"))), None),
              "full": p["name"], "status": p["status"], "speed_mbps": p.get("speed_mbps", 0),
              "speed": p["speed"], "alias": p["alias"], "ifindex": p.get("ifindex"),
@@ -1249,6 +1322,10 @@ def full_scan(api, community=None, quiet=False):
             "public_ip_history": state.get("public_ip_history", []), "scan_seconds": now() - t0, "nodes": list(nodes.values()),
             "switches": switches_out, "zabbix_url": "zabbix.php",
             "partial": report["partial"], "scan_warnings": report["warnings"],
+            "extra_links": [{"a": "s-" + a, "b": "s-" + b, "kind": "redundant",
+                             "label": f"{sw_name[a]} {plabel(a, pa)} ↔ {sw_name[b]} {plabel(b, pb) if pb else ''}".strip()
+                             + " · blocked by spanning tree"} for a, pa, b, pb in redundant
+                            if "s-" + a in nodes and "s-" + b in nodes],
             "vlans": {str(v): {"name": vlan_names.get(v, f"VLAN {v}"),
                                "devices": sum(1 for n in nodes.values() if n.get("vlan") == v)}
                       for v in sorted(set(vlan_names) | {n["vlan"] for n in nodes.values() if n.get("vlan")})}}
@@ -1970,6 +2047,57 @@ def snmp_get(auth, target, oids):
 COUNTER_SANITY_BPS = 400e9          # upper limit when the link speed is unknown
 
 
+HINTS_FILE = os.path.join(STATE_DIR, "spidermap_link_hints.json")
+
+
+def link_state_pairs(changes, window=8, mass=6):
+    """Pairs of ports on different switches that went down or up together (same direction, within `window` s).
+    Moments when more than `mass` ports change at once (a power cut, a restart) prove nothing and are skipped."""
+    pairs = set()
+    for t, s1, p1, st1 in changes:
+        near = [c for c in changes if abs(c[0] - t) <= window]
+        if len(near) > mass:
+            continue
+        for _t2, s2, p2, st2 in near:
+            if s2 != s1 and st2 == st1:
+                pairs.add(tuple(sorted([(s1, p1), (s2, p2)])))
+    return pairs
+
+
+def update_hints(hints, changes, t):
+    """Counts each pair once per event (not again within 60 s). Returns True when something changed."""
+    changed = False
+    for (a, b) in link_state_pairs([c for c in changes if t - c[0] <= 60]):
+        k = f"{a[0]}|{a[1]}|{b[0]}|{b[1]}"
+        h = hints.setdefault(k, {"n": 0, "last": 0})
+        if t - h["last"] > 60:
+            h["n"], h["last"], changed = h["n"] + 1, t, True
+    return changed
+
+
+def link_suggestions(hints, data, links, min_n=2):
+    """Pairs seen together at least `min_n` times, by name, without switches already linked and rejected pairs."""
+    sws = data.get("switches") or {}
+    linked = {frozenset((n["sw"], (n.get("port_ref") or [None])[0])) for n in data.get("nodes", [])
+              if n.get("kind") == "switch" and n.get("port_ref")}
+    refused = {frozenset([tuple(L["a"]), tuple(L["b"])]) for L in links if L.get("state") == "rejected"}
+
+    def end(sid, pid):
+        sw_ = sws.get(sid) or {}
+        p = next((q for q in sw_.get("ports", []) if str(q.get("id", q.get("n"))) == pid), None)
+        return [sw_.get("name", sid), p.get("base", p.get("label")) if p else pid]
+    out = []
+    for k, h in sorted(hints.items(), key=lambda x: -x[1]["n"]):
+        if h["n"] < min_n:
+            continue
+        s1, p1, s2, p2 = k.split("|")
+        a, b = end(s1, p1), end(s2, p2)
+        if frozenset((s1, s2)) in linked or frozenset([tuple(a), tuple(b)]) in refused:
+            continue
+        out.append({"a": a, "b": b, "n": h["n"], "why": f"went down and up together {h['n']} times"})
+    return out[:20]
+
+
 def recheck_speed(auth, target, ifindex):
     """The port's speed now (ifHighSpeed, Mbps), or 0."""
     try:
@@ -2457,6 +2585,30 @@ def apply_settings_request(req):
         add_events([ev("audit", "info", f"{by} imported settings and {len(devs)} devices")])
         res.update(ok=True, message=f"Imported {len(devs)} devices and the settings.")
         return res
+    if "link" in req:
+        lk = req["link"] if isinstance(req["link"], dict) else {}
+        a, b, state = lk.get("a"), lk.get("b"), str(lk.get("state") or "")
+        dm = load_json(os.path.join(DATA_DIR, DATA), {}) or {}
+        known = {(x.get("name"), p.get("base", p.get("label"))) for x in (dm.get("switches") or {}).values() for p in x.get("ports", [])}
+        if not (isinstance(a, list) and isinstance(b, list) and len(a) == 2 and len(b) == 2 and tuple(a) in known
+                and tuple(b) in known and a[0] != b[0]):
+            res["errors"] = ["Both ends must be switch ports on the map, on two different switches."]
+            return res
+        if state not in ("confirmed", "rejected", "remove"):
+            res["errors"] = ["Unknown choice."]
+            return res
+        config_backup(cfg, by, "before a link change")
+        pair = frozenset([tuple(a), tuple(b)])
+        links = [L for L in cfg.get("links", []) if frozenset([tuple(L["a"]), tuple(L["b"])]) != pair]
+        if state != "remove":
+            links.append({"a": a, "b": b, "state": state})
+        cfg["links"] = links
+        save_json(DEVICES_FILE, cfg)
+        audit("link", by, {"a": a, "b": b, "state": state})
+        add_events([ev("audit", "info", f"{by} {'removed the decision on' if state == 'remove' else state} the link "
+                                        f"{a[0]} {a[1]} ↔ {b[0]} {b[1]}")])
+        res.update(ok=True, rescan=True, message="Saved. The map shows it after the scan that starts now.")
+        return res
     if "place" in req:
         pl = req["place"] if isinstance(req["place"], dict) else {}
         key, kind = str(pl.get("key") or ""), str(pl.get("kind") or "")
@@ -2778,6 +2930,7 @@ def rt_loop(api):
     targets, last_lat, speed = {}, 0, {"running": False, "error": ""}
     daily_done, last_save = load_json(SCHED_FILE, {}).get("speedtest_daily_last", ""), 0
     prev_st, flap_t = {}, {}
+    changes, hints = deque(maxlen=200), load_json(HINTS_FILE, {})     # port up/down changes; ports that change together
     use32, quality, rej_said = {}, {}, {}
     live_speed, rescan_at = {}, {}                # port speeds read again after a change; last rescan per switch
     inet = load_json(INET_FILE, {})
@@ -2899,6 +3052,7 @@ def rt_loop(api):
                     was = prev_st.get(key)
                     if was in (1, 2) and was != st:
                         flap_t.setdefault(key, deque()).append(t)
+                        changes.append((t, sid, str(n), st))      # for link-state correlation
                         imp = any("important" in x.get("flags", []) for x in data["nodes"]
                                   if x.get("port_ref") == [sid, str(n)])
                         evs.append(ev("port", "ok" if st == 1 else ("bad" if imp else "info"),
@@ -2952,6 +3106,8 @@ def rt_loop(api):
                 lst.append([t, round(v["rx"]), round(v["tx"])])
                 del lst[:-RT_KEEP]
         root = next((n for n in data["nodes"] if n.get("kind") == "switch" and n.get("flip") and n.get("port_ref")), None)
+        if update_hints(hints, list(changes), t):
+            save_json(HINTS_FILE, hints)
         sw_wan = ports.get(root["port_ref"][0], {}).get(str(root["port_ref"][1])) if root else None
         wan, wan_src, wan_err = measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0)
         # tell once when the WAN cannot be measured (after a minute), and when it can again
@@ -3046,6 +3202,7 @@ def rt_loop(api):
         save_json(os.path.join(DATA_DIR, RT), {
             "t": t, "every": every, "ports": ports, "flaps": flaps,
             "wan": {"down": wan["rx"], "up": wan["tx"], "src": wan_src} if wan else None,
+            "suggestions": link_suggestions(hints, data, load_json(DEVICES_FILE, {}).get("links", [])),
             "wan_state": {"mode": S["wan_source"], "via": wan_src, "error": wan_err,
                           "router": rsnmp.get("router") if wan_src == "snmp" else (upnp["svc"] or {}).get("name", ""),
                           "interface": rsnmp.get("ifname", "") if wan_src == "snmp" else ""},
@@ -3378,6 +3535,14 @@ if (!is_array($in)) deny(400, 'Bad request');
 $ROLE = [1 => 'Zabbix users', 2 => 'Zabbix admins', 3 => 'Zabbix Super admins'];
 
 $act = (string)($in['action'] ?? '');
+if ($act === 'link') {                                 // confirm / reject / remove a link between two switch ports
+  if ($user['type'] < perm('edit')) deny(403, 'Only ' . $ROLE[perm('edit')] . ' can change the map.');
+  if (!is_array($in['link'] ?? null)) deny(400, 'Bad request');
+  $body = ['link' => array_intersect_key($in['link'], array_flip(['a', 'b', 'state']))];
+  $rid = (string)($in['rid'] ?? '');
+  write_request('settings.request', $body + ['by' => $user['name'], 'at' => time()] + (preg_match('/^[a-z0-9]{6,24}$/', $rid) ? ['rid' => $rid] : []));
+  echo json_encode(['ok' => true, 'queued' => 'link']); exit;
+}
 if ($act === 'place') {                                // a switch / AP / ... between a port and its devices, set on the map
   if ($user['type'] < perm('edit')) deny(403, 'Only ' . $ROLE[perm('edit')] . ' can change the map.');
   if (!is_array($in['place'] ?? null)) deny(400, 'Bad request');

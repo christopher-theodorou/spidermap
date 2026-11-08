@@ -198,7 +198,11 @@ def run(base, inbox, data):
     pr = json.load(open(os.path.join(inbox, "settings.request")))
     passed += chk("map edit: Admin may (edit permission), only known fields reach the service",
                   c3 == 200 and pr.get("place") == {"key": "SW|Port 1", "kind": "switch"} and pr.get("by") == "netadmin", (c3, pr))
-    extra += 8
+    c4, _ = req(O, US, '{"action":"link","link":{"a":["SW","Port 1"],"b":["SW2","Port 2"],"state":"confirmed"}}', H)
+    c5, _ = req(O, AD, '{"action":"link","link":{"a":["SW","Port 1"],"b":["SW2","Port 2"],"state":"confirmed","x":1}}', H)
+    lr = json.load(open(os.path.join(inbox, "settings.request")))
+    passed += chk("link: normal user refused, Admin allowed, only known fields passed", c4 == 403 and c5 == 200 and "x" not in lr.get("link", {}), (c4, c5, lr))
+    extra += 9
     return passed, len(cases) + extra
 
 

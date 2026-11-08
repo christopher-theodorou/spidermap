@@ -136,7 +136,7 @@ body.free .tn{cursor:grab}body.free .tn:active{cursor:grabbing}
 .tn.prob .ic{box-shadow:0 0 0 3px var(--pc)}.tn.inferred .ic{border:2px dashed var(--muted)}
 .pl-row{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px}
 .pl-row i{width:10px;height:10px;border-radius:2px;display:block}
-.ln.lag{stroke-width:4.5}.ln.guess{stroke-dasharray:2 4;stroke-linecap:round}
+.ln.lag{stroke-width:4.5}.ln.redundant{stroke:var(--muted);stroke-dasharray:9 6;stroke-width:1.5}.ln.guess{stroke-dasharray:2 4;stroke-linecap:round}
 .tag.t-stale{background:var(--bg);color:var(--muted);border:1px dashed var(--border)}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
 #mapctl{position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:6;transition:right .25s}
 #mapctl button{width:34px;height:34px;border:0;border-radius:7px;background:none;color:var(--muted);font-size:17px;cursor:pointer;display:grid;place-items:center}
@@ -309,7 +309,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.7.2";
+const PAGE_VERSION = "0.8.0";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1114,6 +1114,18 @@ async function placeSend(n, place, msgEl) {
   }
   say("warnc", "Sent, but the SpiderMap service has not answered yet.");
 }
+async function linkSend(link) {                        // confirm / reject / remove a link (edit permission)
+  const id = rid(); toast("Saving…");
+  const r = await postApi({ action: "link", link, rid: id }); const j = await r.json().catch(() => ({}));
+  if (!j.ok) return toast(j.error || "Refused.");
+  for (let i = 0; i < 20; i++) {
+    await new Promise(res => setTimeout(res, 1500));
+    try { STATUS = await getData("status"); } catch (e) { continue; }
+    const res = STATUS.config && STATUS.config.result;
+    if (res && res.rid === id) return toast(res.ok ? res.message : res.errors.join(" "));
+  }
+  toast("Sent, but the SpiderMap service has not answered yet.");
+}
 function wirePlace(n) {
   const box = $("#pl-box"); if (!box) return;
   const key = n.place || portKey(n.port_ref);
@@ -1150,6 +1162,10 @@ function portVlanTxt(p, sw) {
   }
   if (p.lag) { const a = sw.ports.find(q => pidOf(q) === String(p.lag)); bits.push("in " + (a ? a.label : "LAG")); }
   if (p.media) bits.push(p.media);
+  if (p.duplex === "half") bits.push("half duplex ⚠");
+  if (p.stp && p.stp !== "forwarding" && p.stp !== "disabled") bits.push("STP " + p.stp);
+  if (p.poe && p.poe.on) bits.push("PoE" + (p.poe.class != null ? " class " + p.poe.class : ""));
+  else if (p.poe && p.poe.fault) bits.push("PoE fault ⚠");
   return bits.length ? `<div style="font-size:10.5px;color:var(--muted)">${esc(bits.join(" · "))}</div>` : "";
 }
 function vlanButton() {
@@ -1255,6 +1271,12 @@ function render() {
                                  : `<div class="cnt" style="left:${x + 14}px;top:${bus - 8}px">${c.length}</div>`;
   }
   roots.forEach(r => { place(r, left, 0); left += W(r) * span; });
+  (curView() === "physical" ? DATA.extra_links || [] : []).forEach(x => {   // real cables that carry no traffic
+    if (!pos[x.a] || !pos[x.b]) return;
+    const c = id => [pos[id].x, H ? pos[id].y : pos[id].y + 24], [x1, y1] = c(x.a), [x2, y2] = c(x.b);
+    svg += `<line class="ln redundant" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+    extra += `<div class="pt" style="left:${(x1 + x2) / 2}px;top:${(y1 + y2) / 2 - 10}px" title="${esc(x.label)}">STP blocked</div>`;
+  });
   if (FREE) {                                             // straight links between the icons' centres
     const ctr = id => [pos[id].x, H ? pos[id].y : pos[id].y + 24];
     edges.forEach(e => {
@@ -1493,7 +1515,9 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "UniFi controller": "Ελεγκτής UniFi", "Controller address": "Διεύθυνση ελεγκτή", "Site": "Site",
+  "Max-repetitions": "Max-repetitions", "Link to its parent": "Σύνδεση με τον γονέα", "Confirm this link": "Επιβεβαίωση σύνδεσης",
+  "Remove confirmation": "Αφαίρεση επιβεβαίωσης", "Suggested links": "Προτεινόμενες συνδέσεις", "STP blocked": "Μπλοκαρισμένο από STP",
+  "Confirm": "Επιβεβαίωση", "Reject": "Απόρριψη", "IPv6": "IPv6", "TTL": "TTL", "Power": "Τροφοδοσία", "UniFi controller": "Ελεγκτής UniFi", "Controller address": "Διεύθυνση ελεγκτή", "Site": "Site",
   "User": "Χρήστης", "Password": "Κωδικός", "Certificate fingerprint": "Αποτύπωμα πιστοποιητικού", "set · type to change": "ορίστηκε · πληκτρολογήστε για αλλαγή",
   "Wi-Fi": "Wi-Fi", "Wireless clients": "Ασύρματες συσκευές", "Coming in 0.7.3": "Έρχεται στην 0.7.3", "Categories switched off": "Απενεργοποιημένες κατηγορίες",
 };
@@ -1586,6 +1610,15 @@ function panel(id, quiet) {
   if (lv && status(n) !== "off") h += `<div class="traffic"><span><i class="ti ti-arrow-down" style="color:var(--accent)"></i> ${mbps(down)}</span><span><i class="ti ti-arrow-up" style="color:var(--ok)"></i> ${mbps(up)}</span><span style="color:var(--muted)">${phh && phh.live ? '<span class="livedot"></span>' : ""}${esc(n.port || "")}</span></div>`
     + (() => { const q = rtFresh() && RT.quality && n.port_ref && RT.quality[n.port_ref[0]] ? RT.quality[n.port_ref[0]][String(n.port_ref[1])] : null;
                return q && q.ignored ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px" title="Readings that could not be correct (device restart, counter reset or more than the link speed) are not used.">${q.ignored} reading${q.ignored > 1 ? "s" : ""} ignored · last: ${esc(q.last)}</div>` : ""; })() + (ph ? spark(ph, n.flip ? 1 : 2, n.flip ? 2 : 1) + `<div class="lgd"><span><i style="background:var(--accent)"></i>download</span><span><i style="background:var(--pur)"></i>upload</span><span style="margin-left:auto">${phh.live ? "last " + Math.round(ph.length * (RT.every || 5) / 60) + " min, live" : "last " + ph.length + " min"}</span></div>` : "");
+  if (n.kind === "switch" && curView() === "physical") {
+    if ((n.evidence || []).length) h += `<div class="sec">Link to its parent</div><div style="font-size:12.5px">Evidence: ${esc(n.evidence.join(", "))}</div>`;
+    if (n.link_ends && ME.can.edit) h += `<div class="btnrow" style="margin-top:6px" id="lk-box">${(n.evidence || []).includes("confirmed")
+      ? `<button class="btn" data-lk="remove"><i class="ti ti-x"></i>Remove confirmation</button>`
+      : `<button class="btn" data-lk="confirmed"><i class="ti ti-check"></i>Confirm this link</button>`}</div>`;
+    const mine = (RT.suggestions || []).filter(x => x.a[0] === n.name || x.b[0] === n.name);
+    if (mine.length) h += `<div class="sec">Suggested links</div>` + mine.map((x, i) => `<div class="pl-row" style="grid-template-columns:1fr auto"><span><b>${esc(x.a.join(" "))} ↔ ${esc(x.b.join(" "))}</b><br><span style="color:var(--muted)">${esc(x.why)}</span></span>`
+      + (ME.can.edit ? `<span class="btnrow"><button class="btn" data-sg="${i}" data-st="confirmed" title="Confirm"><i class="ti ti-check"></i></button><button class="btn" data-sg="${i}" data-st="rejected" title="Reject"><i class="ti ti-x"></i></button></span>` : "") + `</div>`).join("");
+  }
   const pbs = probOf(n);
   if (pbs) h += `<div class="sec">Zabbix problems</div>` + pbs.list.map(([nm, sev, since]) => `<div class="pl-row"><i style="background:${SEV[sev][1]}" title="${esc(SEV[sev][0])}"></i><span>${esc(nm)}</span><span style="color:var(--muted)">${since ? ago(since) : ""}</span></div>`).join("")
     + `<a class="btn" style="margin-top:8px" target="_blank" rel="noopener" href="zabbix.php?action=problem.view&filter_set=1&hostids%5B%5D=${encodeURIComponent(n.zbx)}"><i class="ti ti-external-link"></i>Open in Zabbix</a>`;
@@ -1625,6 +1658,11 @@ function panel(id, quiet) {
   P.innerHTML = h; P.classList.add("open"); document.body.classList.add("panel-open");
   $("#pclose").onclick = closePanel;
   wirePlace(n);
+  const lkb = $("#lk-box"); if (lkb) lkb.onclick = e => { const b = e.target.closest("[data-lk]"); if (b) linkSend({ a: n.link_ends[0], b: n.link_ends[1], state: b.dataset.lk }); };
+  $("#panel").querySelectorAll("[data-sg]").forEach(b => b.onclick = () => {
+    const mine = (RT.suggestions || []).filter(x => x.a[0] === n.name || x.b[0] === n.name), x = mine[+b.dataset.sg];
+    if (x) linkSend({ a: x.a, b: x.b, state: b.dataset.st });
+  });
   const ap = $("#approve");
   if (ap) ap.onclick = async () => {
     ap.disabled = true;
