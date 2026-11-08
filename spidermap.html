@@ -1443,7 +1443,8 @@ $("#zout").onclick = () => { zoom(.8); apply(true); };
 $("#zfit").onclick = () => fit(true);
 // vertical / horizontal view (remembered per browser)
 function orientIcon() { const b = $("#b-orient"); b.title = ORIENT === "h" ? "Vertical view" : "Horizontal view"; b.innerHTML = `<i class="ti ti-${ORIENT === "h" ? "arrow-autofit-down" : "arrow-autofit-right"}"></i>`; }
-$("#b-orient").onclick = () => { ORIENT = ORIENT === "h" ? "v" : "h"; store("nm-orient", ORIENT); orientIcon(); if (DATA) { render(); fit(true); } };
+// the direction is remembered per theme (see applySkin)
+$("#b-orient").onclick = () => { ORIENT = ORIENT === "h" ? "v" : "h"; store("nm-orient:" + curSkin(), ORIENT); orientIcon(); if (DATA) { render(); fit(true); } };
 orientIcon();
 function layoutIcon() {
   const f = curLayout() === "free", b = $("#b-layout");
@@ -1673,7 +1674,8 @@ function applySkin() {
   const k = curSkin(), pk = PACK[k] || {};
   if (k === "spidermap") delete document.documentElement.dataset.skin; else document.documentElement.dataset.skin = k;
   if (theme === "auto") { if (pk.dark) document.documentElement.setAttribute("data-theme", "dark"); else document.documentElement.removeAttribute("data-theme"); }
-  const want = store("nm-orient") || pk.orient || "v";        // your own choice of direction always wins
+  // the direction is remembered per theme: your choice in this theme, else the theme's own (Green Spider: left to right)
+  const want = store("nm-orient:" + k) || pk.orient || (k === "spidermap" && store("nm-orient")) || "v";
   if (want !== ORIENT) { ORIENT = want; orientIcon(); if (DATA) { render(); fit(false); } }
 }
 function skinMenu() {

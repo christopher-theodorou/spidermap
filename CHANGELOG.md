@@ -25,8 +25,8 @@ and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap 
 ### Added
 - **The spiders:** three style packs beside the default SpiderMap theme, each with more than colours.
   *Green Spider* - green, the map from left to right by default, nodes as device cards. *Blue Spider* - blue, nodes
-  as tiles. *Red Spider* - dark by default, red, nodes as hexagons, devices that are down pulse. A direction or
-  light / dark mode you chose yourself always wins.
+  as tiles. *Red Spider* - dark by default, red, nodes as hexagons, devices that are down pulse. The direction is
+  remembered for each theme (Green Spider starts left to right); a light / dark mode you chose yourself always wins.
 - A small easter egg in some of them.
 
 ## [0.9.2] - 2026-11-09
