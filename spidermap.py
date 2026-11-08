@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.8.3"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -2096,7 +2096,7 @@ def publish_settings():
     save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
 
 
-DISPLAY_KEYS = ("language", "layout", "default_view", "zabbix_triggers", "wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
+DISPLAY_KEYS = ("skin", "language", "layout", "default_view", "zabbix_triggers", "wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
 
 
 def in_scan_window(S, dt):

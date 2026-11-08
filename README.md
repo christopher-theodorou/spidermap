@@ -112,6 +112,10 @@ interface is found from the default route, or set in Settings), otherwise over *
 counting after a few GB, which SpiderMap recognises). When neither works, the card says "WAN unavailable" and why,
 instead of showing other numbers.
 
+**Overview and themes.** *Map | Overview* in the header switches to a page of cards: devices, internet, throughput,
+speed test, problems, switches, top talkers, activity and suggested links. The palette button chooses a theme
+(SpiderMap, Clean, Midnight, Ops) and light, dark or automatic; Settings > General sets the default for everyone.
+
 **Moving around the map.** The controls at the bottom right zoom, fit, turn the tree **vertical or horizontal**,
 **expand or collapse everything** and go **full screen**. The mouse wheel zooms (or scrolls, if you prefer), Shift +
 wheel and two-finger scrolling move the map, Ctrl + wheel or a pinch zooms; the arrow keys move, + / − / 0 zoom

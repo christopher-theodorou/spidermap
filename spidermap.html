@@ -136,6 +136,42 @@ body.free .tn{cursor:grab}body.free .tn:active{cursor:grabbing}
 .tn.prob .ic{box-shadow:0 0 0 3px var(--pc)}.tn.inferred .ic{border:2px dashed var(--muted)}
 .pl-row{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px}
 .pl-row i{width:10px;height:10px;border-radius:2px;display:block}
+/* ---------- themes: each one light and dark (dark rules are more specific, so they win in dark mode) ---------- */
+:root[data-skin=clean]{--bg:#f4f6f8;--card:#fff;--text:#16202c;--muted:#64707f;--faint:#a3acb8;--border:#e4e8ed;--accent:#2563eb;--accent-bg:#e8effd;--line:#9db6f2;--pur:#2563eb;--pur-bg:#e8effd;--sm-accent:#2563eb;--sm-accent-h:#1d4fd1;--sm-soft:#e8effd;--sm-text:#1d4fd1;--shadow:0 1px 3px rgba(16,24,40,.08),0 6px 16px rgba(16,24,40,.06)}
+@media (prefers-color-scheme:dark){:root[data-skin=clean]:not([data-theme=light]){--bg:#111418;--card:#1a1e24;--text:#e8ecf1;--muted:#97a1ae;--border:#2a3038;--accent:#5b8def;--accent-bg:#1b2a46;--line:#36558f;--pur:#5b8def;--pur-bg:#1b2a46;--sm-accent:#5b8def;--sm-accent-h:#79a1f2;--sm-soft:#1b2a46;--sm-text:#9dbaf5}}
+:root[data-skin=clean][data-theme=dark]{--bg:#111418;--card:#1a1e24;--text:#e8ecf1;--muted:#97a1ae;--border:#2a3038;--accent:#5b8def;--accent-bg:#1b2a46;--line:#36558f;--pur:#5b8def;--pur-bg:#1b2a46;--sm-accent:#5b8def;--sm-accent-h:#79a1f2;--sm-soft:#1b2a46;--sm-text:#9dbaf5}
+:root[data-skin=midnight]{--bg:#eef3f6;--card:#fff;--text:#0f2233;--muted:#5d7385;--border:#d9e3ea;--accent:#0d9488;--accent-bg:#ddf3f0;--line:#86cfc6;--pur:#0e7490;--pur-bg:#dcf1f7;--sm-accent:#0d9488;--sm-accent-h:#0b7f74;--sm-soft:#ddf3f0;--sm-text:#0b7f74}
+@media (prefers-color-scheme:dark){:root[data-skin=midnight]:not([data-theme=light]){--bg:#0b1622;--card:#112233;--text:#e3eef7;--muted:#8ba4b8;--faint:#5b7286;--border:#1d3448;--accent:#2dd4bf;--accent-bg:#0f3a3a;--line:#1f6f6a;--pur:#38bdf8;--pur-bg:#0c3049;--off:#3c5163;--sm-accent:#2dd4bf;--sm-accent-h:#5eead4;--sm-soft:#0f3a3a;--sm-text:#5eead4}}
+:root[data-skin=midnight][data-theme=dark]{--bg:#0b1622;--card:#112233;--text:#e3eef7;--muted:#8ba4b8;--faint:#5b7286;--border:#1d3448;--accent:#2dd4bf;--accent-bg:#0f3a3a;--line:#1f6f6a;--pur:#38bdf8;--pur-bg:#0c3049;--off:#3c5163;--sm-accent:#2dd4bf;--sm-accent-h:#5eead4;--sm-soft:#0f3a3a;--sm-text:#5eead4}
+:root[data-skin=ops]{--bg:#eceff1;--card:#fafbfb;--text:#0c1210;--muted:#4f5b56;--border:#cdd4d1;--accent:#15803d;--accent-bg:#dcf2e3;--line:#7fbf96;--pur:#0f766e;--pur-bg:#d9f1ee;--sm-accent:#15803d;--sm-accent-h:#116b33;--sm-soft:#dcf2e3;--sm-text:#116b33;--shadow:none}
+@media (prefers-color-scheme:dark){:root[data-skin=ops]:not([data-theme=light]){--bg:#070a09;--card:#0e1412;--text:#d7f5e3;--muted:#7fa190;--faint:#4b6357;--border:#1c2a24;--accent:#22c55e;--accent-bg:#0f2a1a;--line:#1d6b3c;--pur:#14b8a6;--pur-bg:#0b2a27;--off:#334740;--sm-accent:#22c55e;--sm-accent-h:#4ade80;--sm-soft:#0f2a1a;--sm-text:#4ade80;--shadow:none}}
+:root[data-skin=ops][data-theme=dark]{--bg:#070a09;--card:#0e1412;--text:#d7f5e3;--muted:#7fa190;--faint:#4b6357;--border:#1c2a24;--accent:#22c55e;--accent-bg:#0f2a1a;--line:#1d6b3c;--pur:#14b8a6;--pur-bg:#0b2a27;--off:#334740;--sm-accent:#22c55e;--sm-accent-h:#4ade80;--sm-soft:#0f2a1a;--sm-text:#4ade80;--shadow:none}
+:root[data-skin=ops] body{font-variant-numeric:tabular-nums}
+:root[data-skin=ops] #gw,:root[data-skin=ops] #panel,:root[data-skin=ops] .btn,:root[data-skin=ops] .tn .ic,:root[data-skin=ops] .sm,:root[data-skin=ops] .db-card,:root[data-skin=ops] #mapctl{border-radius:3px}
+:root[data-skin=ops] .db-card h3,:root[data-skin=ops] .db-big{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+:root[data-skin=clean] #gw,:root[data-skin=clean] #panel,:root[data-skin=clean] .db-card{border-radius:16px}
+#skin-pop{position:fixed;z-index:40;width:220px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(10,10,40,.18);padding:8px;font-size:13px}
+#skin-pop button{display:flex;align-items:center;gap:9px;width:100%;border:0;background:none;color:var(--text);padding:7px 8px;border-radius:7px;cursor:pointer;font:inherit;text-align:left}
+#skin-pop button:hover{background:var(--bg)}#skin-pop .sw{width:16px;height:16px;border-radius:50%;border:1px solid var(--border)}#skin-pop .on{font-weight:600}
+#skin-pop hr{border:0;border-top:1px solid var(--border);margin:6px 0}
+/* ---------- overview dashboard ---------- */
+#viewsw{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+#viewsw button{border:0;background:var(--card);color:var(--muted);padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+#viewsw button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);font-weight:600}
+#dash{display:none;position:absolute;inset:0;overflow:auto;padding:18px 20px 30px;background:var(--bg);z-index:5}
+body.dash #dash{display:block}body.dash #canvas,body.dash #gw,body.dash #mapctl{visibility:hidden}
+.db-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;max-width:1500px;margin:0 auto}
+.db-card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;min-width:0}
+.db-card h3{margin:0 0 10px;font-size:13px;font-weight:600;color:var(--muted);display:flex;align-items:center;gap:7px;text-transform:uppercase;letter-spacing:.04em}
+.db-card h3 i{font-size:16px;color:var(--accent)}
+.db-big{font-size:30px;font-weight:700;line-height:1.1}.db-sub{color:var(--muted);font-size:12.5px}
+.db-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.db-kpi{background:var(--bg);border-radius:8px;padding:8px 10px}.db-kpi b{display:block;font-size:19px}.db-kpi span{font-size:12px;color:var(--muted)}
+.db-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px}.db-row:last-child{border:0}
+.db-row .r{margin-left:auto;color:var(--muted);white-space:nowrap}.db-row a{color:var(--text);cursor:pointer;text-decoration:none}.db-row a:hover{color:var(--accent)}
+.db-types{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.db-types span{display:inline-flex;align-items:center;gap:5px;background:var(--bg);border-radius:6px;padding:3px 8px;font-size:12.5px}
+.db-bar{height:6px;border-radius:3px;background:var(--bg);overflow:hidden;flex:1;max-width:120px}.db-bar div{height:100%;background:var(--accent)}
+.db-wide{grid-column:span 2}@media (max-width:700px){.db-wide{grid-column:auto}}
 /* dragging the map is not selecting text, and icons are not images to drag away */
 #canvas,#canvas *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none}
 #canvas{cursor:grab}#canvas.drag{cursor:grabbing}
@@ -276,6 +312,7 @@ table{width:100%;border-collapse:collapse}
   <span class="sp"></span>
   <span class="stat" id="s-time"></span>
   <input class="search" id="q" placeholder="Name, IP or MAC" aria-label="Search devices">
+  <span id="viewsw" role="group" aria-label="View"><button id="vw-map" aria-pressed="true">Map</button><button id="vw-dash" aria-pressed="false">Overview</button></span>
   <button class="btn tb" id="b-lang" title="Ελληνικά" aria-label="Language" style="font-weight:600;font-size:12px;min-width:34px">ΕΛ</button>
   <button class="btn tb" id="b-vlan" title="Show VLANs" aria-label="Show VLANs" aria-haspopup="true" style="display:none"><i class="ti ti-filter"></i><span class="bd" id="vlan-bd" style="display:none"></span></button>
   <button class="btn tb" id="b-act" title="Activity" aria-label="Activity"><i class="ti ti-bell"></i><span class="bd" id="act-bd" style="display:none"></span></button>
@@ -285,8 +322,9 @@ table{width:100%;border-collapse:collapse}
   <button class="btn" id="b-csv" title="Export device list (CSV)" aria-label="Export device list"><i class="ti ti-download"></i></button>
   <button class="btn" id="b-hlt" title="Collector health" aria-label="Collector health"><i class="ti ti-heart-rate-monitor"></i></button>
   <button class="btn" id="b-set" title="Settings" aria-label="Settings" style="display:none"><i class="ti ti-settings"></i></button>
-  <button class="btn" id="theme" aria-label="Theme"><i class="ti ti-sun-moon"></i></button>
+  <button class="btn" id="theme" aria-label="Theme" aria-haspopup="true"><i class="ti ti-palette"></i></button>
 </header>
+<div id="dash" role="region" aria-label="Overview"></div>
 <div id="canvas"><div id="stage"></div><div id="msg">Loading…</div>
   <div id="mapctl" role="toolbar" aria-label="Map controls">
     <button id="zin" title="Zoom in (+)" aria-label="Zoom in"><i class="ti ti-plus"></i></button>
@@ -312,7 +350,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.8.3";
+const PAGE_VERSION = "0.9.0";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -362,7 +400,7 @@ function showAuth(msg) {
 const themes = ["auto", "light", "dark"];
 function applyTheme(t) { if (t === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.setAttribute("data-theme", t); $("#theme").title = "Theme: " + t; }
 let theme = store("nm-theme") || "auto"; applyTheme(theme);
-$("#theme").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; store("nm-theme", theme); applyTheme(theme); };
+// the theme button opens the menu with the themes and light / dark / automatic (see skinMenu)
 
 /* ---------- data ---------- */
 async function load() {
@@ -952,7 +990,7 @@ function smWire() {
 }
 
 /* ---------- display settings for everyone (Settings > General / Measurements) ---------- */
-let DISP = { language: "en", layout: "tree", default_view: "physical", zabbix_triggers: true, wheel: "zoom", map_name: "", page_refresh_s: 60, show_offline: true, ip_labels: true, link_thickness: false, units: "bits", load_warn: 70, load_crit: 90 };
+let DISP = { skin: "spidermap", language: "en", layout: "tree", default_view: "physical", zabbix_triggers: true, wheel: "zoom", map_name: "", page_refresh_s: 60, show_offline: true, ip_labels: true, link_thickness: false, units: "bits", load_warn: 70, load_crit: 90 };
 let mapTimer = null, liveTimer = null;
 function setRefresh(sec) {
   clearInterval(mapTimer); clearInterval(liveTimer);
@@ -968,6 +1006,7 @@ function applyDisplay() {
   if (JSON.parse(before).default_view !== DISP.default_view && !VIEW && DATA) { viewIcon(); index(); }
   if (JSON.parse(before).layout !== DISP.layout && !LAYOUT) layoutIcon();
   if (JSON.parse(before).language !== DISP.language && !LANG) { langButton(); translate(document.body); }
+  if (JSON.parse(before).skin !== DISP.skin && !SKIN) applySkin();
   if (DATA) { render(); gwCard(); }
 }
 function portSpeed(ref) {
@@ -1299,6 +1338,7 @@ function render() {
   stage.style.width = w + "px"; stage.style.height = h + "px";
   if (hoverId) highlight(hoverId);
   foldIcon();
+  if (DASH) renderDash();
 }
 
 /* ---------- path highlight ---------- */
@@ -1521,7 +1561,10 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Traffic correlation": "Συσχέτιση κίνησης", "Link to its parent": "Σύνδεση με τον γονέα", "Confirm this link": "Επιβεβαίωση σύνδεσης",
+  "Max-repetitions": "Max-repetitions", "Overview": "Επισκόπηση", "Theme": "Θέμα", "Automatic": "Αυτόματο", "Light": "Φωτεινό", "Dark": "Σκούρο",
+  "Top talkers today": "Μεγαλύτερη κίνηση σήμερα", "Recent activity": "Πρόσφατη δραστηριότητα", "Nothing to report.": "Τίποτα προς αναφορά.",
+  "uptime this month": "διαθεσιμότητα αυτόν τον μήνα", "This month": "Αυτόν τον μήνα", "Latency": "Καθυστέρηση", "No speed test yet.": "Δεν έχει γίνει τεστ ταχύτητας.",
+  "offline": "εκτός σύνδεσης", "Down": "Εκτός", "Problems": "Προβλήματα", "Confirm or reject them in the switch's panel.": "Επιβεβαιώστε ή απορρίψτε τις στο πάνελ του switch.", "Traffic correlation": "Συσχέτιση κίνησης", "Link to its parent": "Σύνδεση με τον γονέα", "Confirm this link": "Επιβεβαίωση σύνδεσης",
   "Remove confirmation": "Αφαίρεση επιβεβαίωσης", "Suggested links": "Προτεινόμενες συνδέσεις", "STP blocked": "Μπλοκαρισμένο από STP",
   "Confirm": "Επιβεβαίωση", "Reject": "Απόρριψη", "IPv6": "IPv6", "TTL": "TTL", "Power": "Τροφοδοσία", "UniFi controller": "Ελεγκτής UniFi", "Controller address": "Διεύθυνση ελεγκτή", "Site": "Site",
   "User": "Χρήστης", "Password": "Κωδικός", "Certificate fingerprint": "Αποτύπωμα πιστοποιητικού", "set · type to change": "ορίστηκε · πληκτρολογήστε για αλλαγή",
@@ -1561,6 +1604,102 @@ let trPending = false;
 new MutationObserver(() => { if (curLang() !== "el" || trPending) return; trPending = true; requestAnimationFrame(() => { trPending = false; translate(document.body); }); })
   .observe(document.body, { childList: true, subtree: true, characterData: true });
 function langButton() { const b = $("#b-lang"); if (b) { b.textContent = curLang() === "el" ? "EN" : "ΕΛ"; b.title = curLang() === "el" ? "English" : "Ελληνικά"; } document.documentElement.lang = curLang(); }
+
+/* ---------- themes (Settings > General > Theme; each person can choose their own) ---------- */
+const SKINS = [["spidermap", "SpiderMap", "#4f5bd5"], ["clean", "Clean", "#2563eb"], ["midnight", "Midnight", "#0d9488"], ["ops", "Ops", "#22c55e"]];
+let SKIN = store("nm-skin");
+const curSkin = () => SKIN || DISP.skin || "spidermap";
+function applySkin() { const k = curSkin(); if (k === "spidermap") delete document.documentElement.dataset.skin; else document.documentElement.dataset.skin = k; }
+function skinMenu() {
+  const old = $("#skin-pop"); if (old) { old.remove(); return; }
+  const mode = theme;
+  const pop = document.createElement("div"); pop.id = "skin-pop"; pop.setAttribute("role", "menu");
+  pop.innerHTML = SKINS.map(([k, t, c]) => `<button data-skin="${k}" class="${curSkin() === k ? "on" : ""}" role="menuitemradio" aria-checked="${curSkin() === k}"><span class="sw" style="background:${c}"></span>${t}</button>`).join("")
+    + `<hr>` + [["auto", "Automatic", "device-desktop"], ["light", "Light", "sun"], ["dark", "Dark", "moon"]].map(([k, t, ic]) =>
+      `<button data-mode="${k}" class="${mode === k ? "on" : ""}" role="menuitemradio" aria-checked="${mode === k}"><i class="ti ti-${ic}"></i>${t}</button>`).join("");
+  document.body.appendChild(pop);
+  const r = $("#theme").getBoundingClientRect(); pop.style.top = (r.bottom + 6) + "px"; pop.style.left = Math.max(8, Math.min(r.left, innerWidth - 230)) + "px";
+  pop.onclick = e => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.skin) { SKIN = b.dataset.skin; store("nm-skin", SKIN); applySkin(); }
+    if (b.dataset.mode) {
+      theme = b.dataset.mode; store("nm-theme", theme); applyTheme(theme);
+    }
+    pop.remove(); if (DATA) { render(); gwCard(); }
+  };
+  setTimeout(() => document.addEventListener("pointerdown", function off(e) { if (!pop.contains(e.target) && !e.target.closest("#theme")) { pop.remove(); document.removeEventListener("pointerdown", off); } }), 0);
+}
+$("#theme").onclick = skinMenu;
+applySkin();
+
+/* ---------- overview dashboard: everything the page already knows, in cards ---------- */
+let DASH = store("nm-view-dash") === true;
+function showDash(on) {
+  DASH = on; store("nm-view-dash", on); document.body.classList.toggle("dash", on);
+  $("#vw-map").setAttribute("aria-pressed", String(!on)); $("#vw-dash").setAttribute("aria-pressed", String(on));
+  if (on) renderDash(); else if (DATA) fit(false);
+}
+$("#vw-map").onclick = () => showDash(false);
+$("#vw-dash").onclick = () => showDash(true);
+function dbCard(icon, title, body, wide) { return `<section class="db-card${wide ? " db-wide" : ""}"><h3><i class="ti ti-${icon}"></i>${esc(title)}</h3>${body}</section>`; }
+function renderDash() {
+  const box = $("#dash"); if (!box || !DATA || !DASH) return;
+  const y = box.scrollTop, live = rtFresh(), devs = DATA.nodes.filter(n => n.kind === "device" && n.mac);
+  const on = devs.filter(n => status(n) === "up").length, isNew = devs.filter(n => (n.flags || []).some(f => f === "new" || f === "unknown")).length;
+  const down = DATA.nodes.filter(n => status(n) === "down" && n.kind !== "inet");
+  const types = {}; devs.forEach(n => { types[n.type || "unknown"] = (types[n.type || "unknown"] || 0) + 1; });
+  const link = n => `<a data-go="${esc(n.id)}">${esc(n.name)}</a>`;
+  let h = "";
+  // devices
+  h += dbCard("devices", "Devices", `<div class="db-big">${devs.length}</div><div class="db-kpis"><div class="db-kpi"><b style="color:var(--ok)">${on}</b><span>online</span></div><div class="db-kpi"><b>${devs.length - on}</b><span>offline</span></div><div class="db-kpi"><b style="color:var(--accent)">${isNew}</b><span>new / unknown</span></div></div>`
+    + `<div class="db-types">${Object.entries(types).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([t, c]) => `<span title="${esc(TYPE_LABEL[t] || t)}"><i class="ti ti-${esc(TYPES[t] || "help-circle")}"></i>${c}</span>`).join("")}</div>`);
+  // internet
+  const I = live ? RT.inet || {} : {}, T = live ? RT.targets || {} : {}, upm = I.uptime_month, outs = (I.outages_month || []).length;
+  h += dbCard("world", "Internet", `<div class="db-big" style="color:${I.down_since ? "var(--bad)" : "var(--ok)"}">${I.down_since ? "Down" : upm != null ? upm.toFixed(upm >= 99.995 ? 2 : 3) + " %" : "-"}</div>`
+    + `<div class="db-sub">${I.down_since ? "since " + ago(I.down_since) : "uptime this month" + (I.monitored != null && I.monitored < 99.5 ? ` · monitored ${I.monitored} %` : "")} · ${outs} outage${outs === 1 ? "" : "s"}</div>`
+    + Object.entries(T).map(([k, v]) => `<div class="db-row"><span>${esc(k)}</span><span class="r">${v.ms != null ? v.ms.toFixed(v.ms < 10 ? 1 : 0) + " ms" : "no answer"}</span></div>`).join(""));
+  // throughput
+  const W = live ? RT.wan : null, WS = live ? RT.wan_state : null, wrows = live && RT.hist ? RT.hist.wan || [] : [];
+  const mu = live && RT.usage && RT.usage.wan && RT.usage.wan.m;
+  const tp = (W ? `<div class="db-big" style="color:var(--accent)">↓ ${mbps(W.down)}</div><div class="db-sub">↑ ${mbps(W.up)} · ${W.src === "switch" ? "switch port" : "router"}</div>${wrows.length > 2 ? spark(wrows, 1, 2) : ""}`
+                : `<div class="db-big">-</div><div class="db-sub">${esc(WS && WS.error ? "WAN unavailable: " + WS.error : "no measurement")}</div>`)
+           + (mu ? `<div class="db-row"><span>This month</span><span class="r">↓ ${bytes(mu[0])} · ↑ ${bytes(mu[1])}</span></div>` : "");
+  h += dbCard("arrows-down-up", "Throughput", tp);
+  // speed test
+  const SP = live ? RT.speedtest : null, L = SP && SP.last;
+  h += dbCard("gauge", "Speed test", L ? `<div class="db-big">${(L.down / 1e6).toFixed(0)} <span style="font-size:16px;color:var(--muted)">/ ${(L.up / 1e6).toFixed(0)} Mbps</span></div><div class="db-sub">${esc(L.server || "")} · ${ago(L.at)}</div>`
+    + `<div class="db-row"><span>Latency</span><span class="r">${L.ping} ms${L.load_down ? ` · under load ${Math.round(Math.max(L.load_down, L.load_up || 0))} ms` : ""}</span></div>` : `<div class="db-sub">No speed test yet.</div>`);
+  // problems: Zabbix and the network's own warnings
+  const P = Object.entries(LIVE.problems || {}).flatMap(([hid, x]) => x.list.map(l => ({ hid, name: l[0], sev: l[1], since: l[2] }))).sort((a, b) => b.sev - a.sev);
+  const warns = [...(DATA.scan_warnings || []), ...(LIVE.warnings || [])];
+  const byZ = hid => DATA.nodes.find(n => n.zbx === hid);
+  h += dbCard("alert-triangle", "Problems", (P.length || warns.length || down.length ? "" : `<div class="db-sub">Nothing to report.</div>`)
+    + P.slice(0, 6).map(p => `<div class="db-row"><i style="width:10px;height:10px;border-radius:2px;flex:none;background:${SEV[p.sev][1]}"></i><span>${byZ(p.hid) ? link(byZ(p.hid)) + ": " : ""}${esc(p.name)}</span><span class="r">${p.since ? ago(p.since) : ""}</span></div>`).join("")
+    + down.slice(0, 4).map(n => `<div class="db-row"><i class="ti ti-plug-connected-x" style="color:var(--bad)"></i><span>${link(n)} is down</span></div>`).join("")
+    + warns.slice(0, 5).map(w => `<div class="db-row"><i class="ti ti-alert-circle" style="color:var(--warn)"></i><span>${esc(w)}</span></div>`).join(""), true);
+  // switches
+  const sws = DATA.nodes.filter(n => n.kind === "switch");
+  h += dbCard("server-2", "Switches", sws.map(n => {
+    const sw = DATA.switches[n.sw] || { ports: [] }, phys = sw.ports.filter(p => p.kind !== "lag"), up = phys.filter(p => p.status === "up").length;
+    const st = (LIVE.stats || {})["s-" + n.sw] || {};
+    return `<div class="db-row">${link(n)}<div class="db-bar" title="${up} of ${phys.length} ports up"><div style="width:${phys.length ? up / phys.length * 100 : 0}%"></div></div><span class="r">${up}/${phys.length}${st.cpu ? " · CPU " + esc(st.cpu.text) : ""}</span></div>`;
+  }).join("") || `<div class="db-sub">No switches.</div>`);
+  // top talkers today
+  const U = live && RT.usage ? RT.usage.d || {} : {}, rows = [];
+  Object.entries(U).forEach(([sid, pp]) => Object.entries(pp).forEach(([pid, v]) => {
+    const n = DATA.nodes.find(x => x.port_ref && x.port_ref[0] === sid && String(x.port_ref[1]) === pid && x.kind !== "switch");
+    if (n) rows.push([n, v[0] + v[1]]);
+  }));
+  rows.sort((a, b) => b[1] - a[1]);
+  h += dbCard("chart-bar", "Top talkers today", rows.slice(0, 6).map(([n, b]) => `<div class="db-row">${link(n)}<span class="r">${bytes(b)}</span></div>`).join("") || `<div class="db-sub">No traffic counted yet today.</div>`);
+  // recent activity
+  h += dbCard("activity", "Recent activity", (EVENTS || []).slice(-7).reverse().map(e => `<div class="db-row"><span>${esc(e.text)}</span><span class="r">${ago(e.t)}</span></div>`).join("") || `<div class="db-sub">Nothing yet.</div>`);
+  // suggested links
+  const S = live ? RT.suggestions || [] : [];
+  if (S.length) h += dbCard("link", "Suggested links", S.slice(0, 5).map(x => `<div class="db-row"><span>${esc(x.a.join(" "))} ↔ ${esc(x.b.join(" "))}</span><span class="r">${x.n}×</span></div>`).join("") + `<div class="db-sub" style="margin-top:6px">Confirm or reject them in the switch's panel.</div>`);
+  box.innerHTML = `<div class="db-grid">${h}</div>`; box.scrollTop = y;
+  box.onclick = e => { const a = e.target.closest("[data-go]"); if (a) { showDash(false); select(a.dataset.go); centerOn(a.dataset.go); } };
+}
 
 /* ---------- clicks ---------- */
 let nodeDrag = null, justDragged = false;
@@ -1882,6 +2021,7 @@ $("#b-hlt").onclick = () => special("health");
 $("#b-vlan").onclick = () => { if (DATA) vlanMenu(); };
 $("#b-lang").onclick = () => { LANG = curLang() === "el" ? "en" : "el"; store("nm-lang", LANG); location.reload(); };   // back to English: a fresh page
 langButton(); translate(document.body);
+if (DASH) showDash(true);
 smWire();
 $("#b-set").onclick = () => smOpen();
 $("#s-time").onclick = () => special("health");

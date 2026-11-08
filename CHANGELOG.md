@@ -4,6 +4,17 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.0] - 2026-11-08
+
+### Added
+- **Overview:** the *Map | Overview* switch in the header shows the network in cards - devices (online, offline,
+  new, by type), the internet (uptime this month, outages, latency), throughput and this month's usage, the last
+  speed test, problems (Zabbix problems, devices down, the network's own warnings), switches (ports up, CPU), top
+  talkers today, recent activity and suggested links. A name takes you to that device on the map. Built from what
+  the page already has: no new requests to the server.
+- **Themes:** SpiderMap, *Clean*, *Midnight* and *Ops*, each in light and dark. Settings > General > *Theme* sets
+  the default; the palette button in the header lets everyone choose their own theme and light / dark / automatic.
+
 ## [0.8.3] - 2026-11-08
 
 ### Changed
@@ -437,6 +448,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.0
 [0.8.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.3
 [0.8.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.2
 [0.8.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.1
