@@ -4,6 +4,15 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.3] - 2026-11-09
+
+### Added
+- **The spiders:** three style packs beside the default SpiderMap theme, each with more than colours.
+  *Green Spider* - green, the map from left to right by default, nodes as device cards. *Blue Spider* - blue, nodes
+  as tiles. *Red Spider* - dark by default, red, nodes as hexagons, devices that are down pulse. A direction or
+  light / dark mode you chose yourself always wins. Clean, Midnight and Ops stay as colour themes.
+- A small easter egg in some of them.
+
 ## [0.9.2] - 2026-11-09
 
 ### Fixed
@@ -465,6 +474,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.3
 [0.9.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.2
 [0.9.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.1
 [0.9.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.0

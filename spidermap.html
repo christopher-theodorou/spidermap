@@ -181,6 +181,35 @@ table.inv{width:100%;border-collapse:collapse;font-size:13px}table.inv th{positi
 table.inv td{padding:7px 12px;border-bottom:1px solid var(--border);white-space:nowrap}table.inv tr:last-child td{border:0}table.inv tr:hover td{background:var(--bg)}
 table.inv a{color:var(--accent);cursor:pointer}
 .db-wide{grid-column:span 2}@media (max-width:700px){.db-wide{grid-column:auto}}
+/* ---------- style packs: the spiders (colours, node shape, direction) ---------- */
+:root[data-skin=green]{--bg:#f3f6f4;--card:#fff;--text:#14211a;--muted:#5e7066;--border:#dde6e0;--accent:#2e9b4f;--accent-bg:#e2f4e8;--line:#8cc79f;--pur:#1f8a6d;--pur-bg:#dff2ec;--sm-accent:#2e9b4f;--sm-accent-h:#258442;--sm-soft:#e2f4e8;--sm-text:#21793d}
+@media (prefers-color-scheme:dark){:root[data-skin=green]:not([data-theme=light]){--bg:#0f1512;--card:#17201b;--text:#e2efe6;--muted:#93a89a;--border:#26332c;--accent:#4cc56f;--accent-bg:#173322;--line:#2f6b43;--pur:#3fbf9b;--pur-bg:#123029;--sm-accent:#4cc56f;--sm-accent-h:#6bd489;--sm-soft:#173322;--sm-text:#7fdc98}}
+:root[data-skin=green][data-theme=dark]{--bg:#0f1512;--card:#17201b;--text:#e2efe6;--muted:#93a89a;--border:#26332c;--accent:#4cc56f;--accent-bg:#173322;--line:#2f6b43;--pur:#3fbf9b;--pur-bg:#123029;--sm-accent:#4cc56f;--sm-accent-h:#6bd489;--sm-soft:#173322;--sm-text:#7fdc98}
+:root[data-skin=blue]{--bg:#f2f6fb;--card:#fff;--text:#122033;--muted:#5b6b80;--border:#dbe4ef;--accent:#1677d2;--accent-bg:#e1eefb;--line:#90bde9;--pur:#0f9bd7;--pur-bg:#dff2fb;--sm-accent:#1677d2;--sm-accent-h:#1266b4;--sm-soft:#e1eefb;--sm-text:#1266b4}
+@media (prefers-color-scheme:dark){:root[data-skin=blue]:not([data-theme=light]){--bg:#0d1420;--card:#152031;--text:#e3ecf7;--muted:#90a3ba;--border:#22324a;--accent:#4aa3f0;--accent-bg:#14304f;--line:#2b5c8f;--pur:#38bdf8;--pur-bg:#0c3049;--sm-accent:#4aa3f0;--sm-accent-h:#72b8f4;--sm-soft:#14304f;--sm-text:#8cc6f6}}
+:root[data-skin=blue][data-theme=dark]{--bg:#0d1420;--card:#152031;--text:#e3ecf7;--muted:#90a3ba;--border:#22324a;--accent:#4aa3f0;--accent-bg:#14304f;--line:#2b5c8f;--pur:#38bdf8;--pur-bg:#0c3049;--sm-accent:#4aa3f0;--sm-accent-h:#72b8f4;--sm-soft:#14304f;--sm-text:#8cc6f6}
+:root[data-skin=red]{--bg:#f7f3f3;--card:#fff;--text:#231515;--muted:#76605f;--border:#ecdcdc;--accent:#d7262e;--accent-bg:#fbe3e4;--line:#e79a9d;--pur:#b4232a;--pur-bg:#f9e0e1;--sm-accent:#d7262e;--sm-accent-h:#b81f26;--sm-soft:#fbe3e4;--sm-text:#b81f26}
+@media (prefers-color-scheme:dark){:root[data-skin=red]:not([data-theme=light]){--bg:#0d0b0c;--card:#171213;--text:#f1e3e3;--muted:#a88f8f;--faint:#6b5858;--border:#2d2122;--accent:#f0444b;--accent-bg:#3a1517;--line:#7a2a2e;--pur:#ff6b6b;--pur-bg:#3a1517;--off:#4d3d3e;--sm-accent:#f0444b;--sm-accent-h:#f5696f;--sm-soft:#3a1517;--sm-text:#ff8a8f}}
+:root[data-skin=red][data-theme=dark]{--bg:#0d0b0c;--card:#171213;--text:#f1e3e3;--muted:#a88f8f;--faint:#6b5858;--border:#2d2122;--accent:#f0444b;--accent-bg:#3a1517;--line:#7a2a2e;--pur:#ff6b6b;--pur-bg:#3a1517;--off:#4d3d3e;--sm-accent:#f0444b;--sm-accent-h:#f5696f;--sm-soft:#3a1517;--sm-text:#ff8a8f}
+/* node shapes: green = device cards, blue = tiles, red = hexagons */
+:root[data-skin=green] .tn{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 4px 6px;box-shadow:var(--shadow)}
+:root[data-skin=green] .tn .ic{border-radius:6px;background:var(--accent-bg);border-color:transparent}
+:root[data-skin=green] .tn.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg)}
+:root[data-skin=blue] .tn .ic{border-radius:14px;width:52px;height:52px;background:var(--accent-bg);border:0;box-shadow:0 2px 6px rgba(22,119,210,.18)}
+:root[data-skin=blue] .tn .ic i{font-size:26px;color:var(--accent)}
+:root[data-skin=red] .tn .ic{border:0;border-radius:0;background:var(--accent-bg);clip-path:polygon(25% 4%,75% 4%,100% 50%,75% 96%,25% 96%,0 50%)}
+:root[data-skin=red] .tn .ic i{color:var(--accent)}
+:root[data-skin=red] .tn.down .ic{background:var(--accent);animation:redpulse 2s ease-in-out infinite}
+:root[data-skin=red] .tn.down .ic i{color:#fff}
+@keyframes redpulse{50%{filter:brightness(1.35)}}
+/* the spiderweb (an easter egg): green and red spiders, and the default theme on Halloween */
+#web{position:absolute;left:0;bottom:0;width:170px;height:170px;pointer-events:none;z-index:1;opacity:.55;display:none}
+:root[data-skin=green] #web,:root[data-skin=red] #web,:root.halloween #web{display:block}
+#web .silk{stroke:var(--muted);stroke-width:1;fill:none;opacity:.55}
+#web .spider{pointer-events:auto;cursor:pointer}
+
+#web .thread{stroke:var(--muted);stroke-width:1}
+
 /* dragging the map is not selecting text, and icons are not images to drag away */
 #canvas,#canvas *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none}
 #canvas{cursor:grab}#canvas.drag{cursor:grabbing}
@@ -362,7 +391,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.2";
+const PAGE_VERSION = "0.9.3";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1574,7 +1603,7 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Inventory": "Απογραφή", "Network devices": "Συσκευές δικτύου", "All devices": "Όλες οι συσκευές",
+  "Max-repetitions": "Max-repetitions", "Green Spider": "Πράσινη Αράχνη", "Blue Spider": "Μπλε Αράχνη", "Red Spider": "Κόκκινη Αράχνη", "Inventory": "Απογραφή", "Network devices": "Συσκευές δικτύου", "All devices": "Όλες οι συσκευές",
   "Search": "Αναζήτηση", "Serial": "Σειριακός", "Firmware": "Firmware", "Hardware": "Hardware", "Uptime": "Χρόνος λειτουργίας",
   "Source": "Πηγή", "First seen": "Πρώτη εμφάνιση", "Last seen": "Τελευταία εμφάνιση", "Search the inventory": "Αναζήτηση στην απογραφή", "Overview": "Επισκόπηση", "Theme": "Θέμα", "Automatic": "Αυτόματο", "Light": "Φωτεινό", "Dark": "Σκούρο",
   "Top talkers today": "Μεγαλύτερη κίνηση σήμερα", "Recent activity": "Πρόσφατη δραστηριότητα", "Nothing to report.": "Τίποτα προς αναφορά.",
@@ -1621,10 +1650,19 @@ new MutationObserver(() => { if (curLang() !== "el" || trPending) return; trPend
 function langButton() { const b = $("#b-lang"); if (b) { b.textContent = curLang() === "el" ? "EN" : "ΕΛ"; b.title = curLang() === "el" ? "English" : "Ελληνικά"; } document.documentElement.lang = curLang(); }
 
 /* ---------- themes (Settings > General > Theme; each person can choose their own) ---------- */
-const SKINS = [["spidermap", "SpiderMap", "#4f5bd5"], ["clean", "Clean", "#2563eb"], ["midnight", "Midnight", "#0d9488"], ["ops", "Ops", "#22c55e"]];
+const SKINS = [["spidermap", "SpiderMap", "#4f5bd5"], ["green", "Green Spider", "#2e9b4f"], ["blue", "Blue Spider", "#1677d2"], ["red", "Red Spider", "#d7262e"],
+               ["clean", "Clean", "#2563eb"], ["midnight", "Midnight", "#0d9488"], ["ops", "Ops", "#22c55e"]];
+// what a style pack sets besides colours: its own direction (unless you chose one), dark by default (unless you chose light)
+const PACK = { green: { orient: "h" }, red: { dark: true } };
 let SKIN = store("nm-skin");
 const curSkin = () => SKIN || DISP.skin || "spidermap";
-function applySkin() { const k = curSkin(); if (k === "spidermap") delete document.documentElement.dataset.skin; else document.documentElement.dataset.skin = k; }
+function applySkin() {
+  const k = curSkin(), pk = PACK[k] || {};
+  if (k === "spidermap") delete document.documentElement.dataset.skin; else document.documentElement.dataset.skin = k;
+  if (theme === "auto") { if (pk.dark) document.documentElement.setAttribute("data-theme", "dark"); else document.documentElement.removeAttribute("data-theme"); }
+  const want = store("nm-orient") || pk.orient || "v";        // your own choice of direction always wins
+  if (want !== ORIENT) { ORIENT = want; orientIcon(); if (DATA) { render(); fit(false); } }
+}
 function skinMenu() {
   const old = $("#skin-pop"); if (old) { old.remove(); return; }
   const mode = theme;
@@ -1638,7 +1676,7 @@ function skinMenu() {
     const b = e.target.closest("button"); if (!b) return;
     if (b.dataset.skin) { SKIN = b.dataset.skin; store("nm-skin", SKIN); applySkin(); }
     if (b.dataset.mode) {
-      theme = b.dataset.mode; store("nm-theme", theme); applyTheme(theme);
+      theme = b.dataset.mode; store("nm-theme", theme); applyTheme(theme); applySkin();
     }
     pop.remove(); if (DATA) { render(); gwCard(); }
   };
@@ -1766,6 +1804,46 @@ function invCsv(head, list) {
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
   a.download = `spidermap-${INV.tab === "net" ? "network-devices" : "devices"}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
+/* the spiderweb: drawn here, our own, nothing borrowed. Radials from the corner, and a spiral of curved threads. */
+function webSvg() {
+  const cx = 0, cy = 170, R = 165, spokes = 7, rings = 6, pts = [];
+  for (let i = 0; i <= spokes; i++) { const a = -Math.PI / 2 + (Math.PI / 2) * i / spokes; pts.push([Math.cos(a), Math.sin(a)]); }
+  let p = pts.map(([x, y]) => `<line class="silk" x1="${cx}" y1="${cy}" x2="${(cx + x * R).toFixed(1)}" y2="${(cy + y * R).toFixed(1)}"/>`).join("");
+  for (let r = 1; r <= rings; r++) {
+    const rr = R * r / (rings + .4);
+    let d = "";
+    pts.forEach(([x, y], i) => {
+      const X = cx + x * rr, Y = cy + y * rr;
+      if (!i) { d += `M${X.toFixed(1)} ${Y.toFixed(1)}`; return; }
+      const [px, py] = pts[i - 1], mx = cx + (px + x) / 2 * rr * .9, my = cy + (py + y) / 2 * rr * .9;   // threads sag a little
+      d += ` Q${mx.toFixed(1)} ${my.toFixed(1)} ${X.toFixed(1)} ${Y.toFixed(1)}`;
+    });
+    p += `<path class="silk" d="${d}"/>`;
+  }
+  // a small spider on a thread: hover over it and it drops down, then climbs back
+  const spider = `<g class="spider" aria-hidden="true"><g transform="translate(70 74)" fill="var(--text)" stroke="var(--text)" stroke-width="1.2" stroke-linecap="round">
+      <ellipse cx="0" cy="0" rx="4.2" ry="5.2"/><circle cx="0" cy="-6.4" r="2.6"/>
+      <path fill="none" d="M-3 -2 L-9 -7 L-12 -3 M-3 0 L-10 -1 L-13 3 M-3 2 L-9 5 L-11 10 M-2.5 4 L-7 9 L-8 14 M3 -2 L9 -7 L12 -3 M3 0 L10 -1 L13 3 M3 2 L9 5 L11 10 M2.5 4 L7 9 L8 14"/></g></g>`;
+  return `<svg viewBox="0 0 170 170" width="170" height="170" aria-hidden="true">${p}<line class="thread" x1="70" y1="30" x2="70" y2="68"/>${spider}</svg>`;
+}
+(() => {
+  const w = document.createElement("div"); w.id = "web"; w.innerHTML = webSvg(); $("#canvas").appendChild(w);
+  // the spider and its thread move together, frame by frame: down, a pause, back up (still if motion is reduced)
+  const sp = w.querySelector(".spider"), th = w.querySelector(".thread"), still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let busy = false;
+  const ease = x => x < .5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+  const move = (from, to, ms) => new Promise(res => {
+    const t0 = performance.now();
+    const step = now => { const k = Math.min(1, (now - t0) / ms), y = from + (to - from) * ease(k);
+      sp.setAttribute("transform", `translate(0 ${y.toFixed(1)})`); th.setAttribute("y2", (68 + y).toFixed(1));
+      if (k < 1) requestAnimationFrame(step); else res(); };
+    requestAnimationFrame(step);
+  });
+  const drop = async () => { if (busy || still) return; busy = true; await move(0, 46, 1100); await new Promise(r => setTimeout(r, 1300)); await move(46, 0, 1600); busy = false; };
+  sp.addEventListener("pointerenter", drop); sp.addEventListener("click", drop);
+  const d = new Date(); if (d.getMonth() === 9 && d.getDate() === 31) document.documentElement.classList.add("halloween");   // 31 October
+})();
 
 /* ---------- clicks ---------- */
 let nodeDrag = null, justDragged = false;

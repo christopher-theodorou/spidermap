@@ -114,7 +114,7 @@ instead of showing other numbers.
 
 **Overview and themes.** *Map | Overview* in the header switches to a page of cards: devices, internet, throughput,
 speed test, problems, switches, top talkers, activity and suggested links. The palette button chooses a theme
-(SpiderMap, Clean, Midnight, Ops) and light, dark or automatic; Settings > General sets the default for everyone.
+(SpiderMap, Green Spider, Blue Spider, Red Spider, Clean, Midnight, Ops) and light, dark or automatic; Settings > General sets the default for everyone.
 
 **Moving around the map.** The controls at the bottom right zoom, fit, turn the tree **vertical or horizontal**,
 **expand or collapse everything** and go **full screen**. The mouse wheel zooms (or scrolls, if you prefer), Shift +
