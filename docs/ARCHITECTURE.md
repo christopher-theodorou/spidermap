@@ -64,6 +64,21 @@ itself logs to the journal (`journalctl -u spidermap`).
 `dot1qTpFdbPort`) and IEEE8023-LAG-MIB (`dot3adAggPortAttachedAggID`), in `scan_switch()` and `vlan_tables()`.
 Both are optional: a switch without them is scanned as before.
 
+**Files (0.8.3).** `spidermap.py` is the program: the scan (`full_scan`), the service (`rt_loop`, `Scheduler`,
+`live_refresh`), requests from the page, installation and the command line. Self-contained parts live in their own
+modules: `spidermap_settings.py` (the settings schema, validation, secrets, permissions), `spidermap_infer.py`
+(device types, link-state and traffic correlation, suggested links), `spidermap_wan.py` (router over SNMP / UPnP,
+UniFi, outages), `spidermap_speed.py` (speed tests) and `spidermap_gateway.py` (the `spidermap.php` template), next to
+`spidermap_ports.py` (SNMP port reading) and `spidermap_zabbix.py` (Zabbix API, SNMP access). The modules take a few
+helpers (`load_json`, `save_json`, `now`, `ping_stats`, ...) from `spidermap.py`, which imports them at its end, after
+those helpers exist; `sys.modules["spidermap"]` points at the running program, so this also works when it runs as a
+script. Import `spidermap` first. A test that replaces a function must replace it in the module where it lives
+(e.g. `spidermap_wan.upnp_discover`).
+
+**Tests** (`tests/`) never touch the system: `test_core.py` points every `/etc/spidermap` and `/var/lib/spidermap`
+path of every module at a temporary folder before anything runs. GitHub Actions (`.github/workflows/tests.yml`) runs
+the syntax checks and the three suites on every push and pull request, on Python 3.11 and 3.12.
+
 **Evidence model (0.8):** links between switches are collected in `sw_link` with their evidence in `link_ev`:
 LLDP/CDP first, then STP (the designated bridge and port of a non-designated port name the far end, via the other
 switch's bridge MAC and bridge-port table in `zp.BRIDGE`), LACP (partner system ID = the other switch's bridge MAC),

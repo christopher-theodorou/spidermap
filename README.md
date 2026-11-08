@@ -5,6 +5,8 @@
   </picture>
 </p>
 
+<p align="center"><a href="https://github.com/christopher-theodorou/spidermap/actions/workflows/tests.yml"><img alt="tests" src="https://github.com/christopher-theodorou/spidermap/actions/workflows/tests.yml/badge.svg"></a></p>
+
 <p align="center">
   <b>A live, beautiful map of your network, built automatically from your switches and Zabbix.</b><br>
   Every device, every port, every change.

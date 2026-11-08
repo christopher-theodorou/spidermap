@@ -18,7 +18,34 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("ZABBIX_TOKEN", "test")
+# Tests never touch the system: everything SpiderMap would write under /etc/spidermap or /var/lib/spidermap goes to a
+# temporary folder - set before SpiderMap loads (configuration and state) and right after (every other path).
+_ROOT = tempfile.mkdtemp(prefix="spidermap-tests-")
+os.environ["SPIDERMAP_CONF"], os.environ["SPIDERMAP_STATE"] = _ROOT + "/etc/spidermap", _ROOT + "/var/lib/spidermap/state"
+os.environ.setdefault("ZABBIX_TOKEN", "test")
 import spidermap as sm  # noqa: E402
+import spidermap_settings as smset  # noqa: E402
+import spidermap_speed as sms  # noqa: E402
+import spidermap_wan as smw  # noqa: E402
+import spidermap_infer as sminf  # noqa: E402
+import spidermap_speed  # noqa: E402,F401
+import spidermap_ports as _zp  # noqa: E402
+import spidermap_zabbix as _at  # noqa: E402
+
+
+def _isolate():
+    for mod in (sm, smset, sms, smw, sminf, _zp, _at):
+        for k, v in list(vars(mod).items()):
+            if isinstance(v, str) and v.startswith(("/etc/spidermap", "/var/lib/spidermap")):
+                setattr(mod, k, _ROOT + v)
+    for d in ("/etc/spidermap", "/var/lib/spidermap/state", "/var/lib/spidermap/www", "/var/lib/spidermap/inbox", "/var/lib/spidermap/snmp"):
+        os.makedirs(_ROOT + d, exist_ok=True)
+    left = [f"{mod.__name__}.{k}" for mod in (sm, smset, sms, smw, sminf, _zp, _at) for k, v in vars(mod).items()
+            if isinstance(v, str) and v.startswith(("/etc/spidermap", "/var/lib/spidermap"))]
+    assert not left, f"system paths left in the tests: {left}"
+
+
+_isolate()
 
 RESULTS = []
 
@@ -395,8 +422,8 @@ def _fake_router(loc_host="127.0.0.1", rate_down=12_500_000, rate_up=2_500_000, 
 
 
 def _upnp_with(sport):
-    real = sm.upnp_discover
-    sm.upnp_discover = lambda gw, timeout=1.5, port=None, mcast=None: real(gw, timeout, sport, "127.0.0.1")
+    real = smw.upnp_discover
+    smw.upnp_discover = lambda gw, timeout=1.5, port=None, mcast=None: real(gw, timeout, sport, "127.0.0.1")
     return real
 
 
@@ -406,51 +433,51 @@ def test_upnp_stuck():
     real = _upnp_with(sport)
     try:
         upnp = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
-        r = sm.read_upnp(upnp, data, {}, "auto", 0)
+        r = smw.read_upnp(upnp, data, {}, "auto", 0)
         check("UPnP: counters stuck at 2,147,483,647 are not taken as 'no traffic'",
               r is None and "2,147,483,647" in upnp["error"] and "switch port" in upnp["error"] and upnp["stuck_until"] == 600, upnp)
-        check("UPnP: a stuck router is asked again only after 10 minutes", sm.read_upnp(upnp, data, {}, "auto", 300) is None
+        check("UPnP: a stuck router is asked again only after 10 minutes", smw.read_upnp(upnp, data, {}, "auto", 300) is None
               and upnp["stuck_until"] == 600)
     finally:
-        sm.upnp_discover = real
+        smw.upnp_discover = real
     sport, _ = _fake_router(frozen=True)
     real = _upnp_with(sport)
     try:
         upnp = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
         for i in range(14):
-            sm.read_upnp(upnp, data, {}, "auto", i * 5, switch_rate=50e6)
+            smw.read_upnp(upnp, data, {}, "auto", i * 5, switch_rate=50e6)
         check("UPnP: counters that do not move while the switch sees traffic are not used",
               "do not change" in upnp["error"] and upnp.get("stuck_until"), upnp)
         quiet = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
         for i in range(14):
-            sm.read_upnp(quiet, data, {}, "auto", i * 5, switch_rate=0)
+            smw.read_upnp(quiet, data, {}, "auto", i * 5, switch_rate=0)
         check("UPnP: a quiet line (no traffic anywhere) is not mistaken for frozen counters", not quiet.get("stuck_until"), quiet)
     finally:
-        sm.upnp_discover = real
+        smw.upnp_discover = real
     sport, _ = _fake_router(x64=True)
     real = _upnp_with(sport)
     try:
         upnp, usage = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}, {}
-        sm.read_upnp(upnp, data, usage, "auto", 0)
+        smw.read_upnp(upnp, data, usage, "auto", 0)
         time.sleep(2)
-        r = sm.read_upnp(upnp, data, usage, "auto", 10)
+        r = smw.read_upnp(upnp, data, usage, "auto", 10)
         check("UPnP: a router's 64-bit counter is found in its action list and used",
               upnp["svc"]["rx"] == "X_GetTotalBytesReceived64" and r and abs(r["rx"] / 1e6 - 100) < 8, (upnp["svc"], r))
     finally:
-        sm.upnp_discover = real
+        smw.upnp_discover = real
 
 
 def test_upnp():
     sport, state = _fake_router()
-    real = sm.upnp_discover
-    sm.upnp_discover = lambda gw, timeout=1.5, port=None, mcast=None: real(gw, timeout, sport, "127.0.0.1")
+    real = smw.upnp_discover
+    smw.upnp_discover = lambda gw, timeout=1.5, port=None, mcast=None: real(gw, timeout, sport, "127.0.0.1")
     try:
-        check("UPnP: an answer from another address than the gateway is ignored", sm.upnp_discover("127.0.0.9") is None)
+        check("UPnP: an answer from another address than the gateway is ignored", smw.upnp_discover("127.0.0.9") is None)
         data = {"nodes": [{"kind": "router", "ip": "127.0.0.1"}]}
         upnp, usage = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}, {}
-        first = sm.read_upnp(upnp, data, usage, "auto", 0)
+        first = smw.read_upnp(upnp, data, usage, "auto", 0)
         time.sleep(2)
-        r = sm.read_upnp(upnp, data, usage, "auto", 10)
+        r = smw.read_upnp(upnp, data, usage, "auto", 10)
         check("UPnP: the router is found, the first reading is only a baseline", first is None and upnp["svc"]
               and upnp["svc"]["name"] == "Speedport Test" and upnp["link"] == 300, upnp)
         check("UPnP: throughput from the router's counters (100 / 20 Mbps)",
@@ -459,16 +486,16 @@ def test_upnp():
               and usage.get("wan_since"), usage)
         state["answer"] = False
         for i in range(3):
-            sm.read_upnp(upnp, data, usage, "auto", 20 + i)
+            smw.read_upnp(upnp, data, usage, "auto", 20 + i)
         check("UPnP: after 3 failed readings the router is looked for again", upnp["svc"] is None and upnp["next"] == 22 + 60
               and upnp["error"], upnp)
         state["answer"] = True
         data2 = {"nodes": [{"kind": "router", "ip": "127.0.0.9"}]}
         up2 = {"svc": None, "next": 0, "fails": 0, "prev": None, "link": 0, "error": ""}
-        sm.read_upnp(up2, data2, {}, "auto", 0)
+        smw.read_upnp(up2, data2, {}, "auto", 0)
         check("UPnP: a gateway that does not answer gets a clear reason", up2["svc"] is None and "turn UPnP on" in up2["error"], up2)
     finally:
-        sm.upnp_discover = real
+        smw.upnp_discover = real
 
 
 def test_outages():
@@ -605,12 +632,12 @@ def _fake_speed_servers(down_bps=40e6, up_bps=10e6, fast_token=True):
 
 
 def test_speed_providers():
-    real_ping, real = sm.ping_stats, (sm.CF_BASE, sm.FAST_HOME, sm.FAST_API, sm.SPEED_SECONDS)
-    sm.ping_stats = lambda ip, count=4: {"ms": 12.0, "loss": 0.0, "jit": 1.0}
-    sm.SPEED_SECONDS = 4
+    real_ping, real = sms.ping_stats, (sms.CF_BASE, sms.FAST_HOME, sms.FAST_API, sms.SPEED_SECONDS)
+    sms.ping_stats = lambda ip, count=4: {"ms": 12.0, "loss": 0.0, "jit": 1.0}
+    sms.SPEED_SECONDS = 4
     try:
         base, srv = _fake_speed_servers()
-        sm.CF_BASE = base
+        sms.CF_BASE = base
         r = sm._speedtest_cloudflare()
         check("Cloudflare: download and upload close to the line (40 / 10 Mbps)",
               30e6 < r["down"] < 46e6 and 7e6 < r["up"] < 12e6, (round(r["down"] / 1e6, 1), round(r["up"] / 1e6, 1)))
@@ -619,14 +646,14 @@ def test_speed_providers():
               and r["isp"] == "Test ISP" and r["engine"] == "Cloudflare", r)
         srv.shutdown()
         base, srv = _fake_speed_servers()
-        sm.FAST_HOME, sm.FAST_API = base, base + "/api"
+        sms.FAST_HOME, sms.FAST_API = base, base + "/api"
         r = sm._speedtest_fast()
         check("Fast.com: token read, the three targets used, download and upload close to the line",
               30e6 < r["down"] < 46e6 and 7e6 < r["up"] < 12e6 and r["server"] == "Fast.com, Athens, GR" and r["engine"] == "Fast.com",
               (round(r["down"] / 1e6, 1), round(r["up"] / 1e6, 1), r["server"]))
         srv.shutdown()
         base, srv = _fake_speed_servers(fast_token=False)
-        sm.FAST_HOME, sm.FAST_API = base, base + "/api"
+        sms.FAST_HOME, sms.FAST_API = base, base + "/api"
         try:
             sm._speedtest_fast()
             msg = ""
@@ -634,7 +661,7 @@ def test_speed_providers():
             msg = str(e)
         check("Fast.com: if Netflix changes its page, a clear message instead of a crash", "changed" in msg and "Ookla" in msg, msg)
         srv.shutdown()
-        sm.CF_BASE = "http://127.0.0.1:9"                 # nothing listens there
+        sms.CF_BASE = "http://127.0.0.1:9"                 # nothing listens there
         try:
             sm._speedtest_cloudflare()
             msg = ""
@@ -642,8 +669,8 @@ def test_speed_providers():
             msg = str(e)
         check("Cloudflare: an unreachable server gives a clear message", "does not answer" in msg, msg)
     finally:
-        sm.ping_stats = real_ping
-        sm.CF_BASE, sm.FAST_HOME, sm.FAST_API, sm.SPEED_SECONDS = real
+        sms.ping_stats = real_ping
+        sms.CF_BASE, sms.FAST_HOME, sms.FAST_API, sms.SPEED_SECONDS = real
     check("settings: the provider is one of Ookla, Cloudflare, Fast.com (nPerf is not offered)",
           not sm.validate_settings({"speedtest_provider": "cloudflare"})[1] and sm.validate_settings({"speedtest_provider": "nperf"})[1])
 
@@ -653,7 +680,7 @@ def test_measure_wan():
     data = {"nodes": [{"kind": "router", "ip": "192.168.1.1"}]}
     gw = {"name": "MikroTik", "_snmp": {"ip": "192.168.1.1"}, "_ips": ["192.168.1.1"], "_macros": {}}
     sw = {"rx": 5e6, "tx": 1e6}
-    real = (sm.read_router_snmp, sm.read_upnp)
+    real = (smw.read_router_snmp, smw.read_upnp)
     calls = []
 
     def fake(snmp_ok, upnp_ok):
@@ -666,7 +693,7 @@ def test_measure_wan():
             calls.append("upnp")
             upnp["error"] = "" if upnp_ok else "router not used: its byte counters stopped at 2,147,483,647"
             return {"rx": 80e6, "tx": 8e6} if upnp_ok else None
-        sm.read_router_snmp, sm.read_upnp = rs, ru
+        smw.read_router_snmp, smw.read_upnp = rs, ru
     try:
         r = sm.measure_wan(dict(S, wan_source="switch"), data, [gw], sw, {}, {}, {}, 0)
         check("WAN: 'switch port' chosen in Settings -> the switch port", r == (sw, "switch", ""), r)
@@ -684,7 +711,7 @@ def test_measure_wan():
         check("WAN: gateway not in Zabbix and UPnP stuck -> the reason says how to get exact figures",
               r[0] is None and "add the gateway to Zabbix with an SNMP interface" in r[2], r)
     finally:
-        sm.read_router_snmp, sm.read_upnp = real
+        smw.read_router_snmp, smw.read_upnp = real
     check("WAN: the 0.5.1 setting 'auto' now means the router",
           sm.effective_settings({"wan_source": "auto"})["wan_source"] == "router" and S["wan_source"] == "router")
 
@@ -828,13 +855,13 @@ def test_unifi():
     check("UniFi: a wrong password and a wrong site give clear reasons",
           "refused the login" in msgs[0] and "site 'office'" in msgs[1], msgs)
     tmp = _sandbox()
-    sm.SECRETS_FILE = os.path.join(tmp, "secrets.json")
+    smset.SECRETS_FILE = os.path.join(tmp, "secrets.json")
     sm.apply_settings_request({"by": "Admin", "settings": {"unifi_url": "https://10.0.0.5", "unifi_user": "ro", "unifi_password": "S3cret!"}})
     sm.publish_settings()
     pub = open(os.path.join(sm.DATA_DIR, "spidermap_settings.json")).read()
     check("UniFi: the password is kept apart - not in devices.json, not on the page, not in the audit log",
           "S3cret" not in open(sm.DEVICES_FILE).read() and "S3cret" not in pub and "S3cret" not in open(sm.AUDIT_FILE).read()
-          and json.load(open(sm.SECRETS_FILE))["unifi_password"] == "S3cret!" and json.loads(pub)["secrets_set"]["unifi_password"])
+          and json.load(open(smset.SECRETS_FILE))["unifi_password"] == "S3cret!" and json.loads(pub)["secrets_set"]["unifi_password"])
 
 
 def test_080():

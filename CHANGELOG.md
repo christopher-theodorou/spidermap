@@ -4,6 +4,19 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.8.3] - 2026-11-08
+
+### Changed
+- **The code is split into modules** (settings, inference, WAN, speed tests, the gateway template), moved verbatim:
+  the map from the same scan is identical before and after (compared line by line). `spidermap.py` went from 4,400
+  to 3,200 lines.
+- **Tests run automatically on GitHub** (Actions) on every push and pull request, on Python 3.11 and 3.12, with
+  syntax checks of the Python files, `install.sh`, the page's JavaScript and the generated `spidermap.php`.
+
+### Fixed
+- One test wrote to the real `/var/lib/spidermap` when run as root. The tests now point every system path at a
+  temporary folder before anything runs, and pass as a normal user.
+
 ## [0.8.2] - 2026-11-08
 
 ### Added
@@ -424,6 +437,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.8.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.3
 [0.8.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.2
 [0.8.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.1
 [0.8.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.0
