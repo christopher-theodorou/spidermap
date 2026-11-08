@@ -18,33 +18,47 @@
 
 ## What it does
 
-**🕸️ Maps your network by itself**
-Reads LLDP and the switches' MAC tables, and draws the real topology: Internet → gateway → switches → devices →
-Proxmox guests. Every link is labelled with its port, and every device has an icon picked from its type.
+### 🕸️ Maps your network by itself
+Reads LLDP, CDP, spanning tree, LACP and the switches' MAC and ARP tables, and draws the real topology: Internet →
+gateway → switches → devices → virtual machines. Every link says where it comes from (LLDP, MAC table, your
+confirmation, or a dotted *guess*), cables that spanning tree blocks are drawn as redundant links, link aggregations
+as one thick link, fibre in its own style. Switches nobody manages are found from the devices behind them, and
+links between switches without LLDP are **suggested** from ports that change state - or carry exactly the same
+traffic - together. You confirm or reject them.
 
-**⚡ Live**
-Port traffic every 5 seconds with animated links, ports coloured by speed (100 Mbps, 1 / 2.5 / 10 Gbps),
-CPU, memory and disk for switches, servers and VMs, with graphs.
+### ⚡ Live
+Port traffic every 5 seconds with animated links, link thickness and load colours, ports by speed and duplex, PoE,
+VLANs, CPU, memory and disk for switches, servers and VMs. Nodes that are Zabbix hosts show their Zabbix problems.
 
-**🌐 Internet health**
-Throughput, latency, packet loss and jitter to the gateway and the internet, uptime and outages this month,
-public IP changes, and a speed test on demand or every night.
+### 🌐 Internet health
+The router's real WAN throughput (SNMP or UPnP), latency, loss and jitter, uptime and outages this month (with time
+nobody was watching shown honestly), public IP changes, and speed tests with Ookla, Cloudflare or Fast.com.
 
-**🔔 Nothing touches the web unnoticed**
-An activity feed and Zabbix alerts for:
-- new and **unknown devices**, especially ones plugged into a free switch port
-- devices that **move** to another port, **IP changes** and **IP conflicts**
-- **possible cable problems**: port errors, flapping links, a port dropping from 1 Gbps to 100 Mbps
-- **unusual traffic**, like a camera suddenly uploading at 3 am
-- **internet outages**, packet loss, ports going up and down, important devices going offline
+### 🔔 Nothing touches the web unnoticed
+An activity feed and Zabbix alerts for new and **unknown devices** (especially on a free switch port), devices that
+**move**, IP changes and conflicts, **cable problems** (errors, flapping, a drop to a lower speed, duplex
+mismatches), **unusual traffic**, internet outages and important devices going offline.
 
-**👥 And more**
-Who's online (presence timeline), top talkers, device list export (CSV), edit names, icons and web UI addresses
-straight from the map, light and dark theme.
+### 🗂️ Views
+The map (tree or free layout, vertical or horizontal, physical or by subnet, with a VLAN filter), an **overview**
+of cards, and an **inventory** of models, serial numbers and firmware - with devices of one model running different
+firmware marked.
+
+### 🎨 Yours
+Device types with their own icons, names and web addresses edited on the map, map edits (an unmanaged switch here,
+a device connected through another), UniFi access points with their wireless clients, themes (SpiderMap and the
+green, blue and red spiders, each light and dark), English and Greek.
 
 <p align="center">
-  <img alt="Switch panel" src="assets/screenshot-switch.png" width="440">
-  <img alt="Activity feed in dark mode" src="assets/screenshot-dark.png" width="440">
+  <img alt="Overview" src="assets/screenshot-dashboard.png" width="440">
+  <img alt="Inventory" src="assets/screenshot-inventory.png" width="440">
+</p>
+<p align="center">
+  <img alt="Switch panel" src="assets/screenshot-switch.png" width="300">
+  <img alt="Activity in dark mode" src="assets/screenshot-dark.png" width="300">
+</p>
+<p align="center">
+  <img alt="The green, blue and red spider themes" src="assets/screenshot-spiders.png" width="900">
 </p>
 
 SpiderMap only **reads** from your network. It never changes your switch configuration.
@@ -93,15 +107,15 @@ Zabbix Super admins (by default) find a **Settings** button (the gear) on the ma
 
 | Tab | What you set |
 |---|---|
-| General | Map name, map refresh, offline devices, IP labels; backup (export, import, restore an earlier version) |
+| General | Map name, theme, language, default view, mouse wheel, map refresh, offline devices, IP labels, Zabbix problems; backup (export, import, restore an earlier version) and map reset |
 | Scans | Automatic scan, ICMP discovery, SNMP collection, intervals, ICMP payload, timeout, parallel checks, allowed networks, addresses never to scan; **Scan now / Cancel / Pause** with the scan's progress |
 | SNMP | GETBULK max-repetitions, retries, timeout (the credentials come from each switch's interface in Zabbix) |
-| Topology | Link sources: LLDP, MAC tables, ARP tables, VLANs |
-| Measurements | Link thickness by traffic, units, load warning / critical, status refresh, history, daily speed test |
+| Topology | Link sources: LLDP, CDP, MAC and ARP tables, VLANs, traffic correlation, hidden switches; tree or free layout |
+| Measurements | Throughput source (the router's WAN or a switch port), link thickness, units, load warning / critical, status refresh, history, speed test provider and daily test |
 | Security | Off-peak scan window, packet limit, address limit, who may open, edit, test and change settings |
 | Logging | Log level and retention, recent events |
 | Device types | 11 categories (firewalls, ONT/modems, UPS/PDU, cameras/NVR, IP phones/PBX, printers, NAS, hypervisors, industrial/IoT, powerline/media converters, out-of-band management), how each is recognised, on/off |
-| Wireless & WAN | UniFi controller (read-only user): access points and their wireless clients; more in 0.7.3 |
+| Wireless & WAN | UniFi controller (read-only user): access points and their wireless clients |
 
 Every change is checked in the browser and on the server, recorded in the audit log, and the previous version is
 kept, so a mistake is one click away from being undone.
@@ -114,10 +128,11 @@ instead of showing other numbers.
 
 **Overview and themes.** *Map | Overview* in the header switches to a page of cards: devices, internet, throughput,
 speed test, problems, switches, top talkers, activity and suggested links. The palette button chooses a theme
-(SpiderMap, Green Spider, Blue Spider, Red Spider, Clean, Midnight, Ops) and light, dark or automatic; Settings > General sets the default for everyone.
+(SpiderMap, Green Spider, Blue Spider, Red Spider) and light, dark or automatic; Settings > General sets the default for everyone.
 
-**Moving around the map.** The controls at the bottom right zoom, fit, turn the tree **vertical or horizontal**,
-**expand or collapse everything** and go **full screen**. The mouse wheel zooms (or scrolls, if you prefer), Shift +
+**Moving around the map.** The controls at the top right zoom, fit, switch between the physical and the **logical
+view by subnet**, between the tree and a **free layout** (drag nodes; they keep their place), turn the map
+**vertical or horizontal**, **expand or collapse everything** and go **full screen**. The mouse wheel zooms (or scrolls, if you prefer), Shift +
 wheel and two-finger scrolling move the map, Ctrl + wheel or a pinch zooms; the arrow keys move, + / − / 0 zoom
 and fit.
 
@@ -258,12 +273,17 @@ tail -n 5 /var/lib/spidermap/audit.log             # recent changes from the map
 
 | File | Purpose |
 |---|---|
-| `spidermap.py` | The service and its scheduler, scans, live refresh, settings, Zabbix integration |
+| `spidermap.py` | The service and its scheduler, scans, live refresh, requests from the page, installation |
+| `spidermap_settings.py` | The settings, their validation, secrets and permissions |
+| `spidermap_infer.py` | Device types, link-state and traffic correlation, suggested links |
+| `spidermap_wan.py` | The router's WAN (SNMP, UPnP), UniFi, outages and uptime |
+| `spidermap_speed.py` | Speed tests: Ookla, Cloudflare, Fast.com |
+| `spidermap_gateway.py` | The template of `spidermap.php` |
 | `spidermap.html` | The map page (installed in the protected folder, served by `spidermap.php`) |
 | `spidermap_ports.py` | Switch port scanner (also usable alone: port report and HTML table) |
 | `spidermap_zabbix.py` | Zabbix API and SNMP helpers, plus the classic Zabbix map and dashboard |
 | `install.sh` | Installer and updater |
-| `tests/` | Automated tests |
+| `tests/` | Automated tests (run on GitHub for every change: `.github/workflows/tests.yml`) |
 | `docs/` | Architecture and release documentation |
 | `assets/` | Logo, icons and screenshots |
 

@@ -24,8 +24,7 @@ SETTINGS_SCHEMA = [
        choices=[["en", "English"], ["el", "Ελληνικά"]],
        help="The language the map opens in. Everyone can switch for themselves with the EN / ΕΛ button in the header."),
     _S("skin", "choice", "spidermap", "General", "General settings", "Theme",
-       choices=[["spidermap", "SpiderMap"], ["green", "Green Spider"], ["blue", "Blue Spider"], ["red", "Red Spider"],
-                ["clean", "Clean"], ["midnight", "Midnight"], ["ops", "Ops"]],
+       choices=[["spidermap", "SpiderMap"], ["green", "Green Spider"], ["blue", "Blue Spider"], ["red", "Red Spider"]],
        help="Colours and style for everyone. Each person can choose their own from the palette button in the header."),
     _S("map_name", "str", "", "General", "General settings", "Map name", maxlen=60, help="Shown in the header and the browser tab."),
     _S("default_view", "choice", "physical", "General", "General settings", "Default view",
@@ -191,6 +190,8 @@ def effective_settings(settings):
         v = _get(settings, key, None)
         if key == "permissions.view" and v is None:
             v = settings.get("view_min_user_type")                     # before 0.4.0
+        if key == "skin" and v in ("clean", "midnight", "ops"):
+            v = "spidermap"                                            # 0.9.0-0.9.3 colour themes, removed
         if key == "wan_source" and v == "auto":
             v = "router"                                               # 0.5.1: "auto" meant the router first
         if key == "auto_scan" and v is None and "discovery_paused" in settings:

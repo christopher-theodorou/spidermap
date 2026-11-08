@@ -137,19 +137,6 @@ body.free .tn{cursor:grab}body.free .tn:active{cursor:grabbing}
 .pl-row{display:grid;grid-template-columns:10px 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12.5px}
 .pl-row i{width:10px;height:10px;border-radius:2px;display:block}
 /* ---------- themes: each one light and dark (dark rules are more specific, so they win in dark mode) ---------- */
-:root[data-skin=clean]{--bg:#f4f6f8;--card:#fff;--text:#16202c;--muted:#64707f;--faint:#a3acb8;--border:#e4e8ed;--accent:#2563eb;--accent-bg:#e8effd;--line:#9db6f2;--pur:#2563eb;--pur-bg:#e8effd;--sm-accent:#2563eb;--sm-accent-h:#1d4fd1;--sm-soft:#e8effd;--sm-text:#1d4fd1;--shadow:0 1px 3px rgba(16,24,40,.08),0 6px 16px rgba(16,24,40,.06)}
-@media (prefers-color-scheme:dark){:root[data-skin=clean]:not([data-theme=light]){--bg:#111418;--card:#1a1e24;--text:#e8ecf1;--muted:#97a1ae;--border:#2a3038;--accent:#5b8def;--accent-bg:#1b2a46;--line:#36558f;--pur:#5b8def;--pur-bg:#1b2a46;--sm-accent:#5b8def;--sm-accent-h:#79a1f2;--sm-soft:#1b2a46;--sm-text:#9dbaf5}}
-:root[data-skin=clean][data-theme=dark]{--bg:#111418;--card:#1a1e24;--text:#e8ecf1;--muted:#97a1ae;--border:#2a3038;--accent:#5b8def;--accent-bg:#1b2a46;--line:#36558f;--pur:#5b8def;--pur-bg:#1b2a46;--sm-accent:#5b8def;--sm-accent-h:#79a1f2;--sm-soft:#1b2a46;--sm-text:#9dbaf5}
-:root[data-skin=midnight]{--bg:#eef3f6;--card:#fff;--text:#0f2233;--muted:#5d7385;--border:#d9e3ea;--accent:#0d9488;--accent-bg:#ddf3f0;--line:#86cfc6;--pur:#0e7490;--pur-bg:#dcf1f7;--sm-accent:#0d9488;--sm-accent-h:#0b7f74;--sm-soft:#ddf3f0;--sm-text:#0b7f74}
-@media (prefers-color-scheme:dark){:root[data-skin=midnight]:not([data-theme=light]){--bg:#0b1622;--card:#112233;--text:#e3eef7;--muted:#8ba4b8;--faint:#5b7286;--border:#1d3448;--accent:#2dd4bf;--accent-bg:#0f3a3a;--line:#1f6f6a;--pur:#38bdf8;--pur-bg:#0c3049;--off:#3c5163;--sm-accent:#2dd4bf;--sm-accent-h:#5eead4;--sm-soft:#0f3a3a;--sm-text:#5eead4}}
-:root[data-skin=midnight][data-theme=dark]{--bg:#0b1622;--card:#112233;--text:#e3eef7;--muted:#8ba4b8;--faint:#5b7286;--border:#1d3448;--accent:#2dd4bf;--accent-bg:#0f3a3a;--line:#1f6f6a;--pur:#38bdf8;--pur-bg:#0c3049;--off:#3c5163;--sm-accent:#2dd4bf;--sm-accent-h:#5eead4;--sm-soft:#0f3a3a;--sm-text:#5eead4}
-:root[data-skin=ops]{--bg:#eceff1;--card:#fafbfb;--text:#0c1210;--muted:#4f5b56;--border:#cdd4d1;--accent:#15803d;--accent-bg:#dcf2e3;--line:#7fbf96;--pur:#0f766e;--pur-bg:#d9f1ee;--sm-accent:#15803d;--sm-accent-h:#116b33;--sm-soft:#dcf2e3;--sm-text:#116b33;--shadow:none}
-@media (prefers-color-scheme:dark){:root[data-skin=ops]:not([data-theme=light]){--bg:#070a09;--card:#0e1412;--text:#d7f5e3;--muted:#7fa190;--faint:#4b6357;--border:#1c2a24;--accent:#22c55e;--accent-bg:#0f2a1a;--line:#1d6b3c;--pur:#14b8a6;--pur-bg:#0b2a27;--off:#334740;--sm-accent:#22c55e;--sm-accent-h:#4ade80;--sm-soft:#0f2a1a;--sm-text:#4ade80;--shadow:none}}
-:root[data-skin=ops][data-theme=dark]{--bg:#070a09;--card:#0e1412;--text:#d7f5e3;--muted:#7fa190;--faint:#4b6357;--border:#1c2a24;--accent:#22c55e;--accent-bg:#0f2a1a;--line:#1d6b3c;--pur:#14b8a6;--pur-bg:#0b2a27;--off:#334740;--sm-accent:#22c55e;--sm-accent-h:#4ade80;--sm-soft:#0f2a1a;--sm-text:#4ade80;--shadow:none}
-:root[data-skin=ops] body{font-variant-numeric:tabular-nums}
-:root[data-skin=ops] #gw,:root[data-skin=ops] #panel,:root[data-skin=ops] .btn,:root[data-skin=ops] .tn .ic,:root[data-skin=ops] .sm,:root[data-skin=ops] .db-card,:root[data-skin=ops] #mapctl{border-radius:3px}
-:root[data-skin=ops] .db-card h3,:root[data-skin=ops] .db-big{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-:root[data-skin=clean] #gw,:root[data-skin=clean] #panel,:root[data-skin=clean] .db-card{border-radius:16px}
 #skin-pop{position:fixed;z-index:40;width:220px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(10,10,40,.18);padding:8px;font-size:13px}
 #skin-pop button{display:flex;align-items:center;gap:9px;width:100%;border:0;background:none;color:var(--text);padding:7px 8px;border-radius:7px;cursor:pointer;font:inherit;text-align:left}
 #skin-pop button:hover{background:var(--bg)}#skin-pop .sw{width:16px;height:16px;border-radius:50%;border:1px solid var(--border)}#skin-pop .on{font-weight:600}
@@ -158,7 +145,7 @@ body.free .tn{cursor:grab}body.free .tn:active{cursor:grabbing}
 #viewsw{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
 #viewsw button{border:0;background:var(--card);color:var(--muted);padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
 #viewsw button[aria-pressed=true]{background:var(--accent-bg);color:var(--accent);font-weight:600}
-#dash{display:none;position:absolute;inset:0;overflow:auto;padding:18px 20px 30px;background:var(--bg);z-index:5}
+#dash{display:none;position:absolute;top:var(--hh,51px);left:0;right:0;bottom:0;overflow:auto;padding:18px 20px 30px;background:var(--bg);z-index:5}
 body.dash #dash{display:block}body.dash #canvas,body.dash #gw,body.dash #mapctl{visibility:hidden}
 .db-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;max-width:1500px;margin:0 auto}
 .db-card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);padding:14px 16px;min-width:0}
@@ -171,7 +158,7 @@ body.dash #dash{display:block}body.dash #canvas,body.dash #gw,body.dash #mapctl{
 .db-row .r{margin-left:auto;color:var(--muted);white-space:nowrap}.db-row a{color:var(--text);cursor:pointer;text-decoration:none}.db-row a:hover{color:var(--accent)}
 .db-types{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.db-types span{display:inline-flex;align-items:center;gap:5px;background:var(--bg);border-radius:6px;padding:3px 8px;font-size:12.5px}
 .db-bar{height:6px;border-radius:3px;background:var(--bg);overflow:hidden;flex:1;max-width:120px}.db-bar div{height:100%;background:var(--accent)}
-#inv{display:none;position:absolute;inset:0;overflow:auto;padding:18px 20px 30px;background:var(--bg);z-index:5}
+#inv{display:none;position:absolute;top:var(--hh,51px);left:0;right:0;bottom:0;overflow:auto;padding:18px 20px 30px;background:var(--bg);z-index:5}
 body.inv #inv{display:block}body.inv #canvas,body.inv #gw,body.inv #mapctl{visibility:hidden}
 .inv-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
 .inv-top input{height:32px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);padding:0 10px;min-width:220px;font:inherit}
@@ -202,14 +189,31 @@ table.inv a{color:var(--accent);cursor:pointer}
 :root[data-skin=red] .tn.down .ic{background:var(--accent);animation:redpulse 2s ease-in-out infinite}
 :root[data-skin=red] .tn.down .ic i{color:#fff}
 @keyframes redpulse{50%{filter:brightness(1.35)}}
-/* the spiderweb (an easter egg): green and red spiders, and the default theme on Halloween */
+/* the spiderweb (an easter egg): the green, blue and red spiders, and the default theme on Halloween */
 #web{position:absolute;left:0;bottom:0;width:170px;height:170px;pointer-events:none;z-index:1;opacity:.55;display:none}
-:root[data-skin=green] #web,:root[data-skin=red] #web,:root.halloween #web{display:block}
+:root[data-skin=green] #web,:root[data-skin=blue] #web,:root[data-skin=red] #web,:root.halloween #web{display:block}
 #web .silk{stroke:var(--muted);stroke-width:1;fill:none;opacity:.55}
 #web .spider{pointer-events:auto;cursor:pointer}
 
 #web .thread{stroke:var(--muted);stroke-width:1}
 
+/* device drawings: green = drawn devices, blue = outlines, red = solid silhouettes */
+.tn .ic svg.di{width:32px;height:32px;overflow:visible}
+.tn .ic svg.di .b,.tn .ic svg.di .d{stroke-linecap:round;stroke-linejoin:round}
+:root[data-skin=green] svg.di .b{fill:#eef1ef;stroke:#56645c;stroke-width:1.6}
+:root[data-skin=green] svg.di .d{fill:none;stroke:#56645c;stroke-width:1.4}
+:root[data-skin=green] svg.di .a{fill:var(--accent)}
+@media (prefers-color-scheme:dark){:root[data-skin=green]:not([data-theme=light]) svg.di .b{fill:#26332c;stroke:#a7bcae}:root[data-skin=green]:not([data-theme=light]) svg.di .d{stroke:#a7bcae}}
+:root[data-skin=green][data-theme=dark] svg.di .b{fill:#26332c;stroke:#a7bcae}:root[data-skin=green][data-theme=dark] svg.di .d{stroke:#a7bcae}
+:root[data-skin=blue] svg.di .b{fill:none;stroke:var(--accent);stroke-width:2.6}
+:root[data-skin=blue] svg.di .d{fill:none;stroke:var(--accent);stroke-width:2}
+:root[data-skin=blue] svg.di .a{fill:var(--accent)}
+:root[data-skin=red] svg.di .b{fill:var(--accent);stroke:var(--accent);stroke-width:1}
+:root[data-skin=red] svg.di .d{fill:none;stroke:var(--card);stroke-width:1.6}
+:root[data-skin=red] svg.di .a{fill:var(--card)}
+:root[data-skin=red] .tn .ic svg.di{width:28px;height:28px}
+:root[data-skin=red] .tn.down .ic svg.di .b{fill:#fff;stroke:#fff}:root[data-skin=red] .tn.down .ic svg.di .d{stroke:var(--accent)}:root[data-skin=red] .tn.down .ic svg.di .a{fill:var(--accent)}
+.tn.off .ic svg.di{opacity:.55}
 /* dragging the map is not selecting text, and icons are not images to drag away */
 #canvas,#canvas *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none}
 #canvas{cursor:grab}#canvas.drag{cursor:grabbing}
@@ -391,7 +395,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.3";
+const PAGE_VERSION = "0.9.4";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -571,7 +575,9 @@ function tags(n) {
   });
   return out.join("");
 }
-function iconHtml(n) { return n.logo ? `<img src="${esc(n.logo)}" alt="" draggable="false">` : `<i class="ti ti-${esc(n.icon || "help-circle")}" aria-hidden="true"></i>`; }
+function iconHtml(n) {
+  if (!n.logo && typeof devIcon === "function" && ["green", "blue", "red"].includes(document.documentElement.dataset.skin)) { const d = devIcon(n); if (d) return d; }
+  return n.logo ? `<img src="${esc(n.logo)}" alt="" draggable="false">` : `<i class="ti ti-${esc(n.icon || "help-circle")}" aria-hidden="true"></i>`; }
 
 /* ---------- small graphs ---------- */
 function spark(rows, a, b, max) {
@@ -1371,7 +1377,7 @@ function render() {
     });
   }
   Object.keys(els).forEach(id => { if (!seen.has(id)) { const e = els[id]; delete els[id]; e.style.opacity = 0; setTimeout(() => e.remove(), 300); } });
-  stage.querySelectorAll("svg,.tg,.pt,.cnt").forEach(x => x.remove());
+  stage.querySelectorAll(":scope > svg,.tg,.pt,.cnt").forEach(x => x.remove());   // only the link layer, not the icons in the nodes
   let w = H ? (maxd + 1) * HD + 40 : left, h = H ? left + 40 : (maxd + 1) * ROW + 20;
   if (FREE) Object.values(pos).forEach(p => { w = Math.max(w, p.x + 120); h = Math.max(h, p.y + 140); });
   stage.insertAdjacentHTML("afterbegin", `<svg width="${w}" height="${h}" style="position:absolute;left:0;top:0;overflow:visible;pointer-events:none">${svg}</svg>`);
@@ -1650,12 +1656,11 @@ new MutationObserver(() => { if (curLang() !== "el" || trPending) return; trPend
 function langButton() { const b = $("#b-lang"); if (b) { b.textContent = curLang() === "el" ? "EN" : "ΕΛ"; b.title = curLang() === "el" ? "English" : "Ελληνικά"; } document.documentElement.lang = curLang(); }
 
 /* ---------- themes (Settings > General > Theme; each person can choose their own) ---------- */
-const SKINS = [["spidermap", "SpiderMap", "#4f5bd5"], ["green", "Green Spider", "#2e9b4f"], ["blue", "Blue Spider", "#1677d2"], ["red", "Red Spider", "#d7262e"],
-               ["clean", "Clean", "#2563eb"], ["midnight", "Midnight", "#0d9488"], ["ops", "Ops", "#22c55e"]];
+const SKINS = [["spidermap", "SpiderMap", "#4f5bd5"], ["green", "Green Spider", "#2e9b4f"], ["blue", "Blue Spider", "#1677d2"], ["red", "Red Spider", "#d7262e"]];
 // what a style pack sets besides colours: its own direction (unless you chose one), dark by default (unless you chose light)
 const PACK = { green: { orient: "h" }, red: { dark: true } };
 let SKIN = store("nm-skin");
-const curSkin = () => SKIN || DISP.skin || "spidermap";
+const curSkin = () => { const k = SKIN || DISP.skin; return SKINS.some(x => x[0] === k) ? k : "spidermap"; };   // a theme that no longer exists: the default
 function applySkin() {
   const k = curSkin(), pk = PACK[k] || {};
   if (k === "spidermap") delete document.documentElement.dataset.skin; else document.documentElement.dataset.skin = k;
@@ -1678,7 +1683,7 @@ function skinMenu() {
     if (b.dataset.mode) {
       theme = b.dataset.mode; store("nm-theme", theme); applyTheme(theme); applySkin();
     }
-    pop.remove(); if (DATA) { render(); gwCard(); }
+    pop.remove(); if (DATA) { Object.values(els).forEach(e => { e._h = ""; }); render(); gwCard(); }
   };
   setTimeout(() => document.addEventListener("pointerdown", function off(e) { if (!pop.contains(e.target) && !e.target.closest("#theme")) { pop.remove(); document.removeEventListener("pointerdown", off); } }), 0);
 }
@@ -1844,6 +1849,41 @@ function webSvg() {
   sp.addEventListener("pointerenter", drop); sp.addEventListener("click", drop);
   const d = new Date(); if (d.getMonth() === 9 && d.getDate() === 31) document.documentElement.classList.add("halloween");   // 31 October
 })();
+
+/* ---------- device drawings for the spider themes: our own, one geometry, three styles (see the CSS) ---------- */
+// .b = the case, .d = details (lines), .a = lights and accents. 48 x 48.
+const DEVICONS = {
+  switch: '<rect class="b" x="3" y="17" width="42" height="14" rx="2"/><g class="d"><rect x="8" y="21" width="4" height="4"/><rect x="14" y="21" width="4" height="4"/><rect x="20" y="21" width="4" height="4"/><rect x="26" y="21" width="4" height="4"/><rect x="32" y="21" width="4" height="4"/></g><circle class="a" cx="40" cy="24" r="1.8"/>',
+  router: '<rect class="b" x="5" y="24" width="38" height="13" rx="3"/><g class="d"><path d="M13 24 L10 10"/><path d="M35 24 L38 10"/></g><circle class="a" cx="13" cy="31" r="1.6"/><circle class="a" cx="19" cy="31" r="1.6"/><circle class="a" cx="25" cy="31" r="1.6"/>',
+  firewall: '<path class="b" d="M24 5 L40 11 V23 C40 33 33 40 24 43 C15 40 8 33 8 23 V11 Z"/><g class="d"><path d="M12 18 H36 M12 25 H36 M12 32 H33 M20 11 V18 M28 18 V25 M20 25 V32 M28 32 V38"/></g>',
+  ap: '<ellipse class="b" cx="24" cy="25" rx="18" ry="8"/><ellipse class="d" cx="24" cy="23.5" rx="11" ry="4"/><circle class="a" cx="24" cy="23.5" r="2"/>',
+  camera: '<path class="b" d="M8 26 A16 16 0 0 1 40 26 Z"/><rect class="b" x="6" y="26" width="36" height="5" rx="2"/><circle class="d" cx="24" cy="21" r="5"/><circle class="a" cx="24" cy="21" r="2"/>',
+  voip: '<rect class="b" x="8" y="18" width="32" height="22" rx="3"/><path class="b" d="M10 18 C10 10 38 10 38 18"/><g class="d"><rect x="13" y="22" width="10" height="6"/><path d="M28 23h7M28 27h7M28 31h7M14 33h3M20 33h3"/></g><circle class="a" cx="35" cy="35" r="1.6"/>',
+  server: '<rect class="b" x="12" y="4" width="24" height="40" rx="2"/><g class="d"><path d="M16 11h16M16 16h16M16 21h16"/></g><circle class="a" cx="18" cy="37" r="1.8"/><circle class="a" cx="24" cy="37" r="1.8"/>',
+  hypervisor: '<g class="b"><rect x="6" y="6" width="36" height="10" rx="2"/><rect x="6" y="19" width="36" height="10" rx="2"/><rect x="6" y="32" width="36" height="10" rx="2"/></g><g class="d"><path d="M11 11h14M11 24h14M11 37h14"/></g><circle class="a" cx="36" cy="11" r="1.6"/><circle class="a" cx="36" cy="24" r="1.6"/><circle class="a" cx="36" cy="37" r="1.6"/>',
+  nas: '<rect class="b" x="9" y="6" width="30" height="36" rx="3"/><g class="d"><rect x="14" y="11" width="9" height="22" rx="1.5"/><rect x="25" y="11" width="9" height="22" rx="1.5"/></g><circle class="a" cx="18.5" cy="37" r="1.6"/><circle class="a" cx="29.5" cy="37" r="1.6"/>',
+  printer: '<rect class="b" x="6" y="18" width="36" height="16" rx="3"/><g class="d"><path d="M14 18 V7 H34 V18"/><path d="M14 30 H34 V42 H14 Z"/><path d="M18 35h12M18 38h8"/></g><circle class="a" cx="36" cy="23" r="1.6"/>',
+  pc: '<rect class="b" x="5" y="7" width="38" height="25" rx="2"/><g class="d"><path d="M24 32 V39 M15 41 H33"/><rect x="9" y="11" width="30" height="17"/></g>',
+  laptop: '<rect class="b" x="9" y="9" width="30" height="21" rx="2"/><path class="b" d="M3 34 H45 L42 39 H6 Z"/><rect class="d" x="13" y="13" width="22" height="13"/>',
+  phone: '<rect class="b" x="14" y="4" width="20" height="40" rx="4"/><g class="d"><rect x="17" y="9" width="14" height="26"/><path d="M22 39h4"/></g>',
+  tv: '<rect class="b" x="3" y="8" width="42" height="26" rx="2"/><g class="d"><rect x="7" y="12" width="34" height="18"/><path d="M18 41 H30 M24 34 V41"/></g>',
+  iot: '<rect class="b" x="12" y="12" width="24" height="24" rx="3"/><g class="d"><path d="M17 12V6M24 12V6M31 12V6M17 36v6M24 36v6M31 36v6M12 17H6M12 24H6M12 31H6M36 17h6M36 24h6M36 31h6"/></g><circle class="a" cx="24" cy="24" r="4"/>',
+  ups: '<rect class="b" x="10" y="6" width="28" height="36" rx="3"/><path class="a" d="M26 12 L18 25 H24 L22 36 L30 22 H24 Z"/>',
+  ont: '<rect class="b" x="4" y="20" width="40" height="14" rx="3"/><g class="d"><path d="M34 20 L37 9"/></g><circle class="a" cx="11" cy="27" r="1.6"/><circle class="a" cx="17" cy="27" r="1.6"/><circle class="a" cx="23" cy="27" r="1.6"/><circle class="a" cx="29" cy="27" r="1.6"/>',
+  vm: '<path class="b" d="M24 5 L41 14 V34 L24 43 L7 34 V14 Z"/><g class="d"><path d="M7 14 L24 23 L41 14 M24 23 V43"/></g>',
+  inet: '<circle class="b" cx="24" cy="24" r="18"/><g class="d"><ellipse cx="24" cy="24" rx="8" ry="18"/><path d="M6 24h36M9 15h30M9 33h30"/></g>',
+  wifi: '<g class="d" style="stroke-width:3"><path d="M7 20 A24 24 0 0 1 41 20"/><path d="M13 27 A15 15 0 0 1 35 27"/><path d="M19 34 A7 7 0 0 1 29 34"/></g><circle class="a" cx="24" cy="39" r="2.6"/>',
+};
+// which drawing a node gets (by its type or kind)
+const DEVICON_OF = { router: "router", firewall: "firewall", switch: "switch", unifi: "ap", ap: "ap", camera: "camera", voip: "voip",
+  server: "server", hypervisor: "hypervisor", nas: "nas", printer: "printer", pc: "pc", laptop: "laptop", phone: "phone", tv: "tv",
+  iot: "iot", industrial: "iot", ups: "ups", ont: "ont", vm: "vm", lxc: "vm", guest: "vm", mediaconv: "ont" };
+function devIcon(n) {
+  const k = n.kind === "inet" ? "inet" : n.kind === "switch" ? "switch" : n.kind === "router" ? "router"
+    : n.kind === "group" ? (n.icon === "wifi" ? "wifi" : n.inferred || n.type === "switch" ? "switch" : DEVICON_OF[n.type]) : DEVICON_OF[n.type];
+  // the drawing itself, not a <use> reference: the theme's CSS cannot reach into a <use>
+  return k && DEVICONS[k] ? `<svg class="di" viewBox="0 0 48 48" aria-hidden="true">${DEVICONS[k]}</svg>` : null;
+}
 
 /* ---------- clicks ---------- */
 let nodeDrag = null, justDragged = false;

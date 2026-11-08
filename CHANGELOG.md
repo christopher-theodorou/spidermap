@@ -4,13 +4,29 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.4] - 2026-11-09
+
+### Fixed
+- In *Overview* and *Inventory* the page covered the header, so its buttons (Map, Inventory, Settings, ...) could
+  not be clicked until the page was reloaded. The two views now start below the header, like the map.
+
+### Added
+- **Device drawings for the spiders** (our own designs): one drawing per device type - router, firewall, switch,
+  access point, camera, IP phone, server, hypervisor, NAS, printer, PC, laptop, mobile, TV, IoT, UPS, modem / ONT,
+  VM, internet and Wi-Fi - shown as drawn devices in Green Spider, as outlines in Blue Spider and as solid shapes in
+  Red Spider. Other types, and the default theme, keep their icons.
+
+### Removed
+- The colour themes Clean, Midnight and Ops (0.9.0): the spiders replace them. Whoever had chosen one gets the
+  default SpiderMap theme.
+
 ## [0.9.3] - 2026-11-09
 
 ### Added
 - **The spiders:** three style packs beside the default SpiderMap theme, each with more than colours.
   *Green Spider* - green, the map from left to right by default, nodes as device cards. *Blue Spider* - blue, nodes
   as tiles. *Red Spider* - dark by default, red, nodes as hexagons, devices that are down pulse. A direction or
-  light / dark mode you chose yourself always wins. Clean, Midnight and Ops stay as colour themes.
+  light / dark mode you chose yourself always wins.
 - A small easter egg in some of them.
 
 ## [0.9.2] - 2026-11-09
@@ -474,6 +490,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.4]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.4
 [0.9.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.3
 [0.9.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.2
 [0.9.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.1
