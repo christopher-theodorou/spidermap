@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.0"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -1090,12 +1090,18 @@ def full_scan(api, community=None, quiet=False):
         n["details"] = [x for x in n["details"] if x[0] != "Link from"] + [["Link from", VIA_TEXT["manual"] + " (connected through "
                                                                             + nodes[tid]["name"] + ")"]]
 
+    unifi_inv = {}
     # UniFi: access points, and every wireless client under its AP (its own credentials - not from Zabbix)
     if S["unifi_url"] and S["unifi_user"]:
         try:
             uf = unifi_fetch(S["unifi_url"], S["unifi_site"] or "default", S["unifi_user"],
                              load_secrets().get("unifi_password", ""), S["unifi_fingerprint"])
             aps = {str(d.get("mac", "")).lower(): d for d in uf["devices"] if d.get("type") == "uap"}
+            for d in uf["devices"]:
+                um = str(d.get("mac", "")).lower()
+                if um in by_mac:
+                    unifi_inv[by_mac[um]] = {"model": d.get("model", ""), "serial": d.get("serial", ""), "firmware": d.get("version", ""),
+                                             "vendor": "Ubiquiti", "source": "UniFi controller"}
             moved = 0
             for amac, d in aps.items():
                 if amac in by_mac:
@@ -1254,6 +1260,7 @@ def full_scan(api, community=None, quiet=False):
                              "label": f"{sw_name[a]} {plabel(a, pa)} ↔ {sw_name[b]} {plabel(b, pb) if pb else ''}".strip()
                              + " · blocked by spanning tree"} for a, pa, b, pb in redundant
                             if "s-" + a in nodes and "s-" + b in nodes],
+            "inventory": build_inventory(nodes, sw, unifi_inv),
             "vlans": {str(v): {"name": vlan_names.get(v, f"VLAN {v}"),
                                "devices": sum(1 for n in nodes.values() if n.get("vlan") == v)}
                       for v in sorted(set(vlan_names) | {n["vlan"] for n in nodes.values() if n.get("vlan")})}}
@@ -1711,6 +1718,31 @@ def snmp_get(auth, target, oids):
 
 
 COUNTER_SANITY_BPS = 400e9          # upper limit when the link speed is unknown
+
+
+def build_inventory(nodes, sw, unifi_inv):
+    """The network devices with what SNMP (ENTITY-MIB) or the UniFi controller says about them. Devices of one model
+    running different firmware are marked: often one was forgotten in an update."""
+    out = []
+    for sid in sw:
+        inv = zp.INVENTORY.get(sid) or {}
+        n = nodes.get("s-" + sid)
+        if n:
+            out.append({"id": n["id"], "name": n["name"], "kind": "switch", **{k: inv.get(k, "") for k in
+                        ("model", "serial", "firmware", "hardware", "vendor", "location", "contact", "descr")},
+                        "source": "SNMP" if inv else ""})
+    for nid, inv in unifi_inv.items():
+        n = nodes.get(nid)
+        if n:
+            out.append({"id": nid, "name": n["name"], "kind": n.get("type", "device"), "location": "", "contact": "",
+                        "hardware": "", "descr": "", **inv})
+    by_model = {}
+    for x in out:
+        if x.get("model") and x.get("firmware"):
+            by_model.setdefault(x["model"], set()).add(x["firmware"])
+    for x in out:
+        x["firmware_differs"] = len(by_model.get(x.get("model"), ())) > 1
+    return out
 
 
 def recheck_speed(auth, target, ifindex):

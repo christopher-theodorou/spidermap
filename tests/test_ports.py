@@ -279,6 +279,23 @@ def test_facts():
     check("facts: IPv6 neighbours by MAC", zp.V6["99"] == {"aa:bb:cc:00:00:03": ["fe80::200:ff:fe00:3"]}, zp.V6["99"])
 
 
+def test_inventory():
+    ent = {"2.67108867": "S5735-L24T4X-A1", "5.67108867": "3", "11.67108867": '"2102353AGS10L4000123"', "13.67108867": "S5735-L24T4X-A1",
+           "10.67108867": "Version 5.170 (V200R022C00SPC500)", "8.67108867": "VER.B", "12.67108867": "Huawei",
+           "2.68157449": "Power supply", "5.68157449": "6", "11.68157449": "PSU0001"}
+    sysg = {"descr": {"0": "Huawei Versatile Routing Platform"}, "location": {"0": '"Rack 1"'}, "contact": {}, "object_id": {"0": ".1.3.6.1.4.1.2011.2.23.519"}}
+    inv = zp.inventory_from(ent, sysg)
+    check("inventory: the chassis (not the power supply): model, serial, firmware, hardware, vendor, location",
+          inv["model"] == "S5735-L24T4X-A1" and inv["serial"] == "2102353AGS10L4000123" and inv["firmware"].startswith("Version 5.170")
+          and inv["hardware"] == "VER.B" and inv["vendor"] == "Huawei" and inv["location"] == "Rack 1", inv)
+    check("inventory: a device without ENTITY-MIB gives empty fields, no error",
+          zp.inventory_from({}, {"descr": {"0": "Linux"}})["model"] == "" and zp.inventory_from({}, {})["serial"] == "")
+    zp.INVENTORY.update({"1": {"model": "X1", "firmware": "1.0"}, "2": {"model": "X1", "firmware": "1.1"}, "3": {"model": "Y", "firmware": "2"}})
+    nodes = {f"s-{i}": {"id": f"s-{i}", "name": f"SW{i}"} for i in ("1", "2", "3")}
+    out = {x["name"]: x["firmware_differs"] for x in sm.build_inventory(nodes, {"1": {}, "2": {}, "3": {}}, {})}
+    check("inventory: same model, different firmware is marked; a model on its own is not", out == {"SW1": True, "SW2": True, "SW3": False}, out)
+
+
 def test_device_types():
     cases = [("idrac-7XK2", "Dell Inc.", "oob"), ("pve1", "Dell Inc.", "hypervisor"), ("esx01", "VMware", "hypervisor"),
              ("", "American Power Conversion", "ups"), ("nvr-office", "Hikvision", "camera"), ("SIP-T46U", "Yealink", "voip"),
@@ -302,6 +319,7 @@ def main():
     test_vlans_and_lag()
     test_device_types()
     test_facts()
+    test_inventory()
     test_report()
     test_counters()
     test_zabbix_items()

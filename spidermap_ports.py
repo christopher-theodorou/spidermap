@@ -61,6 +61,26 @@ BRIDGE = {}         # hostid -> {"mac": bridge MAC, "root": root bridge MAC, "ro
 V6 = {}             # hostid -> {mac: [IPv6 addresses]} from the switch's / router's neighbour table
 POE_TOTAL = {}      # hostid -> watts the switch delivers over PoE
 TTL = {}            # ip -> TTL of its ping reply, from the last sweep
+INVENTORY = {}      # hostid -> {"model", "serial", "firmware", "hardware", "vendor", "descr", "location", "contact", "object_id"}
+ENTITY = "1.3.6.1.2.1.47.1.1.1.1"   # ENTITY-MIB entPhysicalTable
+SYSTEM = {"descr": "1.3.6.1.2.1.1.1", "object_id": "1.3.6.1.2.1.1.2", "contact": "1.3.6.1.2.1.1.4", "location": "1.3.6.1.2.1.1.6"}
+
+
+def inventory_from(entity, system):
+    """Model, serial, firmware ... of a switch / router, from ENTITY-MIB rows ({"col.index": value}) and the system
+    group. The chassis (class 3) is preferred, else the first entry that has a serial number or a model."""
+    clean = lambda v: str(v or "").strip().strip('"').strip()  # noqa: E731
+    rows = {}
+    for k, v in entity.items():
+        col, _, idx = str(k).partition(".")
+        rows.setdefault(idx, {})[col] = clean(v)
+    pick = next((r for r in rows.values() if r.get("5") == "3" and (r.get("11") or r.get("13"))), None) \
+        or next((r for r in rows.values() if r.get("11") or r.get("13")), {})
+    sysv = {k: clean(next(iter(v.values()), "")) if isinstance(v, dict) else clean(v) for k, v in system.items()}
+    sw_rev = pick.get("10") or pick.get("9") or ""
+    return {"model": pick.get("13") or pick.get("2") or "", "serial": pick.get("11", ""), "firmware": sw_rev,
+            "hardware": pick.get("8", ""), "vendor": pick.get("12", ""), "descr": sysv.get("descr", "")[:200],
+            "location": sysv.get("location", "")[:120], "contact": sysv.get("contact", "")[:120], "object_id": sysv.get("object_id", "")}
 FACTS = {           # optional standard tables: duplex, STP, LACP partner, PoE, IPv6 neighbours
     "duplex": "1.3.6.1.2.1.10.7.2.1.19", "stp_base": "1.3.6.1.2.1.17.1.1", "stp_root": "1.3.6.1.2.1.17.2.5",
     "stp_rootport": "1.3.6.1.2.1.17.2.7", "stp_state": "1.3.6.1.2.1.17.2.15.1.3", "stp_dbridge": "1.3.6.1.2.1.17.2.15.1.8",
@@ -331,6 +351,12 @@ def scan_switch(h, community, hosts):
         stp[bport.get(bp, bp)] = {"state": STP_STATE.get(str(st).strip(), str(st)), "dbridge": mac_of(fx["stp_dbridge"].get(bp, "")),
                                   "dport": str((int.from_bytes(bytes(dp), "big") & 0x0FFF)) if dp else ""}
     V6[h["hostid"]] = ip6_neighbours(fx["ip6"])
+    try:                                                      # inventory: model, serial, firmware (ENTITY-MIB)
+        ent = {k: v for col in ("2", "5", "8", "9", "10", "11", "12", "13")
+               for k, v in ((f"{col}.{i}", x) for i, x in at.snmpwalk(auth, target, f"{ENTITY}.{col}").items())}
+        INVENTORY[h["hostid"]] = inventory_from(ent, {k: at.snmpwalk(auth, target, o) for k, o in SYSTEM.items()})
+    except Exception:  # noqa: BLE001
+        INVENTORY[h["hostid"]] = {}
     POE_TOTAL[h["hostid"]] = sum(int(v) for v in fx["poe_total"].values() if str(v).strip().isdigit())
     poe = {}
     for suffix, st in fx["poe_status"].items():               # index: group . port (often the ifIndex)

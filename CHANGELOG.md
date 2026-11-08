@@ -4,6 +4,16 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.1] - 2026-11-08
+
+### Added
+- **Inventory** (*Map | Overview | Inventory* in the header). *Network devices*: model, serial number, firmware,
+  hardware version, manufacturer, uptime and location of every switch and router (SNMP ENTITY-MIB and the system
+  group) and of UniFi devices (from the controller). Devices of the same model running different firmware are marked
+  - often one was forgotten in an update. *All devices*: name, type, manufacturer, IP, MAC, status, VLAN,
+  connection, first and last seen. Search, sort by any column (empty values last), CSV export (cells that could be
+  read as spreadsheet formulas are written as text), and a name takes you to the device on the map.
+
 ## [0.9.0] - 2026-11-08
 
 ### Added
@@ -448,6 +458,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.1
 [0.9.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.0
 [0.8.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.3
 [0.8.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.2

@@ -171,6 +171,15 @@ body.dash #dash{display:block}body.dash #canvas,body.dash #gw,body.dash #mapctl{
 .db-row .r{margin-left:auto;color:var(--muted);white-space:nowrap}.db-row a{color:var(--text);cursor:pointer;text-decoration:none}.db-row a:hover{color:var(--accent)}
 .db-types{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.db-types span{display:inline-flex;align-items:center;gap:5px;background:var(--bg);border-radius:6px;padding:3px 8px;font-size:12.5px}
 .db-bar{height:6px;border-radius:3px;background:var(--bg);overflow:hidden;flex:1;max-width:120px}.db-bar div{height:100%;background:var(--accent)}
+#inv{display:none;position:absolute;inset:0;overflow:auto;padding:18px 20px 30px;background:var(--bg);z-index:5}
+body.inv #inv{display:block}body.inv #canvas,body.inv #gw,body.inv #mapctl{visibility:hidden}
+.inv-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.inv-top input{height:32px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);padding:0 10px;min-width:220px;font:inherit}
+.inv-n{color:var(--muted);font-size:12.5px;margin-right:auto}
+.inv-wrap{overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:12px}
+table.inv{width:100%;border-collapse:collapse;font-size:13px}table.inv th{position:sticky;top:0;background:var(--card);text-align:left;font-weight:600;color:var(--muted);padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;user-select:none}
+table.inv td{padding:7px 12px;border-bottom:1px solid var(--border);white-space:nowrap}table.inv tr:last-child td{border:0}table.inv tr:hover td{background:var(--bg)}
+table.inv a{color:var(--accent);cursor:pointer}
 .db-wide{grid-column:span 2}@media (max-width:700px){.db-wide{grid-column:auto}}
 /* dragging the map is not selecting text, and icons are not images to drag away */
 #canvas,#canvas *{-webkit-user-select:none;user-select:none;-webkit-user-drag:none;-webkit-touch-callout:none}
@@ -312,7 +321,7 @@ table{width:100%;border-collapse:collapse}
   <span class="sp"></span>
   <span class="stat" id="s-time"></span>
   <input class="search" id="q" placeholder="Name, IP or MAC" aria-label="Search devices">
-  <span id="viewsw" role="group" aria-label="View"><button id="vw-map" aria-pressed="true">Map</button><button id="vw-dash" aria-pressed="false">Overview</button></span>
+  <span id="viewsw" role="group" aria-label="View"><button id="vw-map" aria-pressed="true">Map</button><button id="vw-dash" aria-pressed="false">Overview</button><button id="vw-inv" aria-pressed="false">Inventory</button></span>
   <button class="btn tb" id="b-lang" title="Ελληνικά" aria-label="Language" style="font-weight:600;font-size:12px;min-width:34px">ΕΛ</button>
   <button class="btn tb" id="b-vlan" title="Show VLANs" aria-label="Show VLANs" aria-haspopup="true" style="display:none"><i class="ti ti-filter"></i><span class="bd" id="vlan-bd" style="display:none"></span></button>
   <button class="btn tb" id="b-act" title="Activity" aria-label="Activity"><i class="ti ti-bell"></i><span class="bd" id="act-bd" style="display:none"></span></button>
@@ -325,6 +334,7 @@ table{width:100%;border-collapse:collapse}
   <button class="btn" id="theme" aria-label="Theme" aria-haspopup="true"><i class="ti ti-palette"></i></button>
 </header>
 <div id="dash" role="region" aria-label="Overview"></div>
+<div id="inv" role="region" aria-label="Inventory"></div>
 <div id="canvas"><div id="stage"></div><div id="msg">Loading…</div>
   <div id="mapctl" role="toolbar" aria-label="Map controls">
     <button id="zin" title="Zoom in (+)" aria-label="Zoom in"><i class="ti ti-plus"></i></button>
@@ -350,7 +360,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.0";
+const PAGE_VERSION = "0.9.1";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1339,6 +1349,7 @@ function render() {
   if (hoverId) highlight(hoverId);
   foldIcon();
   if (DASH) renderDash();
+  if (VIEWMODE === "inv" && !(document.activeElement && document.activeElement.id === "inv-q")) renderInv();
 }
 
 /* ---------- path highlight ---------- */
@@ -1561,7 +1572,9 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Overview": "Επισκόπηση", "Theme": "Θέμα", "Automatic": "Αυτόματο", "Light": "Φωτεινό", "Dark": "Σκούρο",
+  "Max-repetitions": "Max-repetitions", "Inventory": "Απογραφή", "Network devices": "Συσκευές δικτύου", "All devices": "Όλες οι συσκευές",
+  "Search": "Αναζήτηση", "Serial": "Σειριακός", "Firmware": "Firmware", "Hardware": "Hardware", "Uptime": "Χρόνος λειτουργίας",
+  "Source": "Πηγή", "First seen": "Πρώτη εμφάνιση", "Last seen": "Τελευταία εμφάνιση", "Search the inventory": "Αναζήτηση στην απογραφή", "Overview": "Επισκόπηση", "Theme": "Θέμα", "Automatic": "Αυτόματο", "Light": "Φωτεινό", "Dark": "Σκούρο",
   "Top talkers today": "Μεγαλύτερη κίνηση σήμερα", "Recent activity": "Πρόσφατη δραστηριότητα", "Nothing to report.": "Τίποτα προς αναφορά.",
   "uptime this month": "διαθεσιμότητα αυτόν τον μήνα", "This month": "Αυτόν τον μήνα", "Latency": "Καθυστέρηση", "No speed test yet.": "Δεν έχει γίνει τεστ ταχύτητας.",
   "offline": "εκτός σύνδεσης", "Down": "Εκτός", "Problems": "Προβλήματα", "Confirm or reject them in the switch's panel.": "Επιβεβαιώστε ή απορρίψτε τις στο πάνελ του switch.", "Traffic correlation": "Συσχέτιση κίνησης", "Link to its parent": "Σύνδεση με τον γονέα", "Confirm this link": "Επιβεβαίωση σύνδεσης",
@@ -1633,14 +1646,17 @@ $("#theme").onclick = skinMenu;
 applySkin();
 
 /* ---------- overview dashboard: everything the page already knows, in cards ---------- */
-let DASH = store("nm-view-dash") === true;
-function showDash(on) {
-  DASH = on; store("nm-view-dash", on); document.body.classList.toggle("dash", on);
-  $("#vw-map").setAttribute("aria-pressed", String(!on)); $("#vw-dash").setAttribute("aria-pressed", String(on));
-  if (on) renderDash(); else if (DATA) fit(false);
+let VIEWMODE = ["dash", "inv"].includes(store("nm-viewmode")) ? store("nm-viewmode") : "map", DASH = VIEWMODE === "dash";
+function showView(v) {
+  VIEWMODE = v; DASH = v === "dash"; store("nm-viewmode", v);
+  document.body.classList.toggle("dash", v === "dash"); document.body.classList.toggle("inv", v === "inv");
+  [["map", "#vw-map"], ["dash", "#vw-dash"], ["inv", "#vw-inv"]].forEach(([k, b]) => $(b).setAttribute("aria-pressed", String(v === k)));
+  if (v === "dash") renderDash(); else if (v === "inv") renderInv(); else if (DATA) fit(false);
 }
-$("#vw-map").onclick = () => showDash(false);
-$("#vw-dash").onclick = () => showDash(true);
+const showDash = on => showView(on ? "dash" : "map");
+$("#vw-map").onclick = () => showView("map");
+$("#vw-dash").onclick = () => showView("dash");
+$("#vw-inv").onclick = () => showView("inv");
 function dbCard(icon, title, body, wide) { return `<section class="db-card${wide ? " db-wide" : ""}"><h3><i class="ti ti-${icon}"></i>${esc(title)}</h3>${body}</section>`; }
 function renderDash() {
   const box = $("#dash"); if (!box || !DATA || !DASH) return;
@@ -1699,6 +1715,54 @@ function renderDash() {
   if (S.length) h += dbCard("link", "Suggested links", S.slice(0, 5).map(x => `<div class="db-row"><span>${esc(x.a.join(" "))} ↔ ${esc(x.b.join(" "))}</span><span class="r">${x.n}×</span></div>`).join("") + `<div class="db-sub" style="margin-top:6px">Confirm or reject them in the switch's panel.</div>`);
   box.innerHTML = `<div class="db-grid">${h}</div>`; box.scrollTop = y;
   box.onclick = e => { const a = e.target.closest("[data-go]"); if (a) { showDash(false); select(a.dataset.go); centerOn(a.dataset.go); } };
+}
+
+/* ---------- inventory: network devices (model, serial, firmware) and all devices ---------- */
+let INV = { tab: "net", q: "", sort: [0, 1] };
+function invRows() {
+  const fmt = t => t ? new Date(t * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "";
+  if (INV.tab === "net") {
+    return { head: ["Name", "Model", "Serial", "Firmware", "Hardware", "Manufacturer", "Uptime", "Location", "Source"],
+      rows: (DATA.inventory || []).map(x => {
+        const st = (LIVE.stats || {})[x.id] || {};
+        return { id: x.id, warn: x.firmware_differs, cells: [x.name, x.model, x.serial, x.firmware, x.hardware, x.vendor, st.uptime ? st.uptime.text : "", x.location, x.source] };
+      }) };
+  }
+  return { head: ["Name", "Type", "Manufacturer", "IP", "MAC", "Status", "VLAN", "Connection", "First seen", "Last seen"],
+    rows: DATA.nodes.filter(n => n.kind === "device" && n.mac).map(n => ({ id: n.id,
+      cells: [n.name, TYPE_LABEL[n.type] || n.type || "", n.vendor || "", n.ip || "", n.mac, status(n), n.vlan || "", n.port || n.conn || "", fmt(n.first), fmt(n.last)] })) };
+}
+function renderInv() {
+  const box = $("#inv"); if (!box || !DATA || VIEWMODE !== "inv") return;
+  const { head, rows } = invRows(), q = INV.q.toLowerCase();
+  let list = rows.filter(r => !q || r.cells.some(c => String(c).toLowerCase().includes(q)));
+  const [col, dir] = INV.sort;
+  list.sort((a, b) => {                                   // empty values always last, whichever way
+    const x = String(a.cells[col] ?? ""), y = String(b.cells[col] ?? "");
+    return !x !== !y ? (!x ? 1 : -1) : x.localeCompare(y, undefined, { numeric: true }) * dir;
+  });
+  const anyWarn = list.some(r => r.warn);
+  box.innerHTML = `<div class="inv-top"><div class="chips"><span class="chip ${INV.tab === "net" ? "on" : ""}" data-it="net">Network devices</span><span class="chip ${INV.tab === "all" ? "on" : ""}" data-it="all">All devices</span></div>
+    <input id="inv-q" placeholder="Search" value="${esc(INV.q)}" aria-label="Search the inventory"><span class="inv-n">${list.length} of ${rows.length}</span>
+    <button class="btn" id="inv-csv"><i class="ti ti-download"></i>CSV</button></div>`
+    + (anyWarn ? `<div class="note warnc" style="margin:0 0 10px">⚠ Devices of the same model run different firmware: often one was forgotten in an update.</div>` : "")
+    + (INV.tab === "net" && !rows.length ? `<p style="color:var(--muted)">No switches or access points yet.</p>` : "")
+    + `<div class="inv-wrap"><table class="inv"><thead><tr>${head.map((h_, i) => `<th data-ic="${i}" aria-sort="${col === i ? (dir > 0 ? "ascending" : "descending") : "none"}">${esc(h_)}${col === i ? (dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")}</tr></thead>`
+    + `<tbody>${list.map(r => `<tr data-go="${esc(r.id)}">${r.cells.map((c, i) => `<td>${i === 0 ? `<a>${esc(c)}</a>` : esc(c)}${INV.tab === "net" && i === 3 && r.warn ? ' <span class="warnc" title="Other devices of this model run different firmware">⚠</span>' : ""}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  const qi = $("#inv-q"); qi.oninput = () => { INV.q = qi.value; const pos = qi.selectionStart; renderInv(); const n = $("#inv-q"); n.focus(); n.setSelectionRange(pos, pos); };
+  box.onclick = e => {
+    const t = e.target.closest("[data-it]"); if (t) { INV.tab = t.dataset.it; INV.sort = [0, 1]; renderInv(); return; }
+    const th = e.target.closest("[data-ic]"); if (th) { const c = +th.dataset.ic; INV.sort = [c, INV.sort[0] === c ? -INV.sort[1] : 1]; renderInv(); return; }
+    if (e.target.closest("#inv-csv")) { invCsv(head, list); return; }
+    const tr = e.target.closest("tr[data-go]"); if (tr && e.target.closest("a")) { showView("map"); select(tr.dataset.go); centerOn(tr.dataset.go); }
+  };
+}
+function invCsv(head, list) {
+  // a cell that starts with = + - @ is written with a ' in front, so spreadsheets never run it as a formula
+  const cell = v => { let t = String(v ?? ""); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return /[",\n;]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  const csv = [head, ...list.map(r => r.cells)].map(r => r.map(cell).join(",")).join("\r\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
+  a.download = `spidermap-${INV.tab === "net" ? "network-devices" : "devices"}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
 /* ---------- clicks ---------- */
@@ -2021,7 +2085,7 @@ $("#b-hlt").onclick = () => special("health");
 $("#b-vlan").onclick = () => { if (DATA) vlanMenu(); };
 $("#b-lang").onclick = () => { LANG = curLang() === "el" ? "en" : "el"; store("nm-lang", LANG); location.reload(); };   // back to English: a fresh page
 langButton(); translate(document.body);
-if (DASH) showDash(true);
+if (VIEWMODE !== "map") showView(VIEWMODE);
 smWire();
 $("#b-set").onclick = () => smOpen();
 $("#s-time").onclick = () => special("health");
