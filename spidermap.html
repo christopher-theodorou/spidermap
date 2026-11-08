@@ -179,9 +179,17 @@ table.inv a{color:var(--accent);cursor:pointer}
 @media (prefers-color-scheme:dark){:root[data-skin=red]:not([data-theme=light]){--bg:#0d0b0c;--card:#171213;--text:#f1e3e3;--muted:#a88f8f;--faint:#6b5858;--border:#2d2122;--accent:#f0444b;--accent-bg:#3a1517;--line:#7a2a2e;--pur:#ff6b6b;--pur-bg:#3a1517;--off:#4d3d3e;--sm-accent:#f0444b;--sm-accent-h:#f5696f;--sm-soft:#3a1517;--sm-text:#ff8a8f}}
 :root[data-skin=red][data-theme=dark]{--bg:#0d0b0c;--card:#171213;--text:#f1e3e3;--muted:#a88f8f;--faint:#6b5858;--border:#2d2122;--accent:#f0444b;--accent-bg:#3a1517;--line:#7a2a2e;--pur:#ff6b6b;--pur-bg:#3a1517;--off:#4d3d3e;--sm-accent:#f0444b;--sm-accent-h:#f5696f;--sm-soft:#3a1517;--sm-text:#ff8a8f}
 /* node shapes: green = device cards, blue = tiles, red = hexagons */
-:root[data-skin=green] .tn{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 4px 6px;box-shadow:var(--shadow)}
-:root[data-skin=green] .tn .ic{border-radius:6px;background:var(--accent-bg);border-color:transparent}
-:root[data-skin=green] .tn.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-bg)}
+:root[data-skin=green] .tn{background:color-mix(in srgb,var(--accent-bg) 55%,var(--card));border:1px solid color-mix(in srgb,var(--accent) 22%,var(--border));border-radius:9px;padding:6px 4px 6px;box-shadow:none}
+:root[data-skin=green] .tn .ic{border-radius:7px;background:var(--card);border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border))}
+:root[data-skin=green] .tn.sel{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 25%,transparent)}
+/* lines: each spider its own (special lines - offline, guessed, redundant, load, fibre - keep their meaning) */
+:root[data-skin=green] .ln{stroke-width:2.2;stroke-linejoin:round;stroke-linecap:round}
+:root[data-skin=green] .ln:not(.off):not(.lw):not(.lc):not(.fib):not(.redundant){stroke:color-mix(in srgb,var(--accent) 70%,var(--line))}
+:root[data-skin=blue] .ln{stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}
+:root[data-skin=blue] .ln:not(.off):not(.lw):not(.lc):not(.fib):not(.redundant){stroke:color-mix(in srgb,var(--accent) 45%,var(--line))}
+:root[data-skin=red] .ln{stroke-width:1.5}
+:root[data-skin=red] .ln:not(.off):not(.lw):not(.lc):not(.fib):not(.redundant){stroke:var(--accent)}
+:root[data-skin=red] #stage>svg{filter:drop-shadow(0 0 2.5px color-mix(in srgb,var(--accent) 55%,transparent))}
 :root[data-skin=blue] .tn .ic{border-radius:14px;width:52px;height:52px;background:var(--accent-bg);border:0;box-shadow:0 2px 6px rgba(22,119,210,.18)}
 :root[data-skin=blue] .tn .ic i{font-size:26px;color:var(--accent)}
 :root[data-skin=red] .tn .ic{border:0;border-radius:0;background:var(--accent-bg);clip-path:polygon(25% 4%,75% 4%,100% 50%,75% 96%,25% 96%,0 50%)}
