@@ -870,6 +870,41 @@ def test_080():
     check("link: remove the decision (either order of the ends)", json.load(open(sm.DEVICES_FILE))["links"] == [])
 
 
+def test_traffic_correlation():
+    import math
+    def wave(t0, k=1.0, extra=0.0, noise=0.0, steady=False):
+        out = []
+        for i in range(12):
+            base = 20e6 if steady else 20e6 + 15e6 * math.sin(i / 1.7)
+            rx, tx = base * k + extra, base * 0.4 * k + extra * 0.4
+            out.append((t0 + 5 * i, rx * (1 + noise * ((-1) ** i)), tx * (1 - noise * ((-1) ** i))))
+        return out
+    a = wave(1000)
+    b = [(t, tx, rx) for t, rx, tx in wave(1000, noise=0.01)]           # the other end: in and out swapped, 1% noise
+    check("traffic: the two ends of one cable match", sm.traffic_match(a, b) is True)
+    up = [(t, tx + 8e6, rx + 3e6) for t, rx, tx in a]                 # an uplink that also carries other devices' traffic
+    check("traffic: a port that carries more (an uplink of several devices) does not match", sm.traffic_match(a, up) is False)
+    st = wave(1000, steady=True)
+    check("traffic: steady traffic proves nothing", sm.traffic_match(st, [(t, tx, rx) for t, rx, tx in st]) is None)
+    idle = [(t, 1e3, 1e3) for t, _, _ in a]
+    check("traffic: idle ports prove nothing", sm.traffic_match(idle, idle) is None)
+    hints = {}
+    meta = {("A", "1"): {"speed": 1000, "up": True}, ("B", "7"): {"speed": 1000, "up": True}, ("C", "3"): {"speed": 100, "up": True}}
+    series = {("A", "1"): a, ("B", "7"): b, ("C", "3"): b}
+    for t in (2000, 2100, 2200):
+        sm.update_traffic_hints(hints, series, meta, set(), t)
+    check("traffic: 3 matching windows, and a port of another speed is not even compared", hints == {"T|A|1|B|7": {"n": 3, "last": 2200}}, hints)
+    data = {"switches": {"A": {"name": "SW-A", "ports": [{"id": "1", "base": "Port 1"}]}, "B": {"name": "SW-B", "ports": [{"id": "7", "base": "Port 7"}]}}, "nodes": []}
+    sug = sm.link_suggestions(hints, data, [])
+    check("traffic: then it is a suggestion, with the reason", len(sug) == 1 and "same traffic" in sug[0]["why"] and sug[0]["a"] == ["SW-A", "Port 1"], sug)
+    sm.update_traffic_hints(hints, {("A", "1"): a, ("B", "7"): up}, meta, set(), 2300)
+    check("traffic: a clear mismatch starts the count again", hints["T|A|1|B|7"]["n"] == 0)
+    hints2 = {}
+    for t in (2000, 2100, 2200):
+        sm.update_traffic_hints(hints2, series, meta, {frozenset(("A", "B"))}, t)
+    check("traffic: switches already linked are not compared", hints2 == {})
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -893,6 +928,7 @@ def main():
     test_070()
     test_unifi()
     test_080()
+    test_traffic_correlation()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
     return 0 if all(RESULTS) else 1
 

@@ -4,6 +4,16 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.8.2] - 2026-11-08
+
+### Added
+- **Traffic correlation** (Settings > Topology): links between switches without LLDP, found from the counters
+  SpiderMap already reads every 5 seconds. Two ports on different switches, at the same speed and not already
+  explained, are the two ends of one cable when what leaves one arrives at the other (within 5%, both ways) while the
+  traffic rises and falls together. After three such measurements the pair is a suggested link (Confirm / Reject);
+  a clear mismatch starts again. Steady or idle traffic proves nothing and is never used. It finds direct cables:
+  through an unmanaged switch the totals differ.
+
 ## [0.8.1] - 2026-11-08
 
 ### Fixed
@@ -414,6 +424,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.8.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.2
 [0.8.1]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.1
 [0.8.0]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.8.0
 [0.7.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.7.2

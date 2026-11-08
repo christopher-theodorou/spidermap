@@ -30,7 +30,7 @@ import requests
 import spidermap_zabbix as at
 import spidermap_ports as zp
 
-__version__ = "0.8.1"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.8.2"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -2064,6 +2064,58 @@ def link_state_pairs(changes, window=8, mass=6):
     return pairs
 
 
+def traffic_match(a, b, tol=0.05, min_bps=50e3, min_corr=0.9):
+    """Do ports a and b carry the same traffic, as the two ends of one cable do? a, b: [(t, rx, tx)] rates (bit/s)
+    from the same polling cycles. What leaves a must arrive at b and the other way round (totals within `tol`), and
+    the traffic must rise and fall together (steady traffic proves nothing). Returns (True / False / None = no signal)."""
+    pairs = [(x, y) for x in a for y in b if abs(x[0] - y[0]) <= 3]
+    if len(pairs) < 6:
+        return None
+    out_a, in_b = sum(x[2] for x, _ in pairs), sum(y[1] for _, y in pairs)
+    in_a, out_b = sum(x[1] for x, _ in pairs), sum(y[2] for _, y in pairs)
+    vol = (out_a + in_a) / len(pairs)
+    if vol < min_bps:
+        return None
+    def close(u, v):
+        return abs(u - v) <= tol * max(u, v, 1)
+    if not (close(out_a, in_b) and close(in_a, out_b)):
+        return False
+    xs = [x[1] + x[2] for x, _ in pairs]
+    ys = [y[1] + y[2] for _, y in pairs]
+    mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+    vx, vy = sum((v - mx) ** 2 for v in xs), sum((v - my) ** 2 for v in ys)
+    if vx <= 0 or vy <= 0 or (vx / len(xs)) ** 0.5 < 0.05 * mx:
+        return None                                    # steady traffic: the totals alone could be a coincidence
+    corr = sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / (vx * vy) ** 0.5
+    return corr >= min_corr
+
+
+def update_traffic_hints(hints, series, meta, linked, t, need=3):
+    """Every window: candidate pairs of ports on different switches (same speed, both up, not already explained)
+    that carry the same traffic get one more match; a clear mismatch starts them again. series: {(sid, pid):
+    [(t, rx, tx)]}, meta: {(sid, pid): {"speed": Mbps, "up": bool, "known": bool}}, linked: {frozenset(sid pair)}."""
+    keys = [k for k, m in meta.items() if m.get("up") and not m.get("known") and len(series.get(k, [])) >= 6]
+    changed = False
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            if a[0] == b[0] or meta[a].get("speed") != meta[b].get("speed") or frozenset((a[0], b[0])) in linked:
+                continue
+            r = traffic_match(series[a], series[b])
+            if r is None:
+                continue
+            x, y = sorted([a, b])
+            k = f"T|{x[0]}|{x[1]}|{y[0]}|{y[1]}"
+            h = hints.get(k, {"n": 0, "last": 0})
+            if r and t - h["last"] >= 60:
+                h = {"n": h["n"] + 1, "last": t}
+            elif r is False and h["n"]:
+                h = {"n": 0, "last": t}
+            else:
+                continue
+            hints[k], changed = h, True
+    return changed
+
+
 def update_hints(hints, changes, t):
     """Counts each pair once per event (not again within 60 s). Returns True when something changed."""
     changed = False
@@ -2088,13 +2140,19 @@ def link_suggestions(hints, data, links, min_n=2):
         return [sw_.get("name", sid), p.get("base", p.get("label")) if p else pid]
     out = []
     for k, h in sorted(hints.items(), key=lambda x: -x[1]["n"]):
-        if h["n"] < min_n:
+        traffic = k.startswith("T|")
+        if h["n"] < (3 if traffic else min_n):
             continue
-        s1, p1, s2, p2 = k.split("|")
+        s1, p1, s2, p2 = k.split("|")[1:] if traffic else k.split("|")
         a, b = end(s1, p1), end(s2, p2)
         if frozenset((s1, s2)) in linked or frozenset([tuple(a), tuple(b)]) in refused:
             continue
-        out.append({"a": a, "b": b, "n": h["n"], "why": f"went down and up together {h['n']} times"})
+        why = (f"carried the same traffic, byte for byte (±5%), in {h['n']} measurements" if traffic
+               else f"went down and up together {h['n']} times")
+        if any(o["a"] == a and o["b"] == b for o in out):
+            next(o for o in out if o["a"] == a and o["b"] == b)["why"] += "; " + why
+            continue
+        out.append({"a": a, "b": b, "n": h["n"], "why": why})
     return out[:20]
 
 
@@ -2931,6 +2989,7 @@ def rt_loop(api):
     daily_done, last_save = load_json(SCHED_FILE, {}).get("speedtest_daily_last", ""), 0
     prev_st, flap_t = {}, {}
     changes, hints = deque(maxlen=200), load_json(HINTS_FILE, {})     # port up/down changes; ports that change together
+    series, last_corr = {}, 0                                          # 5-second rates per port, for traffic correlation
     use32, quality, rej_said = {}, {}, {}
     live_speed, rescan_at = {}, {}                # port speeds read again after a change; last rescan per switch
     inet = load_json(INET_FILE, {})
@@ -3108,6 +3167,24 @@ def rt_loop(api):
         root = next((n for n in data["nodes"] if n.get("kind") == "switch" and n.get("flip") and n.get("port_ref")), None)
         if update_hints(hints, list(changes), t):
             save_json(HINTS_FILE, hints)
+        for sid_, pp in ports.items():
+            for pid_, v in pp.items():
+                if v.get("rx") is not None:
+                    series.setdefault((sid_, pid_), deque(maxlen=12)).append((t, v["rx"], v["tx"]))
+        if t - last_corr >= 30 and setting("topo_traffic"):
+            last_corr = t
+            meta, linked = {}, set()
+            for n_ in data["nodes"]:
+                if n_.get("kind") == "switch" and n_.get("port_ref"):
+                    linked.add(frozenset((n_["sw"], n_["port_ref"][0])))
+            known = {tuple(n_["port_ref"]) for n_ in data["nodes"] if n_.get("kind") == "switch" and n_.get("port_ref")}
+            for sid_, x in (data.get("switches") or {}).items():
+                for p in x.get("ports", []):
+                    pid_ = str(p.get("id", p.get("n")))
+                    meta[(sid_, pid_)] = {"speed": p.get("speed_mbps"), "up": p.get("status") == "up",
+                                          "known": (sid_, pid_) in known or p.get("kind") == "lag"}
+            if update_traffic_hints(hints, {k: list(v) for k, v in series.items()}, meta, linked, t):
+                save_json(HINTS_FILE, hints)
         sw_wan = ports.get(root["port_ref"][0], {}).get(str(root["port_ref"][1])) if root else None
         wan, wan_src, wan_err = measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0)
         # tell once when the WAN cannot be measured (after a minute), and when it can again
@@ -3734,6 +3811,9 @@ SETTINGS_SCHEMA = [
             "placed on switch ports."),
     _S("topo_arp", "bool", True, "Topology", "Link sources", "ARP tables",
        help="IP addresses from the switches' and routers' ARP tables, in addition to this server's own."),
+    _S("topo_traffic", "bool", True, "Topology", "Link sources", "Traffic correlation",
+       help="Suggests links between switches without LLDP: two ports whose bytes match (what leaves one arrives at "
+            "the other) while the traffic rises and falls together. Suggestions only - you confirm or reject them."),
     _S("infer_switches", "bool", True, "Topology", "Link sources", "Find hidden switches",
        help="Several devices on one port without LLDP: drawn behind an 'Unmanaged switch' (dashed), or behind the "
             "access point or hypervisor that is one of them."),
