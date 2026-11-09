@@ -1,6 +1,7 @@
 """The WAN and the internet: the router over SNMP / UPnP, UniFi, outages and uptime.
 
 Part of SpiderMap (see spidermap.py and docs/ARCHITECTURE.md)."""
+import subprocess
 import datetime
 import re
 import time
@@ -327,3 +328,21 @@ def month_uptime(inet, t, month_start=None):
         return None, outs, 0.0
     down = _overlap(spans, since, t)
     return round(100 * (1 - down / monitored), 3), outs, round(100 * monitored / (t - since), 1)
+
+
+def upstream_router(gw_ip):
+    """The second hop to the internet, when it is a private address other than the gateway: a router before the
+    gateway (double NAT). A provider's carrier-grade NAT (100.64.0.0/10) is not a private address and is not shown."""
+    import ipaddress
+    try:
+        r = subprocess.run(["ping", "-n", "-c", "1", "-W", "2", "-t", "2", "1.1.1.1"], capture_output=True, text=True, timeout=6)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"From (\d+\.\d+\.\d+\.\d+)", r.stdout)
+    if not m:
+        return None
+    ip = m.group(1)
+    try:
+        return ip if ip != gw_ip and ipaddress.ip_address(ip).is_private else None
+    except ValueError:
+        return None

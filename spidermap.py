@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.6"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.7"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -535,9 +535,9 @@ def full_scan(api, community=None, quiet=False):
 
     S = effective_settings(cfg.get("settings", {}))
     scan_progress(2, "starting")
-    outside = []
-    if S["scan_subnets"]:
-        nets_ = [ipaddress.ip_network(n, strict=False) for n in S["scan_subnets"]]
+    outside, auto_nets = [], ([] if S["scan_subnets"] else zp.local_nets())
+    if S["scan_subnets"] or auto_nets:
+        nets_ = [ipaddress.ip_network(n, strict=False) for n in (S["scan_subnets"] or auto_nets)]
 
         def _inside(h):
             try:
@@ -547,11 +547,11 @@ def full_scan(api, community=None, quiet=False):
         outside = [h["name"] for h in switches if not _inside(h)]
         switches = [h for h in switches if _inside(h)]
         if outside:
-            say(f"Not scanned (outside the allowed networks): {', '.join(outside)}")
+            say(f"Not scanned (outside {'the allowed networks' if S['scan_subnets'] else 'the networks this server is on: ' + ', '.join(auto_nets)}): {', '.join(outside)}")
     at.SNMP_WALK.update(timeout_s=S["snmp_timeout_ms"] / 1000, retries=S["snmp_retries"], max_rep=S["snmp_max_repetitions"])
     zp.CDP_ON = S["topo_cdp"]
-    nets = S["scan_subnets"] or sorted({str(ipaddress.ip_network(f"{h['_snmp']['ip']}/24", strict=False))
-                                        for h in switches if h["_snmp"].get("ip")})
+    nets = S["scan_subnets"] or auto_nets or sorted({str(ipaddress.ip_network(f"{h['_snmp']['ip']}/24", strict=False))
+                                                     for h in switches if h["_snmp"].get("ip")})
     targets = list(scan_targets(nets, S["scan_exclude"]))
     if not S["icmp_discovery"]:
         say("Ping sweep off (Settings > Scans): only devices the network already knows are seen")
@@ -656,6 +656,17 @@ def full_scan(api, community=None, quiet=False):
                 elif peer:
                     host_port[(sid, p["name"])] = peer
 
+    # ---------------- a cable is a cable, whichever end reports it: a switch that does not tell its LLDP neighbours
+    # (some TP-Link models) is still linked to the switches that see it. The tree grows from the core outwards, so a
+    # link known only from the far end must count in both directions.
+    for (a, b), (pa, pb) in list(sw_link.items()):
+        if (b, a) not in sw_link:
+            mine = next((p["name"] for p in sw[b]["ports"] if pb and pb in (p["name"], p.get("alias"), p.get("descr"))), pb or "")
+            sw_link[(b, a)] = (mine, pa)
+            if mine in {p["name"] for p in sw[b]["ports"]}:
+                uplink.add((b, mine))
+            say(f"  {sw[a]['host']['name']} reports {sw[b]['host']['name']} by LLDP; {sw[b]['host']['name']} does not report it back - linked both ways")
+
     # ---------------- switches without LLDP: switch B's own MAC on a port of switch A that does not lead up to the
     # gateway means B sits behind that port (the closest such port: the one with the fewest MACs)
     mac_links = set()
@@ -668,16 +679,27 @@ def full_scan(api, community=None, quiet=False):
             ms = set().union(*[ip2mac.get(ip_, set()) for ip_ in s_["host"]["_ips"]]) if s_["host"]["_ips"] else set()
             if zp.BRIDGE.get(k, {}).get("mac"):
                 ms.add(zp.BRIDGE[k]["mac"])
+            ms |= zp.IFMACS.get(k, set())                    # its interfaces' MACs: often what the others learn
             own[k] = ms
-        for a, pa, b, pb in mac_switch_links({k: s_["ports"] for k, s_ in sw.items()}, own, gw_mac,
-                                             {x for pair in sw_link for x in pair}):
+        core = core_switch_id(sw, S["core_switch"]) or min(
+            ((k, len(p["macs"])) for k, s_ in sw.items() for p in s_["ports"] if gw_mac in p["macs"]),
+            key=lambda x: x[1], default=(None, 0))[0]
+        for a, pa, b, pb in mac_switch_links({k: s_["ports"] for k, s_ in sw.items()}, own, gw_mac, set(sw_link), core):
             sw_link[(a, b)] = (pa, pb)
             mac_links.add((a, b))
             uplink.add((a, pa))
             if pb:
                 uplink.add((b, pb))
-        if mac_links:
-            say(f"  links between switches from the MAC tables: {len(mac_links)}")
+            say(f"  {sw[b]['host']['name']} is behind {sw[a]['host']['name']} {pa} (MAC table)")
+        linked = {x for pair in sw_link for x in pair}
+        for k, s_ in sw.items():                             # say why a switch stays unlinked, for whoever reads the log
+            if k == core or k in linked:
+                continue
+            seen = [f"{sw[a]['host']['name']} {p['name']}" for a, t in sw.items() if a != k for p in t["ports"] if own[k] & set(p["macs"])]
+            say(f"  {s_['host']['name']}: no link found - "
+                + ("its own MAC is unknown (no ARP entry, bridge or interface MAC)" if not own[k] else
+                   f"its MAC is seen only on ports toward the gateway: {', '.join(seen[:4])}" if seen else
+                   "its MAC is in no other switch's MAC table"))
 
     # ---------------- where is each MAC right now (access port with fewest MACs)
     seen_at = {}
@@ -699,7 +721,9 @@ def full_scan(api, community=None, quiet=False):
         sdev.pop(m, None)
 
     gw_loc = seen_at.get(gw_mac) if gw_mac else None
-    root_sw = gw_loc[0] if gw_loc else (next(iter(sw)) if sw else None)
+    root_sw = core_switch_id(sw, S["core_switch"]) or (gw_loc[0] if gw_loc else (next(iter(sw)) if sw else None))
+    if root_sw and gw_mac and (not gw_loc or gw_loc[0] != root_sw):
+        gw_loc = next(((root_sw, p["name"], len(p["macs"])) for p in sw[root_sw]["ports"] if gw_mac in p["macs"]), gw_loc)
 
     # ---------------- device records (memory)
     events = {"new": [], "changed": []}
@@ -900,6 +924,20 @@ def full_scan(api, community=None, quiet=False):
         g["kind"] = "router"
     gw_id = by_mac.get(gw_mac, "inet")
 
+    # a router before the gateway (double NAT, e.g. a provider's router in front of a firewall): the second hop to
+    # the internet, when it is a private address
+    if S["detect_upstream"] and gw_id != "inet":
+        up_ip = upstream_router(gw_ip)
+        if up_ip:
+            zh = next((h for h in hosts if up_ip in (h.get("_ips") or ())), None)
+            site = (cfg.get("settings", {}).get("site_topology") or {})
+            up_name = (zh and zh["name"]) or site.get("upstream_name") or dns.get(up_ip) or "Upstream router"
+            add("up-router", "inet", name=up_name, sub=up_ip, icon="router", kind="upstream", status="up", ip=up_ip,
+                zbx=zh["hostid"] if zh else "", via="traceroute",
+                details=[["IP", up_ip], ["Link from", "the second hop to the internet: a router before the gateway (double NAT)"]])
+            nodes[gw_id]["parent"] = "up-router"
+            say(f"Upstream router before the gateway: {up_name} ({up_ip})")
+
     # switches in BFS order from the root switch
     # ---- evidence for each link between switches: LLDP/CDP (above), STP, LACP, and your confirmations
     link_ev = {k: ["MAC table" if k in mac_links else "LLDP/CDP"] for k in sw_link}
@@ -990,6 +1028,8 @@ def full_scan(api, community=None, quiet=False):
             link_kind = "fiber" if gw_loc and sid == root_sw and _pinfo.get((sid, gw_loc[1]), {}).get("media") else ""
             link_via = "mac" if gw_loc and sid == root_sw else ""
             parent, lbl = gw_id, (plabel(sid, gw_loc[1]) if gw_loc and sid == root_sw else "")
+            if sid != root_sw and root_sw and "s-" + root_sw in nodes:
+                parent, link_via, lbl = "s-" + root_sw, "behind", ""    # no evidence: guessed, below the core switch
             pref = [sid, pid_of(sid, gw_loc[1])] if gw_loc and sid == root_sw else None
         add("s-" + sid, parent, name=h["name"], sub="." + h["_snmp"]["ip"].split(".")[-1], icon="server-2",
             kind="switch", sw=sid, status="up", port=lbl, port_ref=pref, zbx=sid, flip=sid not in parent_of, link=link_kind, via=link_via,
@@ -1012,6 +1052,11 @@ def full_scan(api, community=None, quiet=False):
 
     # devices on switch ports (online, remembered, or pinned)
     placed = {gw_mac} if gw_mac else set()
+
+    for n_ in nodes.values():                                 # say it in the panel: a switch placed without evidence
+        if n_.get("kind") == "switch" and n_.get("via") == "behind":
+            n_["details"].append(["Link from", "guessed: no LLDP, spanning tree, LACP or MAC table evidence - drawn below the "
+                                               "core switch (confirm the real link in a panel, or set the core switch in Settings)"])
 
     def pin_loc(mac):
         pin = dcfg.get(mac, {}).get("pin", "")
@@ -1785,6 +1830,15 @@ def build_inventory(nodes, sw, unifi_inv):
     for x in out:
         x["firmware_differs"] = len(by_model.get(x.get("model"), ())) > 1
     return out
+
+
+def core_switch_id(sw, want):
+    """The switch named (or with the IP) set as core switch in Settings, or None."""
+    want = str(want or "").strip().lower()
+    if not want:
+        return None
+    return next((k for k, s_ in sw.items() if want in (s_["host"]["name"].lower(), s_["host"]["host"].lower())
+                 or want in {str(i) for i in s_["host"].get("_ips", ())}), None)
 
 
 def recheck_speed(auth, target, ifindex):
@@ -3164,7 +3218,7 @@ def job_lock(name, wait):
 from spidermap_infer import mac_switch_links, CLASSIFY, DEVICE_CATEGORIES, DEVICE_CATEGORY_KEYS, HINTS_FILE, PLACE_KINDS, VIA_GUESSED, VIA_TEXT, classify, link_state_pairs, link_suggestions, traffic_match, update_hints, update_traffic_hints  # noqa: E402,F401
 from spidermap_settings import SECRETS_FILE, SECRET_KEYS, SETTINGS_BY_KEY, SETTINGS_KEYS, SETTINGS_SCHEMA, _S, effective_settings, load_secrets, permissions, save_secrets, scan_target_count, scan_targets, validate_settings  # noqa: E402,F401
 from spidermap_speed import CF_BASE, FAST_API, FAST_HOME, OOKLA_SERVERS, SPEED_SECONDS, _latency, _speedtest_cloudflare, _speedtest_fast, _speedtest_once, _transfer, ookla_servers  # noqa: E402,F401
-from spidermap_wan import GAP_S, UPNP_SEARCH, UPNP_STUCK, _overlap, inet_start, inet_update, measure_wan, month_uptime, read_router_snmp, read_upnp, router_wan_ifindex, unifi_fetch, upnp_call, upnp_counters, upnp_discover, upnp_link_mbps, upnp_wan_service  # noqa: E402,F401
+from spidermap_wan import upstream_router, GAP_S, UPNP_SEARCH, UPNP_STUCK, _overlap, inet_start, inet_update, measure_wan, month_uptime, read_router_snmp, read_upnp, router_wan_ifindex, unifi_fetch, upnp_call, upnp_counters, upnp_discover, upnp_link_mbps, upnp_wan_service  # noqa: E402,F401
 from spidermap_gateway import GATEWAY_PHP, gateway_code  # noqa: E402,F401
 
 

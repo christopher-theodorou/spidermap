@@ -4,6 +4,32 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.7] - 2026-11-09
+
+Found on Nikolaos Karanikolas's network, with his review and diagnostics - thank you.
+
+### Fixed
+- **A link reported from one side only was ignored.** Some switches (TP-Link) do not report their LLDP neighbours;
+  the switches behind them (MikroTik) do. The tree grows from the core outwards and only followed links reported by
+  the switch above, so everything behind such a core was drawn straight under the gateway. A link now counts in
+  both directions, whichever end reports it.
+- **MAC tables: a branch already linked to itself was never connected to the core.** A switch linked to *any*
+  other (B-C by LLDP) was skipped, even when that group was not connected to the core. The search now works branch
+  by branch from the core outwards, and two equally close candidates are refused rather than guessed.
+- **A switch's identity in other MAC tables** now also comes from its interfaces' MACs (not only ARP and the bridge
+  MAC); zero, broadcast and multicast addresses are ignored.
+- **Without allowed networks, only the networks this server is on are mapped** - not the network of every SNMP host
+  in Zabbix, which can include other sites (1,778 addresses: the ping sweep was skipped and those hosts scanned).
+
+### Added
+- **Core switch** (Settings > Topology): name or IP; empty = the switch the gateway is connected to. A switch with no
+  link evidence is drawn below it, dotted and explained in its panel - no longer straight under the gateway. A
+  `site_topology.core_ip` from earlier modified installations is used automatically.
+- **An upstream router** in front of the gateway (double NAT - a provider's router before a firewall) is found from
+  the second hop to the internet and drawn between the internet and the gateway, named after its Zabbix host.
+- **The scan log says why** a switch stays unlinked (its MAC unknown, seen only toward the gateway, or in no table),
+  and which switch reports a link the other does not.
+
 ## [0.9.6] - 2026-11-09
 
 ### Fixed
@@ -520,6 +546,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.7]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.7
 [0.9.6]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.6
 [0.9.5]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.5
 [0.9.4]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.4

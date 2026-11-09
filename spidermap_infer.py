@@ -200,30 +200,50 @@ def link_suggestions(hints, data, links, min_n=2):
     return out[:20]
 
 
-def mac_switch_links(ports, own, gw_mac, has_link):
-    """Links between switches from the MAC tables, for switches no better evidence links (no LLDP, STP, LACP).
-    ports: {switch: [port records with "name", "macs"]}, own: {switch: its own MACs}, gw_mac: the gateway's MAC,
-    has_link: switches already linked. Switch B is behind the port of switch A that sees B's MAC - not a port toward
-    the gateway (that one leads up) - and of those the one with the fewest MACs (the closest). Returns
+def mac_switch_links(ports, own, gw_mac, links, root):
+    """Links between switches from the MAC tables, branch by branch, for whatever no better evidence (LLDP, STP,
+    LACP, a confirmation) has connected to the core yet.
+    ports: {switch: [port records with "name", "macs"]}; own: {switch: its own MACs (management, bridge, interfaces)};
+    gw_mac: the gateway's MAC; links: existing links {(a, b)} - any direction; root: the core switch (by the gateway).
+    Each round links the closest switch not yet reachable from the core - switch B is behind the port of a reachable
+    switch A that sees B's MAC, is not a port toward the gateway (that one leads up) and has the fewest MACs - which
+    also brings in whatever B is already linked to (a branch connected by LLDP, say). Returns
     [(A, A's port, B, B's port toward A or "")]. Without the gateway's MAC there is no "up", so there are no links."""
-    if not gw_mac:
+    if not gw_mac or root not in ports:
         return []
+    adj = {}
+    for a, b in links:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+
+    def reachable():
+        seen, todo = {root}, [root]
+        while todo:
+            for n in adj.get(todo.pop(), ()):
+                if n not in seen:
+                    seen.add(n)
+                    todo.append(n)
+        return seen
     out = []
-    for b, mb in own.items():
-        if b in has_link or not mb:
-            continue
-        best = None
-        for a, plist in ports.items():
-            if a == b:
+    while True:
+        here, best, tie = reachable(), None, False
+        for b in ports:
+            mb = own.get(b) or set()
+            if b in here or not mb:
                 continue
-            for p in plist:
-                macs = set(p.get("macs") or ())
-                if gw_mac in macs or not mb & macs:
-                    continue
-                if best is None or len(macs) < best[2]:
-                    best = (a, p["name"], len(macs))
-        if best:
-            a = best[0]
-            pb = next((p["name"] for p in ports[b] if gw_mac in (p.get("macs") or ()) or own.get(a, set()) & set(p.get("macs") or ())), "")
-            out.append((a, best[1], b, pb))
-    return out
+            for a in here:
+                for p in ports.get(a, ()):
+                    macs = set(p.get("macs") or ())
+                    if gw_mac in macs or not mb & macs:
+                        continue                         # the port toward the gateway leads up, not down
+                    if best is None or len(macs) < best[0]:
+                        best, tie = (len(macs), a, p["name"], b), False
+                    elif len(macs) == best[0] and b == best[3] and a != best[1]:
+                        tie = True                       # two switches equally close: do not guess
+        if not best or tie:
+            return out
+        _n, a, pa, b = best
+        pb = next((p["name"] for p in ports[b] if gw_mac in (p.get("macs") or ()) or (own.get(a) or set()) & set(p.get("macs") or ())), "")
+        out.append((a, pa, b, pb))
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)

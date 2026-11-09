@@ -61,6 +61,7 @@ BRIDGE = {}         # hostid -> {"mac": bridge MAC, "root": root bridge MAC, "ro
 V6 = {}             # hostid -> {mac: [IPv6 addresses]} from the switch's / router's neighbour table
 POE_TOTAL = {}      # hostid -> watts the switch delivers over PoE
 TTL = {}            # ip -> TTL of its ping reply, from the last sweep
+IFMACS = {}         # hostid -> the MACs of the switch's own interfaces (ifPhysAddress): who it is in other MAC tables
 INVENTORY = {}      # hostid -> {"model", "serial", "firmware", "hardware", "vendor", "descr", "location", "contact", "object_id"}
 ENTITY = "1.3.6.1.2.1.47.1.1.1.1"   # ENTITY-MIB entPhysicalTable
 SYSTEM = {"descr": "1.3.6.1.2.1.1.1", "object_id": "1.3.6.1.2.1.1.2", "contact": "1.3.6.1.2.1.1.4", "location": "1.3.6.1.2.1.1.6"}
@@ -87,6 +88,7 @@ FACTS = {           # optional standard tables: duplex, STP, LACP partner, PoE, 
     "stp_dport": "1.3.6.1.2.1.17.2.15.1.9", "lacp_psys": "1.2.840.10006.300.43.1.2.1.1.9",
     "lacp_pport": "1.2.840.10006.300.43.1.2.1.1.17", "poe_status": "1.3.6.1.2.1.105.1.1.1.6",
     "poe_class": "1.3.6.1.2.1.105.1.1.1.10", "poe_total": "1.3.6.1.2.1.105.1.3.1.1.4", "ip6": "1.3.6.1.2.1.4.35.1.4",
+    "ifmac": "1.3.6.1.2.1.2.2.1.6",
 }
 STP_STATE = {"1": "disabled", "2": "blocking", "3": "listening", "4": "learning", "5": "forwarding", "6": "broken"}
 
@@ -336,7 +338,7 @@ def scan_switch(h, community, hosts):
             fx[k] = at.snmpwalk(auth, target, FACTS[k])
         except Exception:  # noqa: BLE001
             fx[k] = {}
-    for k in ("stp_base", "stp_root", "stp_rootport", "stp_dbridge", "stp_dport", "lacp_psys", "lacp_pport", "ip6"):
+    for k in ("stp_base", "stp_root", "stp_rootport", "stp_dbridge", "stp_dport", "lacp_psys", "lacp_pport", "ip6", "ifmac"):
         try:
             fx[k] = at.snmpwalk(auth + ["-Ox"], target, FACTS[k])
         except Exception:  # noqa: BLE001
@@ -351,6 +353,8 @@ def scan_switch(h, community, hosts):
         stp[bport.get(bp, bp)] = {"state": STP_STATE.get(str(st).strip(), str(st)), "dbridge": mac_of(fx["stp_dbridge"].get(bp, "")),
                                   "dport": str((int.from_bytes(bytes(dp), "big") & 0x0FFF)) if dp else ""}
     V6[h["hostid"]] = ip6_neighbours(fx["ip6"])
+    IFMACS[h["hostid"]] = {m for m in (mac_of(v) for v in fx["ifmac"].values())   # not zero, broadcast or multicast
+                           if m and m not in ("00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff") and not int(m[:2], 16) & 1}
     try:                                                      # inventory: model, serial, firmware (ENTITY-MIB)
         ent = {k: v for col in ("2", "5", "8", "9", "10", "11", "12", "13")
                for k, v in ((f"{col}.{i}", x) for i, x in at.snmpwalk(auth, target, f"{ENTITY}.{col}").items())}
@@ -412,6 +416,20 @@ def scan_switch(h, community, hosts):
             "poe": poe.get(idx),
         })
     return ports, arp
+
+
+def local_nets():
+    """The IPv4 networks this server is on (its own addresses), at most /22 each - the network SpiderMap maps when no
+    allowed networks are set. Never the networks of every SNMP host in Zabbix (those can be other sites)."""
+    out = set()
+    try:
+        r = subprocess.run(["ip", "-4", "-o", "addr", "show", "scope", "global"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    for m in re.finditer(r"inet (\d+\.\d+\.\d+\.\d+)/(\d+)", r.stdout):
+        ip, pfx = m.group(1), max(int(m.group(2)), 22)
+        out.add(str(ipaddress.ip_network(f"{ip}/{pfx}", strict=False)))
+    return sorted(out)
 
 
 def default_gateway():

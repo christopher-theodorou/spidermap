@@ -415,7 +415,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.6";
+const PAGE_VERSION = "0.9.7";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -508,7 +508,7 @@ function viewNodes() {
   if (curView() !== "l3") return DATA.nodes;
   const gw = DATA.nodes.find(n => n.kind === "router"), out = [], nets = {};
   DATA.nodes.forEach(n => {
-    if (n.kind === "inet" || n.kind === "router") { out.push(n); return; }
+    if (n.kind === "inet" || n.kind === "router" || n.kind === "upstream") { out.push(n); return; }
     if (n.kind === "group") return;                    // port groups and Wi-Fi mean nothing in this view
     const ip = n.ip || ((n.details || []).find(d => d[0] === "IP") || [])[1] || "";
     const m = /^(\d+\.\d+\.\d+)\.\d+$/.exec(ip), key = m ? m[1] + ".0/24" : "no address", id = "sn-" + key;
@@ -1649,7 +1649,7 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Discard": "Απόρριψη", "Reset positions": "Επαναφορά θέσεων", "Reset and forget": "Επαναφορά και διαγραφή", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
+  "Max-repetitions": "Max-repetitions", "Core switch": "Κεντρικό switch", "Find an upstream router": "Εύρεση router πριν την πύλη", "Discard": "Απόρριψη", "Reset positions": "Επαναφορά θέσεων", "Reset and forget": "Επαναφορά και διαγραφή", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
   "Export the map (PNG, SVG)": "Εξαγωγή χάρτη (PNG, SVG)", "Logical view (by subnet)": "Λογική προβολή (ανά υποδίκτυο)", "Physical view": "Φυσική προβολή",
   "Free layout": "Ελεύθερη διάταξη", "Back to the tree": "Πίσω στο δέντρο", "Reset positions": "Επαναφορά θέσεων", "Green Spider": "Πράσινη Αράχνη", "Blue Spider": "Μπλε Αράχνη", "Red Spider": "Κόκκινη Αράχνη", "Inventory": "Απογραφή", "Network devices": "Συσκευές δικτύου", "All devices": "Όλες οι συσκευές",
   "Search": "Αναζήτηση", "Serial": "Σειριακός", "Firmware": "Firmware", "Hardware": "Hardware", "Uptime": "Χρόνος λειτουργίας",
@@ -1923,7 +1923,7 @@ const DEVICON_OF = { router: "router", firewall: "firewall", switch: "switch", u
   server: "server", hypervisor: "hypervisor", nas: "nas", printer: "printer", pc: "pc", laptop: "laptop", phone: "phone", tv: "tv",
   iot: "iot", industrial: "iot", ups: "ups", ont: "ont", vm: "vm", lxc: "vm", guest: "vm", mediaconv: "ont" };
 function devIcon(n) {
-  const k = n.kind === "inet" ? "inet" : n.kind === "switch" ? "switch" : n.kind === "router" ? "router"
+  const k = n.kind === "inet" ? "inet" : n.kind === "switch" ? "switch" : n.kind === "router" || n.kind === "upstream" ? "router"
     : n.kind === "group" ? (n.icon === "wifi" ? "wifi" : n.icon === "network" ? "subnet" : n.inferred || n.type === "switch" ? "switch" : DEVICON_OF[n.type]) : DEVICON_OF[n.type];
   // the drawing itself, not a <use> reference: the theme's CSS cannot reach into a <use>
   return k && DEVICONS[k] ? `<svg class="di" viewBox="0 0 48 48" aria-hidden="true">${DEVICONS[k]}</svg>` : null;
@@ -1931,7 +1931,7 @@ function devIcon(n) {
 
 /* ---------- the map as SVG or PNG (current theme; device drawings instead of font icons, so it looks the same anywhere) ---------- */
 function diKey(n) {
-  return n.kind === "inet" ? "inet" : n.kind === "switch" ? "switch" : n.kind === "router" ? "router"
+  return n.kind === "inet" ? "inet" : n.kind === "switch" ? "switch" : n.kind === "router" || n.kind === "upstream" ? "router"
     : n.kind === "group" ? (n.icon === "wifi" ? "wifi" : n.icon === "network" ? "subnet" : n.inferred || n.type === "switch" ? "switch" : DEVICON_OF[n.type]) : DEVICON_OF[n.type];
 }
 const fitText = (t, max) => { t = String(t || ""); return t.length > max ? t.slice(0, max - 1) + "…" : t; };   // a node is 104 px wide

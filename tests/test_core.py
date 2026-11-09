@@ -939,13 +939,30 @@ def test_mac_switch_links():
              "A": [{"name": "p1", "macs": [GW, "mROOT", "d9"]}, {"name": "p3", "macs": ["mB", "d2", "d3"]}, {"name": "p4", "macs": ["d1"]}],
              "B": [{"name": "p1", "macs": [GW, "mROOT", "mA", "d1", "d9"]}, {"name": "p2", "macs": ["d2"]}, {"name": "p3", "macs": ["d3"]}]}
     own = {"ROOT": {"mROOT"}, "A": {"mA"}, "B": {"mB"}}
-    links = sorted(sm.mac_switch_links(ports, own, GW, set()))
+    links = sorted(sm.mac_switch_links(ports, own, GW, set(), "ROOT"))
     check("MAC tables: a chain of switches without LLDP is found (ROOT p5 -> A, A p3 -> B), with each one's uplink",
           links == [("A", "p3", "B", "p1"), ("ROOT", "p5", "A", "p1")], links)
-    check("MAC tables: the switch next to the gateway is never put behind another one", all(b != "ROOT" for _, _, b, _ in links))
-    check("MAC tables: a switch already linked (LLDP) is left alone", sorted(sm.mac_switch_links(ports, own, GW, {"B"})) == [("ROOT", "p5", "A", "p1")])
-    check("MAC tables: nothing without the gateway's MAC (no direction)", sm.mac_switch_links(ports, own, None, set()) == [])
-
+    check("MAC tables: the core switch is never put behind another one", all(b != "ROOT" for _, _, b, _ in links))
+    # the bug Nikolaos's review found: A -> B only in the MAC tables, B -> C by LLDP. B must still be found.
+    ports2 = {"ROOT": [{"name": "p1", "macs": [GW]}, {"name": "p5", "macs": ["mA", "mB", "mC", "d1"]}],
+              "A": [{"name": "p1", "macs": [GW, "mROOT"]}, {"name": "p2", "macs": ["mB", "mC", "d1"]}],
+              "B": [{"name": "p1", "macs": [GW, "mROOT", "mA"]}, {"name": "p4", "macs": ["mC", "d1"]}],
+              "C": [{"name": "p1", "macs": [GW, "mROOT", "mA", "mB"]}, {"name": "p2", "macs": ["d1"]}]}
+    own2 = {"ROOT": {"mROOT"}, "A": {"mA"}, "B": {"mB"}, "C": {"mC"}}
+    got = sorted(sm.mac_switch_links(ports2, own2, GW, {("B", "C"), ("C", "B")}, "ROOT"))
+    check("MAC tables: a branch already linked by LLDP (B-C) is still connected to the core (ROOT -> A -> B)",
+          got == [("A", "p2", "B", "p1"), ("ROOT", "p5", "A", "p1")], got)
+    check("MAC tables: what is already connected to the core is left alone",
+          sm.mac_switch_links(ports, own, GW, {("ROOT", "A"), ("A", "B")}, "ROOT") == [])
+    check("MAC tables: nothing without the gateway's MAC (no direction)", sm.mac_switch_links(ports, own, None, set(), "ROOT") == [])
+    tie = {"ROOT": [{"name": "p1", "macs": [GW]}, {"name": "p5", "macs": ["mB", "x"]}],
+           "A": [{"name": "p1", "macs": [GW]}, {"name": "p2", "macs": ["mB", "y"]}],
+           "B": [{"name": "p1", "macs": [GW]}]}
+    check("MAC tables: two switches equally close to a third - no guess", sm.mac_switch_links(tie, {"ROOT": {"r"}, "A": {"a"}, "B": {"mB"}}, GW, {("ROOT", "A")}, "ROOT") == [])
+    sw = {"1": {"host": {"name": "Core", "host": "core", "_ips": {"192.168.5.2"}}}, "2": {"host": {"name": "Edge", "host": "edge", "_ips": {"192.168.5.3"}}}}
+    check("core switch: by name or by IP (the old site_topology core_ip works too)",
+          sm.core_switch_id(sw, "core") == "1" and sm.core_switch_id(sw, "192.168.5.3") == "2" and sm.core_switch_id(sw, "") is None
+          and sm.effective_settings({"site_topology": {"core_ip": "192.168.5.2"}})["core_switch"] == "192.168.5.2")
 
 def main():
     test_gateway_step()

@@ -91,6 +91,12 @@ SETTINGS_SCHEMA = [
     _S("infer_switches", "bool", True, "Topology", "Link sources", "Find hidden switches",
        help="Several devices on one port without LLDP: drawn behind an 'Unmanaged switch' (dashed), or behind the "
             "access point or hypervisor that is one of them."),
+    _S("core_switch", "str", "", "Topology", "Link sources", "Core switch", maxlen=120,
+       help="Name or IP of your main switch. Empty: the switch the gateway is connected to. Switches without any link "
+            "evidence are drawn below it, dotted."),
+    _S("detect_upstream", "bool", True, "Topology", "Link sources", "Find an upstream router",
+       help="A router in front of your gateway (double NAT - a provider's router before a firewall) is drawn between "
+            "the internet and the gateway, found from the second hop to the internet."),
     _S("layout", "choice", "tree", "Topology", "Layout", "Map layout",
        choices=[["tree", "Tree"], ["free", "Free: drag nodes where you want them"]],
        help="Free: links are straight lines and every node you move keeps its place after new scans (per browser). "
@@ -190,6 +196,8 @@ def effective_settings(settings):
         v = _get(settings, key, None)
         if key == "permissions.view" and v is None:
             v = settings.get("view_min_user_type")                     # before 0.4.0
+        if key == "core_switch" and not v:
+            v = (settings.get("site_topology") or {}).get("core_ip") or None   # a declared site topology (earlier forks)
         if key == "skin" and v in ("clean", "midnight", "ops"):
             v = "spidermap"                                            # 0.9.0-0.9.3 colour themes, removed
         if key == "wan_source" and v == "auto":
