@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.4"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.5"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -535,6 +535,19 @@ def full_scan(api, community=None, quiet=False):
 
     S = effective_settings(cfg.get("settings", {}))
     scan_progress(2, "starting")
+    outside = []
+    if S["scan_subnets"]:
+        nets_ = [ipaddress.ip_network(n, strict=False) for n in S["scan_subnets"]]
+
+        def _inside(h):
+            try:
+                return any(ipaddress.ip_address((h["_snmp"] or {}).get("ip", "")) in n for n in nets_)
+            except ValueError:
+                return True                                  # a DNS name: we cannot tell, so it stays
+        outside = [h["name"] for h in switches if not _inside(h)]
+        switches = [h for h in switches if _inside(h)]
+        if outside:
+            say(f"Not scanned (outside the allowed networks): {', '.join(outside)}")
     at.SNMP_WALK.update(timeout_s=S["snmp_timeout_ms"] / 1000, retries=S["snmp_retries"], max_rep=S["snmp_max_repetitions"])
     zp.CDP_ON = S["topo_cdp"]
     nets = S["scan_subnets"] or sorted({str(ipaddress.ip_network(f"{h['_snmp']['ip']}/24", strict=False))
@@ -612,6 +625,11 @@ def full_scan(api, community=None, quiet=False):
 
     def pos_of(sid, pname):
         return _pinfo[(sid, pname)].get("pos", 0) if (sid, pname) in _pinfo else 0
+    not_switches = [k for k, s_ in sw.items() if not any(p["macs"] for p in s_["ports"])
+                    and sum(1 for p in s_["ports"] if p.get("kind", "port") == "port") < 5]
+    for k in not_switches:                                   # an access point, NAS, IPMI ...: a device, still linked to Zabbix
+        say(f"  {sw[k]['host']['name']}: no MAC table and fewer than 5 ports - drawn as a device, not as a switch")
+        sw.pop(k)
     ipmap = {m: v[0] for m, v in arp.items()}
     dns = zp.rdns_all(sorted(set(ipmap.values())))
     gw_ip = zp.default_gateway()
@@ -637,6 +655,29 @@ def full_scan(api, community=None, quiet=False):
                     sw_link[(sid, peer["hostid"])] = (p["name"], nb["remote_port"])
                 elif peer:
                     host_port[(sid, p["name"])] = peer
+
+    # ---------------- switches without LLDP: switch B's own MAC on a port of switch A that does not lead up to the
+    # gateway means B sits behind that port (the closest such port: the one with the fewest MACs)
+    mac_links = set()
+    if S["topo_fdb"] and gw_mac:
+        ip2mac = {}
+        for m_, ip_ in ipmap.items():
+            ip2mac.setdefault(ip_, set()).add(m_)
+        own = {}
+        for k, s_ in sw.items():
+            ms = set().union(*[ip2mac.get(ip_, set()) for ip_ in s_["host"]["_ips"]]) if s_["host"]["_ips"] else set()
+            if zp.BRIDGE.get(k, {}).get("mac"):
+                ms.add(zp.BRIDGE[k]["mac"])
+            own[k] = ms
+        for a, pa, b, pb in mac_switch_links({k: s_["ports"] for k, s_ in sw.items()}, own, gw_mac,
+                                             {x for pair in sw_link for x in pair}):
+            sw_link[(a, b)] = (pa, pb)
+            mac_links.add((a, b))
+            uplink.add((a, pa))
+            if pb:
+                uplink.add((b, pb))
+        if mac_links:
+            say(f"  links between switches from the MAC tables: {len(mac_links)}")
 
     # ---------------- where is each MAC right now (access port with fewest MACs)
     seen_at = {}
@@ -861,7 +902,7 @@ def full_scan(api, community=None, quiet=False):
 
     # switches in BFS order from the root switch
     # ---- evidence for each link between switches: LLDP/CDP (above), STP, LACP, and your confirmations
-    link_ev = {k: ["LLDP/CDP"] for k in sw_link}
+    link_ev = {k: ["MAC table" if k in mac_links else "LLDP/CDP"] for k in sw_link}
     bmac = {zp.BRIDGE[k]["mac"]: k for k in sw if zp.BRIDGE.get(k, {}).get("mac")}
     redundant = []
 
@@ -937,7 +978,8 @@ def full_scan(api, community=None, quiet=False):
             agg = next((q for q in sw[par]["ports"] if mine.get("lag") and str(q.get("ifindex")) == str(mine["lag"])), None) \
                 or (mine if mine.get("kind") == "lag" else None)
             ev_ = link_ev.get((par, sid)) or link_ev.get((sid, par)) or []
-            link_via = "manual" if "confirmed" in ev_ else "lldp" if "LLDP/CDP" in ev_ else "stp" if "STP" in ev_ else "lacp" if "LACP" in ev_ else "lldp"
+            link_via = ("manual" if "confirmed" in ev_ else "lldp" if "LLDP/CDP" in ev_ else "stp" if "STP" in ev_ else "lacp" if "LACP" in ev_
+                        else "mac" if "MAC table" in ev_ else "lldp")
             if agg:
                 members = [q["label"].replace("Port ", "") for q in sw[par]["ports"] if str(q.get("lag")) == str(agg.get("ifindex"))]
                 lbl = f"{agg['label']}" + (f" ({'+'.join(members)})" if members else "") + f" ↔ {rb['label'].replace('Port ', '') if rb else pb}"
@@ -2089,7 +2131,9 @@ def apply_settings_request(req):
             shutil.rmtree(os.path.join(STATE_DIR, d), ignore_errors=True)
         audit("reset", by, {"keep_devices": keep_dev, "keep_speedtests": keep_sp, "backup": bdir})
         add_events([ev("audit", "info", f"{by} reset the map" + ("" if keep_dev else " and forgot the device names"))])
-        res.update(ok=True, restart=True, message="Map reset. A new scan starts now; the map appears within a few minutes.")
+        res.update(ok=True, restart=True, message="Map reset. A new scan starts now; the map appears within a few minutes."
+                   + ("" if keep_dev else " Your device settings can be brought back: Settings > General > Saved versions > "
+                                          "'before map reset'."))
         return res
     if "restore" in req:
         rid = str(req["restore"])
@@ -3117,7 +3161,7 @@ def job_lock(name, wait):
 
 
 # ---- the parts kept in their own modules (they use the helpers above) ----
-from spidermap_infer import CLASSIFY, DEVICE_CATEGORIES, DEVICE_CATEGORY_KEYS, HINTS_FILE, PLACE_KINDS, VIA_GUESSED, VIA_TEXT, classify, link_state_pairs, link_suggestions, traffic_match, update_hints, update_traffic_hints  # noqa: E402,F401
+from spidermap_infer import mac_switch_links, CLASSIFY, DEVICE_CATEGORIES, DEVICE_CATEGORY_KEYS, HINTS_FILE, PLACE_KINDS, VIA_GUESSED, VIA_TEXT, classify, link_state_pairs, link_suggestions, traffic_match, update_hints, update_traffic_hints  # noqa: E402,F401
 from spidermap_settings import SECRETS_FILE, SECRET_KEYS, SETTINGS_BY_KEY, SETTINGS_KEYS, SETTINGS_SCHEMA, _S, effective_settings, load_secrets, permissions, save_secrets, scan_target_count, scan_targets, validate_settings  # noqa: E402,F401
 from spidermap_speed import CF_BASE, FAST_API, FAST_HOME, OOKLA_SERVERS, SPEED_SECONDS, _latency, _speedtest_cloudflare, _speedtest_fast, _speedtest_once, _transfer, ookla_servers  # noqa: E402,F401
 from spidermap_wan import GAP_S, UPNP_SEARCH, UPNP_STUCK, _overlap, inet_start, inet_update, measure_wan, month_uptime, read_router_snmp, read_upnp, router_wan_ifindex, unifi_fetch, upnp_call, upnp_counters, upnp_discover, upnp_link_mbps, upnp_wan_service  # noqa: E402,F401

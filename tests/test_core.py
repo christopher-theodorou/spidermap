@@ -932,6 +932,21 @@ def test_traffic_correlation():
     check("traffic: switches already linked are not compared", hints2 == {})
 
 
+def test_mac_switch_links():
+    GW = "aa:00:00:00:00:01"
+    # gateway - ROOT - (port 5) A - (port 3) B ; no LLDP anywhere. Each switch sees the others' MACs on its ports.
+    ports = {"ROOT": [{"name": "p1", "macs": [GW]}, {"name": "p5", "macs": ["mA", "mB", "d1", "d2", "d3"]}, {"name": "p7", "macs": ["d9"]}],
+             "A": [{"name": "p1", "macs": [GW, "mROOT", "d9"]}, {"name": "p3", "macs": ["mB", "d2", "d3"]}, {"name": "p4", "macs": ["d1"]}],
+             "B": [{"name": "p1", "macs": [GW, "mROOT", "mA", "d1", "d9"]}, {"name": "p2", "macs": ["d2"]}, {"name": "p3", "macs": ["d3"]}]}
+    own = {"ROOT": {"mROOT"}, "A": {"mA"}, "B": {"mB"}}
+    links = sorted(sm.mac_switch_links(ports, own, GW, set()))
+    check("MAC tables: a chain of switches without LLDP is found (ROOT p5 -> A, A p3 -> B), with each one's uplink",
+          links == [("A", "p3", "B", "p1"), ("ROOT", "p5", "A", "p1")], links)
+    check("MAC tables: the switch next to the gateway is never put behind another one", all(b != "ROOT" for _, _, b, _ in links))
+    check("MAC tables: a switch already linked (LLDP) is left alone", sorted(sm.mac_switch_links(ports, own, GW, {"B"})) == [("ROOT", "p5", "A", "p1")])
+    check("MAC tables: nothing without the gateway's MAC (no direction)", sm.mac_switch_links(ports, own, None, set()) == [])
+
+
 def main():
     test_gateway_step()
     test_speedtest_due()
@@ -954,6 +969,7 @@ def main():
     test_approve()
     test_070()
     test_unifi()
+    test_mac_switch_links()
     test_080()
     test_traffic_correlation()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")

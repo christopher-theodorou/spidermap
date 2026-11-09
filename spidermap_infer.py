@@ -198,3 +198,32 @@ def link_suggestions(hints, data, links, min_n=2):
             continue
         out.append({"a": a, "b": b, "n": h["n"], "why": why})
     return out[:20]
+
+
+def mac_switch_links(ports, own, gw_mac, has_link):
+    """Links between switches from the MAC tables, for switches no better evidence links (no LLDP, STP, LACP).
+    ports: {switch: [port records with "name", "macs"]}, own: {switch: its own MACs}, gw_mac: the gateway's MAC,
+    has_link: switches already linked. Switch B is behind the port of switch A that sees B's MAC - not a port toward
+    the gateway (that one leads up) - and of those the one with the fewest MACs (the closest). Returns
+    [(A, A's port, B, B's port toward A or "")]. Without the gateway's MAC there is no "up", so there are no links."""
+    if not gw_mac:
+        return []
+    out = []
+    for b, mb in own.items():
+        if b in has_link or not mb:
+            continue
+        best = None
+        for a, plist in ports.items():
+            if a == b:
+                continue
+            for p in plist:
+                macs = set(p.get("macs") or ())
+                if gw_mac in macs or not mb & macs:
+                    continue
+                if best is None or len(macs) < best[2]:
+                    best = (a, p["name"], len(macs))
+        if best:
+            a = best[0]
+            pb = next((p["name"] for p in ports[b] if gw_mac in (p.get("macs") or ()) or own.get(a, set()) & set(p.get("macs") or ())), "")
+            out.append((a, best[1], b, pb))
+    return out

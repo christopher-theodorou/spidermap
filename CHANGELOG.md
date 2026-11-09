@@ -4,9 +4,26 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.5] - 2026-11-09
+
+### Fixed
+- **The map is drawn right from scratch, also without LLDP.** Switches that no LLDP, CDP, spanning tree or LACP
+  links were all drawn straight under the gateway: a reset (or a new install) on a network of MikroTik and TP-Link
+  switches showed a flat row. Switches are now also linked through the MAC tables: switch B's own MAC on a port of
+  switch A that does not lead up to the gateway puts B behind that port (the closest such port). Shown as "MAC
+  table" in the switch's panel. The ports between switches are no longer taken for "unmanaged switches".
+- **Only real switches are switches.** Every SNMP host in Zabbix was drawn as a switch - access points, NAS,
+  IPMI. A host with no MAC table and fewer than 5 ports is now a device (still linked to its Zabbix host).
+- **Other sites in the same Zabbix are no longer scanned.** With *Allowed networks* set, SNMP hosts outside them
+  (e.g. customers' devices monitored by the same Zabbix) are left out - they made every scan "partial".
+- **A reset no longer forgets your device settings by accident.** Forgetting names, types and pins is now a separate,
+  unticked choice with its own confirmation, and the message after a reset says how to bring them back.
+
 ## [0.9.4] - 2026-11-09
 
 ### Fixed
+- The Settings window opened in the middle of the Zabbix widget, which can be much taller than the screen, so it
+  appeared far down. It now opens at the top.
 - In *Overview* and *Inventory* the page covered the header, so its buttons (Map, Inventory, Settings, ...) could
   not be clicked until the page was reloaded. The two views now start below the header, like the map.
 
@@ -15,6 +32,11 @@ and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap 
   access point, camera, IP phone, server, hypervisor, NAS, printer, PC, laptop, mobile, TV, IoT, UPS, modem / ONT,
   VM, internet and Wi-Fi - shown as drawn devices in Green Spider, as outlines in Blue Spider and as solid shapes in
   Red Spider. Other types, and the default theme, keep their icons.
+
+- **Export the map** as a PNG image (twice the resolution) or as SVG for draw.io, Visio or Inkscape - in the current
+  theme, with device drawings instead of font icons so it looks the same in any program (button in the map controls).
+- **A label at the top of the map** when it is in the logical view or in the free layout, with the way back
+  (*Physical view*, *Back to the tree*, *Reset positions*): a node dragged away by accident is easy to put back.
 
 ### Removed
 - The colour themes Clean, Midnight and Ops (0.9.0): the spiders replace them. Whoever had chosen one gets the
@@ -490,6 +512,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.5]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.5
 [0.9.4]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.4
 [0.9.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.3
 [0.9.2]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.2
