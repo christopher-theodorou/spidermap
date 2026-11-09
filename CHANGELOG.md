@@ -4,6 +4,50 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.11] - 2026-11-10
+
+With ideas from Nikolaos Karanikolas's review - thank you.
+
+### Added
+- **Why a device is an access point**, in its panel: *Type from* - its SNMP (e.g. "2 Wi-Fi interfaces"), a switch's
+  LLDP ("announces itself as a WLAN access point"), its name (an access point model) or your choice on the map.
+- **Fortinet FortiAP** among the access point models; FortiGate and FortiSwitch never are.
+
+### Fixed
+- The 0.9.10 entry of this changelog appeared twice.
+
+## [0.9.10] - 2026-11-10
+
+### Fixed
+- **Access points are recognised by themselves, from any vendor.** The wireless clients behind an access point were
+  drawn under an "Unmanaged switch", because nothing told SpiderMap the device on that port is an access point.
+  Now, without any setting:
+  - an SNMP host with Wi-Fi interfaces (IF-MIB ifType 71 - every vendor reports it), Wi-Fi interface names
+    (wlan, ath, ra ...) or a model in its own description is an access point;
+  - a neighbour that the switch's LLDP announces as "WLAN access point" is one - also when it is not in Zabbix;
+  - a device without SNMP named like an access point model (UniFi UAP/U6/U7, TP-Link EAP, Grandstream GWN76xx, Cisco
+    Aironet/CBW/Catalyst 91xx/Meraki MR/WAP, D-Link DAP/DBA/DWL, Aruba, Ruckus, Netgear WAC/WAX, Zyxel NWA, EnGenius,
+    MikroTik cAP/wAP, Cambium, Mist) is one. The same vendors' switches, controllers and routers (UniFi switches,
+    Cloud Key, Omada controllers, Grandstream GWN78xx/70xx, TP-Link SG ...) never are.
+  Its clients on that port are drawn under it, and the scan log says why ("drawn as an access point (2 Wi-Fi
+  interfaces)"). A type you chose for a device still comes first.
+- **A hypervisor is the parent of the other devices on its port only when that is proven:** its own MAC is not a
+  virtual one, and most of the others are (VMware, Proxmox, KVM, Hyper-V, VirtualBox, Xen, Docker). A virtual machine
+  can no longer gather the other VMs under itself.
+- **Switches on a management network of their own** (routed to the SpiderMap server) are scanned again when no
+  allowed networks are set: only when some SNMP hosts are on the server's own network are the others left out.
+
+## [0.9.9] - 2026-11-10
+
+### Fixed
+- **The "Coming in 0.7.3" panel** (Settings > Wireless & WAN) was out of date: 0.7.3 was never released, and two
+  of its "not active yet" items - inferring hidden devices and manual links - have worked since 0.7.0 / 0.8.0. It
+  now lists only what is really planned, without a version number, with **TP-Link Omada** first.
+- **Tests on Python 3.11** (Debian 12): `tests/test_gateway.py` used an f-string that only Python 3.12 accepts, so it
+  had to be patched by hand before every run. Every file is now checked for this.
+- **The networks this server is on** are now also read from the kernel's routing table when the `ip` command gives
+  nothing, so a missing command can never make SpiderMap fall back to the network of every SNMP host in Zabbix.
+
 ## [0.9.8] - 2026-11-10
 
 ### Added
@@ -580,6 +624,10 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.11]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.11
+[0.9.10]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.10
+[0.9.10]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.10
+[0.9.9]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.9
 [0.9.8]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.8
 [0.9.7]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.7
 [0.9.6]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.6

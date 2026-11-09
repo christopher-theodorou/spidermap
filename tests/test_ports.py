@@ -296,6 +296,52 @@ def test_inventory():
     check("inventory: same model, different firmware is marked; a model on its own is not", out == {"SW1": True, "SW2": True, "SW3": False}, out)
 
 
+def test_local_nets():
+    import tempfile
+    rt = ("Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+          "eth0\t00000000\t0105A8C0\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"     # default via 192.168.5.1
+          "eth0\t0005A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n"     # 192.168.5.0/24, directly
+          "eth1\t0000000A\t00000000\t0001\t0\t0\t0\t000000FF\t0\t0\t0\n"     # 10.0.0.0/8 -> capped at /22
+          "eth0\t0032A8C0\t0205A8C0\t0003\t0\t0\t0\t00FFFFFF\t0\t0\t0\n")    # 192.168.50.0/24 via a router
+    with tempfile.NamedTemporaryFile("w", delete=False) as f:
+        f.write(rt)
+    got = zp._connected_routes(f.name)
+    os.unlink(f.name)
+    check("local networks: from the routing table - directly connected only, the default route and routed sites left out",
+          got == ["10.0.0.0/22", "192.168.5.0/24"], got)
+
+
+def test_access_points():
+    check("AP: Wi-Fi interfaces (ifType 71) are the proof, in either SNMP form",
+          zp.ap_evidence({"1": "6", "5": "71", "6": "ieee80211(71)"}, {}) == "2 Wi-Fi interfaces")
+    check("AP: Wi-Fi interface names when the type is not reported",
+          zp.ap_evidence({"1": "6"}, {"1": "eth0", "2": "ath0", "3": "ath1"}) == "Wi-Fi interfaces ath0, ath1")
+    check("AP: its own description (TP-Link EAP, as Nikolaos's EAP610-Outdoor reports it)",
+          "EAP6" in (zp.ap_evidence({"1": "6"}, {"1": "eth0"}, "Linux EAP610-Outdoor 4.4.60 #1 SMP PREEMPT aarch64") or ""))
+    check("AP: a switch, a NAS, an IPMI are not access points",
+          zp.ap_evidence({"1": "6", "2": "6", "3": "161"}, {"1": "GigabitEthernet0/0/1", "2": "eth0", "3": "bond0"}, "Synology DSM 7.2") is None
+          and zp.ap_evidence({"1": "6"}, {"1": "ether1"}, "RouterOS CRS310-8G+2S+") is None)
+
+
+def test_ap_models():
+    yes = ["EAP610-Outdoor", "EAP723_OUT", "TP-Link EAP245", "UAP-AC-Pro", "U6-Lite", "U7-Pro", "UniFi AP AC LR", "GWN7605", "GWN7660",
+           "Cisco Aironet 1832", "AIR-CAP2702I", "CBW240AC", "C9115AXI", "Meraki MR36", "MR33", "WAP571", "DAP-2610", "DBA-1210P",
+           "DWL-8610AP", "Aruba AP-515", "IAP-305", "Ruckus R650", "ZoneFlex 7372", "WAC540", "WAX615", "NWA1123", "ECW230",
+           "MikroTik cAP ax", "cnPilot e600", "Mist AP43", "office-access-point", "FortiAP 231F", "FAP-431F"]
+    no = ["USW-24-PoE", "UniFi Switch 8", "UCK-G2-Plus", "Cloud Key", "OC200", "Omada Controller", "GWN7813P", "GWN7062",
+          "TL-SG3218XP-M2", "SG2206MP", "CRS310-8G+2S+", "Catalyst 9300", "DESKTOP-4KQ7", "iPhone", "Synology DS418p",
+          "karanik TP Link Omada 6-Port SG2206MP", "pfSense", "Supermicro IPMI", "FortiGate 60F", "FortiSwitch 124F"]
+    wrong_yes = [x for x in yes if not zp.ap_model(x)]
+    wrong_no = [x for x in no if zp.ap_model(x)]
+    check(f"AP models: {len(yes)} access points of 15 vendors are recognised", not wrong_yes, wrong_yes)
+    check(f"AP models: {len(no)} switches, controllers, routers and computers are not", not wrong_no, wrong_no)
+    check("AP models: a device without SNMP named like an AP is typed 'ap'; a UniFi switch is not",
+          sm.classify("EAP610_IN", "TP-Link", "98:ba:5f:00:00:01") == "ap" and sm.classify("USW-Lite-8", "Ubiquiti", "74:83:c2:00:00:01") != "ap")
+    check("LLDP: 'WLAN access point' capability, as text or hex (bit 3), and not a plain bridge/router",
+          zp.lldp_says_ap("wlanAccessPoint(3)") and zp.lldp_says_ap("14 00") and zp.lldp_says_ap("10 00")
+          and not zp.lldp_says_ap("28 00") and not zp.lldp_says_ap("bridge(2) router(4)") and not zp.lldp_says_ap(""))
+
+
 def test_device_types():
     cases = [("idrac-7XK2", "Dell Inc.", "oob"), ("pve1", "Dell Inc.", "hypervisor"), ("esx01", "VMware", "hypervisor"),
              ("", "American Power Conversion", "ups"), ("nvr-office", "Hikvision", "camera"), ("SIP-T46U", "Yealink", "voip"),
@@ -320,6 +366,9 @@ def main():
     test_device_types()
     test_facts()
     test_inventory()
+    test_local_nets()
+    test_access_points()
+    test_ap_models()
     test_report()
     test_counters()
     test_zabbix_items()

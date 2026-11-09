@@ -415,7 +415,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.8";
+const PAGE_VERSION = "0.9.11";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -885,14 +885,13 @@ function smCard() {
     + (j.last_result && j.last_result !== "ok" && !j.running ? `<div class="note warnc" style="margin-top:8px">Last scan: ${esc(j.last_result)}${j.error ? " - " + esc(j.error) : ""}</div>` : "");
 }
 const SM_PREVIEW = {
-  "Wireless & WAN": [["Links between buildings (PtP / PtMP)", [["Wireless link detection", "Matches both ends of a link through the remote station's MAC in the registration table, so it does not look like a cable."],
+  "Wireless & WAN": [["Controllers", [["TP-Link Omada", "Switches, access points and their uplinks straight from the Omada controller (read-only API account), so the topology of TP-Link equipment is as exact as in Omada itself."]]],
+    ["Links between buildings (PtP / PtMP)", [["Wireless link detection", "Matches both ends of a link through the remote station's MAC in the registration table, so it does not look like a cable."],
       ["Vendor profiles", "MikroTik, Ubiquiti, Cambium, Mimosa, Siklu, LigoWave: signal, capacity, distance and frequency from each vendor's MIB."],
       ["Signal warning / critical", "Thresholds in dBm, and how wireless links are drawn on the map."]]],
     ["WAN & satellite", [["Starlink", "Latency, obstruction, speeds and outages from the dish's local gRPC API (Starlink has no SNMP)."],
       ["4G / 5G routers", "Teltonika, MikroTik LTE, Huawei, ZTE: RSRP / SINR, provider and cell."],
-      ["Active WAN in failover", "Which connection carries the traffic right now, e.g. fibre or Starlink."]]],
-    ["Unmanaged devices", [["Inferring hidden devices", "Many MACs on one switch port means an unmanaged switch or media converter: drawn as an unknown device."],
-      ["Manual links", "Fibre through media converters, links without management access."]]]],
+      ["Active WAN in failover", "Which connection carries the traffic right now, e.g. fibre or Starlink."]]]],
   "Device types": [["Firewalls & gateways", "pfSense, OPNsense, FortiGate, Sophos", "SNMP, ARP and routing tables, VPN tunnels"],
     ["ONT / modem", "Fibre routers, VDSL, cable", "ICMP to the WAN side, TR-069 where the provider allows"],
     ["UPS", "APC, Eaton, CyberPower, Riello", "UPS-MIB: load, battery, runtime, powered devices"],
@@ -906,11 +905,11 @@ const SM_PREVIEW = {
     ["Powerline & media converters", "Managed models", "Vendor tools where available"],
     ["Out-of-band management", "iLO, iDRAC, IPMI, console servers", "Separate management network"]] };
 function smPreview(tab) {
-  let h = `<h3>${esc(tab)}</h3><div class="sm-note" style="margin:0 0 14px"><i class="ti ti-info-circle"></i><span>Planned for SpiderMap 0.7.3. Shown here so you can see what is coming; nothing below is active yet.</span></div>`;
+  let h = `<h3>${esc(tab)}</h3><div class="sm-note" style="margin:0 0 14px"><i class="ti ti-info-circle"></i><span>Planned - shown so you can see what is coming. Nothing below works yet.</span></div>`;
   if (tab === "Device types")
     return h + `<div class="sm-grid">${SM_PREVIEW[tab].map(c => `<div class="sm-cat"><b>${esc(c[0])}</b>${esc(c[1])}<div style="margin-top:6px">Detection: ${esc(c[2])}</div></div>`).join("")}</div>`;
   for (const [g, items] of SM_PREVIEW[tab])
-    h += `<h4>${esc(g)}</h4>` + items.map(([l, d]) => `<div class="sm-row sw dis"><span class="lb">${esc(l)}${smInfo(d)}<span class="sm-mini">v0.7.3</span></span><label class="sm-switch"><input type="checkbox" disabled aria-label="Not available yet"><span></span></label></div>`).join("");
+    h += `<h4>${esc(g)}</h4>` + items.map(([l, d]) => `<div class="sm-row sw dis"><span class="lb">${esc(l)}${smInfo(d)}<span class="sm-mini">planned</span></span><label class="sm-switch"><input type="checkbox" disabled aria-label="Not available yet"><span></span></label></div>`).join("");
   return h;
 }
 function smLogRows() {
@@ -922,7 +921,7 @@ function smLogRows() {
   return rows.slice(0, 12).map(r => `<div><span>${new Date(r[0] * 1000).toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span><b class="${r[1] === "ERROR" ? "badc" : ""}" style="color:${r[1] === "ERROR" ? "" : "var(--sm-text)"}">${r[1]}</b><span>${esc(r[2])}</span></div>`).join("") || '<div><span></span><span></span><span style="color:var(--muted)">Nothing yet.</span></div>';
 }
 function smTab(tab) {
-  if (tab === "Wireless & WAN") return `<h3>Wireless & WAN</h3>${smGroups(tab)}<div class="sm-sep" style="margin:22px 0 4px"></div>` + smPreview(tab).replace(/^<h3>[^]*?<\/h3>/, `<h4>Coming in 0.7.3<span class="sm-mini">v0.7.3</span></h4>`);
+  if (tab === "Wireless & WAN") return `<h3>Wireless & WAN</h3>${smGroups(tab)}<div class="sm-sep" style="margin:22px 0 4px"></div>` + smPreview(tab).replace(/^<h3>[^]*?<\/h3>/, `<h4>Planned<span class="sm-mini">not active yet</span></h4>`);
   if (tab === "Device types") {
     const off = SM.draft.device_types_off || [], cats = SETTINGS.device_categories || [];
     const cnt = k => DATA ? DATA.nodes.filter(n => n.kind === "device" && n.type === k).length : 0;
@@ -1660,7 +1659,7 @@ const EL = {
   "Remove confirmation": "Αφαίρεση επιβεβαίωσης", "Suggested links": "Προτεινόμενες συνδέσεις", "STP blocked": "Μπλοκαρισμένο από STP",
   "Confirm": "Επιβεβαίωση", "Reject": "Απόρριψη", "IPv6": "IPv6", "TTL": "TTL", "Power": "Τροφοδοσία", "UniFi controller": "Ελεγκτής UniFi", "Controller address": "Διεύθυνση ελεγκτή", "Site": "Site",
   "User": "Χρήστης", "Password": "Κωδικός", "Certificate fingerprint": "Αποτύπωμα πιστοποιητικού", "set · type to change": "ορίστηκε · πληκτρολογήστε για αλλαγή",
-  "Wi-Fi": "Wi-Fi", "Wireless clients": "Ασύρματες συσκευές", "Coming in 0.7.3": "Έρχεται στην 0.7.3", "Categories switched off": "Απενεργοποιημένες κατηγορίες",
+  "Wi-Fi": "Wi-Fi", "Wireless clients": "Ασύρματες συσκευές", "Planned": "Σχεδιάζεται", "not active yet": "δεν λειτουργεί ακόμη", "planned": "σχεδιάζεται", "Controllers": "Controllers", "Categories switched off": "Απενεργοποιημένες κατηγορίες",
 };
 const EL_RX = [
   [/^(\d+) online$/, "$1 σε σύνδεση"], [/^(\d+) offline$/, "$1 εκτός σύνδεσης"], [/^(\d+) new \/ unknown$/, "$1 νέες / άγνωστες"],

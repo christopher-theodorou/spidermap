@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.8"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.11"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -545,7 +545,11 @@ def full_scan(api, community=None, quiet=False):
             except ValueError:
                 return True                                  # a DNS name: we cannot tell, so it stays
         outside = [h["name"] for h in switches if not _inside(h)]
-        switches = [h for h in switches if _inside(h)]
+        if not S["scan_subnets"] and len(outside) == len(switches):
+            outside = []                                     # no switch on this server's own network: the switches
+            say("No SNMP host is on this server's own network - scanning them all (Settings > Scans > Allowed networks)")
+        else:                                                # live on a management network of their own, routed to us
+            switches = [h for h in switches if _inside(h)]
         if outside:
             say(f"Not scanned (outside {'the allowed networks' if S['scan_subnets'] else 'the networks this server is on: ' + ', '.join(auto_nets)}): {', '.join(outside)}")
     at.SNMP_WALK.update(timeout_s=S["snmp_timeout_ms"] / 1000, retries=S["snmp_retries"], max_rep=S["snmp_max_repetitions"])
@@ -627,10 +631,28 @@ def full_scan(api, community=None, quiet=False):
         return _pinfo[(sid, pname)].get("pos", 0) if (sid, pname) in _pinfo else 0
     not_switches = [k for k, s_ in sw.items() if not any(p["macs"] for p in s_["ports"])
                     and sum(1 for p in s_["ports"] if p.get("kind", "port") == "port") < 5]
+    demoted = {}
     for k in not_switches:                                   # an access point, NAS, IPMI ...: a device, still linked to Zabbix
-        say(f"  {sw[k]['host']['name']}: no MAC table and fewer than 5 ports - drawn as a device, not as a switch")
-        sw.pop(k)
+        role = zp.ROLE.get(k)
+        say(f"  {sw[k]['host']['name']}: no MAC table and fewer than 5 ports - drawn as "
+            + (f"an access point ({role[1]})" if role else "a device, not as a switch"))
+        demoted[k] = sw.pop(k)["host"]
     ipmap = {m: v[0] for m, v in arp.items()}
+    # what such a host is, by its MACs (its management address, its interfaces): an access point found over SNMP
+    role_type, role_why = {}, {}
+    for k, h_ in demoted.items():
+        if zp.ROLE.get(k):
+            for m_ in {m for m, ip_ in ipmap.items() if ip_ in h_.get("_ips", ())} | zp.IFMACS.get(k, set()):
+                role_type[m_], role_why[m_] = zp.ROLE[k][0], f"its SNMP: {zp.ROLE[k][1]}"
+    # ... and what the switches' LLDP says is plugged in: a neighbour announcing "WLAN access point", from any vendor,
+    # also when it is not in Zabbix
+    for s_ in sw.values():
+        for p_ in s_["ports"]:
+            for nb, _peer in p_.get("lldp", ()):
+                if zp.lldp_says_ap(nb.get("caps")):
+                    m_ = zp.mac_of(nb.get("chassis", "")) or next((m for m, ip_ in ipmap.items() if ip_ == nb.get("mgmt_ip")), None)
+                    if m_ and m_ not in role_type:
+                        role_type[m_], role_why[m_] = "ap", f"LLDP of {s_['host']['name']}: announces itself as a WLAN access point"
     dns = zp.rdns_all(sorted(set(ipmap.values())))
     gw_ip = zp.default_gateway()
     gw_mac = next((m for m, v in arp.items() if v[0] == gw_ip), None)
@@ -838,14 +860,14 @@ def full_scan(api, community=None, quiet=False):
     def dtype(mac):
         """A device's type, the same way device_node() decides it."""
         d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
-        return c.get("type") or (g and g["kind"]) or classify(f"{dname(mac)} {d.get('dns', '')}", vendor_of(mac), mac,
+        return c.get("type") or role_type.get(mac) or (g and g["kind"]) or classify(f"{dname(mac)} {d.get('dns', '')}", vendor_of(mac), mac,
                                                               S["device_types_off"])
 
     def device_node(mac, parent, port_ref=None, port_lbl="", via=""):
         d, c, g = sdev.get(mac, {}), dcfg.get(mac, {}), guest_by_mac.get(mac)
         ip, name = d.get("ip", ""), dname(mac)
         vendor = vendor_of(mac)
-        typ = c.get("type") or (g and g["kind"]) or classify(f"{name} {d.get('dns', '')}", vendor, mac, S["device_types_off"])
+        typ = c.get("type") or role_type.get(mac) or (g and g["kind"]) or classify(f"{name} {d.get('dns', '')}", vendor, mac, S["device_types_off"])
         h = host_by_ip.get(ip)
         is_on = mac in online
         if g and g["status"] and not is_on:
@@ -1103,7 +1125,11 @@ def full_scan(api, community=None, quiet=False):
         if len(live_macs) > 1 and (sid, pname) not in host_port:
             # several devices on one port: behind an access point / hypervisor that is one of them,
             # or behind a switch nobody manages (inferred: drawn dashed)
-            hub = next((m for m in live_macs if dtype(m) in ("ap", "hypervisor")), None)   # not "unifi": a Cloud Key is no AP
+            hub = next((m for m in live_macs if dtype(m) == "ap"), None)   # not "unifi": a Cloud Key is no AP
+            if not hub:                                      # a hypervisor only with its virtual machines behind it
+                virt = [m for m in live_macs if is_virtual_mac(m)]
+                hub = next((m for m in live_macs if dtype(m) == "hypervisor" and not is_virtual_mac(m)
+                            and len(virt) * 2 >= len(live_macs) - 1 and virt), None)
             if hub and not not_a_device:
                 hn = device_node(hub, "s-" + sid, pr, lbl, "mac")
                 placed.add(hub)
@@ -1244,6 +1270,13 @@ def full_scan(api, community=None, quiet=False):
             device_node(m, "unplaced")
 
     # switch port panels
+    for n_ in nodes.values():                                 # why a device is an access point - in its panel
+        if n_.get("kind") == "device" and n_.get("type") == "ap":
+            m_ = n_.get("mac", "")
+            why = (role_why.get(m_) or (dcfg.get(m_, {}).get("type") and "your choice on the map")
+                   or (zp.ap_model(n_.get("name", "")) and f"its name: an access point model ({zp.ap_model(n_.get('name', ''))})"))
+            if why:
+                n_["details"].append(["Type from", why])
     switches_out = {}
     for sid in order:
         clients = {}
@@ -1830,6 +1863,15 @@ def build_inventory(nodes, sw, unifi_inv):
     for x in out:
         x["firmware_differs"] = len(by_model.get(x.get("model"), ())) > 1
     return out
+
+
+VIRTUAL_OUI = ("00:50:56", "00:0c:29", "00:05:69", "00:1c:14", "bc:24:11", "52:54:00", "00:15:5d", "08:00:27", "00:16:3e",
+               "02:42:")                                     # VMware, Proxmox, KVM/QEMU, Hyper-V, VirtualBox, Xen, Docker
+
+
+def is_virtual_mac(mac):
+    """A virtual machine's (or container's) MAC address, by its maker's prefix."""
+    return str(mac).lower().startswith(VIRTUAL_OUI)
 
 
 def core_switch_id(sw, want):

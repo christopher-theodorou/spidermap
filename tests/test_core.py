@@ -932,6 +932,12 @@ def test_traffic_correlation():
     check("traffic: switches already linked are not compared", hints2 == {})
 
 
+def test_virtual_macs():
+    check("virtual MACs: VMware, Proxmox, Hyper-V, KVM are virtual; a real NIC is not",
+          all(sm.is_virtual_mac(m) for m in ("00:50:56:aa:bb:cc", "00:0C:29:11:22:33", "bc:24:11:46:63:8f", "00:15:5d:01:02:03", "52:54:00:12:34:56"))
+          and not sm.is_virtual_mac("98:5f:41:55:49:00") and not sm.is_virtual_mac("ac:1f:6b:00:11:22"))
+
+
 def test_mac_switch_links():
     GW = "aa:00:00:00:00:01"
     # gateway - ROOT - (port 5) A - (port 3) B ; no LLDP anywhere. Each switch sees the others' MACs on its ports.
@@ -987,6 +993,7 @@ def main():
     test_070()
     test_unifi()
     test_mac_switch_links()
+    test_virtual_macs()
     test_080()
     test_traffic_correlation()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")
