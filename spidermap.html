@@ -232,6 +232,10 @@ table.inv a{color:var(--accent);cursor:pointer}
 #modebar span{display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:600}#modebar .sep{width:1px;height:16px;background:var(--border)}
 #modebar button{border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:999px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}#modebar button:hover{border-color:var(--accent);color:var(--accent)}
 body.dash #modebar,body.inv #modebar{display:none!important}
+#ask-back{position:fixed;inset:0;background:rgba(10,10,40,.38);display:flex;align-items:flex-start;justify-content:center;padding:80px 16px 16px;z-index:80}
+#ask{background:var(--card);color:var(--text);border-radius:12px;box-shadow:0 24px 60px rgba(10,10,40,.3);width:min(440px,100%);padding:18px 20px}
+#ask p{margin:0 0 16px;font-size:14px;line-height:1.5;white-space:pre-line}.ask-btns{display:flex;justify-content:flex-end;gap:10px}
+.ask-btns .sm-btn{width:auto;padding:0 18px;margin:0}.sm-btn.danger{background:var(--bad);border-color:var(--bad)}
 .ln.lag{stroke-width:4.5}.ln.redundant{stroke:var(--muted);stroke-dasharray:9 6;stroke-width:1.5}.ln.guess{stroke-dasharray:2 4;stroke-linecap:round}
 .tag.t-stale{background:var(--bg);color:var(--muted);border:1px dashed var(--border)}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
 #mapctl{position:absolute;right:16px;top:12px;max-height:calc(100% - 24px);overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:6;transition:right .25s}
@@ -411,7 +415,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.5";
+const PAGE_VERSION = "0.9.6";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -799,8 +803,24 @@ function smOpen(reload) {
   smRender();
   if (!reload) setTimeout(() => { const t = $("#sm-tabs [aria-selected=true]"); if (t) t.focus(); }, 30);
 }
-function smClose() {
-  if (smDirtyKeys().length && !confirm("Discard the unsaved changes?")) return;
+/* ---------- our own confirmation window: the browser's confirm() is blocked inside the Zabbix dashboard (iframe sandbox) ---------- */
+function askConfirm(msg, ok = "OK", danger = false) {
+  return new Promise(res => {
+    const back = document.createElement("div"); back.id = "ask-back";
+    back.innerHTML = `<div id="ask" role="alertdialog" aria-modal="true" aria-labelledby="ask-msg"><p id="ask-msg"></p><div class="ask-btns"><button class="sm-btn" id="ask-no">Cancel</button><button class="sm-btn primary${danger ? " danger" : ""}" id="ask-ok"></button></div></div>`;
+    back.querySelector("#ask-msg").textContent = msg; back.querySelector("#ask-ok").textContent = ok;
+    document.body.appendChild(back);
+    const done = v => { document.removeEventListener("keydown", key, true); back.remove(); res(v); };
+    const key = e => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); done(false); } else if (e.key === "Enter") { e.stopPropagation(); e.preventDefault(); done(true); } };
+    document.addEventListener("keydown", key, true);                      // first, before the Settings window sees the key
+    back.querySelector("#ask-no").onclick = () => done(false);
+    back.querySelector("#ask-ok").onclick = () => done(true);
+    back.onclick = e => { if (e.target === back) done(false); };
+    back.querySelector("#ask-ok").focus();
+  });
+}
+async function smClose() {
+  if (smDirtyKeys().length && !(await askConfirm("Discard the unsaved changes?", "Discard"))) return;
   SM.open = false; $("#smb").hidden = true;
 }
 function smInfo(t) { return t ? `<span class="sm-info" tabindex="0" aria-label="${esc(t)}">i<span class="tip">${esc(t)}</span></span>` : ""; }
@@ -1033,7 +1053,7 @@ function smWire() {
       setTimeout(loadStatus, 2500); return;
     }
     const rs = e.target.closest("[data-restore]");
-    if (rs && confirm("Restore this saved version of the settings and devices? The current version is kept too.")) sendToService({ action: "restore", restore: rs.dataset.restore });
+    if (rs && await askConfirm("Restore this saved version of the settings and devices? The current version is kept too, so you can come back to it.", "Restore")) sendToService({ action: "restore", restore: rs.dataset.restore });
     if (e.target.closest("#st-exp")) exportSettings();
     if (e.target.closest("#sm-reset")) {
       $("#sm-reset-box").innerHTML = `<div class="sm-note" style="background:var(--bad-bg);display:block"><b>Reset the map?</b> SpiderMap forgets everything it has seen and starts again with a new scan.
@@ -1044,7 +1064,7 @@ function smWire() {
     if (e.target.closest("#rs-no")) $("#sm-reset-box").innerHTML = "";
     if (e.target.closest("#rs-go")) {
       const forget = $("#rs-forget").checked;
-      if (forget && !confirm("Also forget everything you set for your devices - names, types, pins, web addresses, 'connected through'?\n\nThe map is drawn from the network again either way. Your settings can be brought back with Settings > General > Saved versions > 'before map reset'.")) return;
+      if (forget && !(await askConfirm("Also forget everything you set for your devices - names, types, pins, web addresses, 'connected through'?\n\nThe map is drawn from the network again either way. Your settings can be brought back with Settings > General > Saved versions > 'before map reset'.", "Reset and forget", true))) return;
       const keep = { keep_devices: !forget, keep_speedtests: $("#rs-sp").checked };
       $("#sm-reset-box").innerHTML = "";
       sendToService({ action: "reset", reset: keep });
@@ -1236,7 +1256,7 @@ async function linkSend(link) {                        // confirm / reject / rem
 function wirePlace(n) {
   const box = $("#pl-box"); if (!box) return;
   const key = n.place || portKey(n.port_ref);
-  box.onclick = e => {
+  box.onclick = async e => {
     const b = e.target.closest("[data-pl]"); if (!b) return;
     const a = b.dataset.pl;
     if (a.startsWith("form:")) {
@@ -1246,7 +1266,7 @@ function wirePlace(n) {
                                                     model: $("#pl-model").value.trim(), location: $("#pl-loc").value.trim() }, $("#pl-msg"));
       return;
     }
-    if (a === "remove" && !confirm("Remove this from the map? The devices stay, SpiderMap places them as before.")) return;
+    if (a === "remove" && !(await askConfirm("Remove this from the map? The devices stay, SpiderMap places them as before.", "Remove", true))) return;
     placeSend(n, { key, kind: a }, null);
   };
 }
@@ -1464,7 +1484,7 @@ function layoutIcon() {
   document.body.classList.toggle("free", f);
 }
 $("#b-layout").onclick = () => { LAYOUT = curLayout() === "free" ? "tree" : "free"; store("nm-layout", LAYOUT); layoutIcon(); if (DATA) { render(); fit(true); } };
-$("#b-relayout").onclick = () => { if (!confirm("Put every node back in its tree position?")) return; delete POS[posKey()]; store("nm-pos", POS); if (DATA) { render(); fit(true); } };
+$("#b-relayout").onclick = async () => { if (!(await askConfirm("Put every node back in its tree position?", "Reset positions"))) return; delete POS[posKey()]; store("nm-pos", POS); if (DATA) { render(); fit(true); } };
 layoutIcon();
 function viewIcon() { const b = $("#b-view"), l3 = curView() === "l3"; b.title = l3 ? "Physical view (switches and ports)" : "Logical view (by subnet)"; b.innerHTML = `<i class="ti ti-${l3 ? "server-2" : "network"}"></i>`; }
 $("#b-view").onclick = () => { VIEW = curView() === "l3" ? "physical" : "l3"; store("nm-view", VIEW); viewIcon(); if (DATA) { closePanel(); index(); render(); fit(true); } };
@@ -1629,7 +1649,7 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
+  "Max-repetitions": "Max-repetitions", "Discard": "Απόρριψη", "Reset positions": "Επαναφορά θέσεων", "Reset and forget": "Επαναφορά και διαγραφή", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
   "Export the map (PNG, SVG)": "Εξαγωγή χάρτη (PNG, SVG)", "Logical view (by subnet)": "Λογική προβολή (ανά υποδίκτυο)", "Physical view": "Φυσική προβολή",
   "Free layout": "Ελεύθερη διάταξη", "Back to the tree": "Πίσω στο δέντρο", "Reset positions": "Επαναφορά θέσεων", "Green Spider": "Πράσινη Αράχνη", "Blue Spider": "Μπλε Αράχνη", "Red Spider": "Κόκκινη Αράχνη", "Inventory": "Απογραφή", "Network devices": "Συσκευές δικτύου", "All devices": "Όλες οι συσκευές",
   "Search": "Αναζήτηση", "Serial": "Σειριακός", "Firmware": "Firmware", "Hardware": "Hardware", "Uptime": "Χρόνος λειτουργίας",

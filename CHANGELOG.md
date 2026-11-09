@@ -4,6 +4,14 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.6] - 2026-11-09
+
+### Fixed
+- **Restore, Reset positions, Remove and other confirmations did nothing inside the Zabbix dashboard.** They used the
+  browser's own confirmation dialog, which the dashboard's iframe sandbox blocks without a word (it answers
+  "Cancel"). SpiderMap now asks in its own window, which works in the dashboard and on its own page alike
+  (Enter confirms, Escape cancels).
+
 ## [0.9.5] - 2026-11-09
 
 ### Fixed
@@ -512,6 +520,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.6]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.6
 [0.9.5]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.5
 [0.9.4]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.4
 [0.9.3]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.3
