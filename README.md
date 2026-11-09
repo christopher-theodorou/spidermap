@@ -81,6 +81,10 @@ cd /opt/spidermap
 bash install.sh
 ```
 
+`bash install.sh` opens a menu: choose **1) Install**. The same menu later updates SpiderMap, checks everything,
+changes the Zabbix or Proxmox connection, fixes permissions, shows the logs and the certificate, and uninstalls
+(see [docs/COMMANDS.md](docs/COMMANDS.md#the-installer-menu)). For scripts: `bash install.sh --install`.
+
 The installer sets up the packages it needs, asks for your Zabbix API address and token, creates the system user
 `spidermap` and starts the **`spidermap` service**, which runs the scans (no cron jobs) and the first scan right away.
 Configuration goes to `/etc/spidermap`, data to `/var/lib/spidermap`; `zabbix.env` and `devices.json` in
@@ -100,6 +104,34 @@ blocks their forms. The map itself stays sandboxed.
 
 Then open **Dashboards → SpiderMap**, or the page directly at `http://<zabbix>/zabbix/spidermap.php`
 (Zabbix Super admins by default, see [Security](#security)).
+
+## Commands
+
+The installer adds the `spidermap` command (run as root):
+
+```bash
+spidermap status              # service, last scan, switches, where to open the map
+spidermap doctor              # checks everything; every problem comes with its fix
+spidermap logs -f             # follow the scan log   (--errors, --service)
+spidermap scan                # scan now, with progress
+spidermap test-snmp SW-Core   # does a switch answer SNMP, with LLDP and MAC tables?
+spidermap cert                # the https certificate: names, expiry, fingerprint
+spidermap help                # all of them
+```
+
+Every command, with examples: [docs/COMMANDS.md](docs/COMMANDS.md).
+
+### HTTPS
+
+SpiderMap works the same on http and https; it does not create certificates, the web server does. When Zabbix runs
+on https:
+
+- keep `ZABBIX_URL` on `http://127.0.0.1/...` (it never leaves the server, so it needs no certificate) and exclude
+  127.0.0.1 from any http-to-https redirect;
+- leave the dashboard widget's URL relative, `spidermap.php`: an absolute `http://` address is blocked by browsers
+  inside an https dashboard;
+- `spidermap cert` shows the certificate's SHA-256 to compare when you install a self-signed certificate on your
+  devices, and `spidermap doctor` warns 30 days before it expires.
 
 ## Settings
 
@@ -186,10 +218,11 @@ Alternatives: `PVE_CA=/path/to/pve-root-ca.pem`, or `PVE_VERIFY=1` for a certifi
 ## Update
 
 ```bash
-cd /opt/spidermap && git pull && bash install.sh --update
+spidermap update
 ```
 
-Open pages reload themselves with the new version.
+The same as `cd /opt/spidermap && git pull && bash install.sh --update` (use that the first time you update from a
+version before 0.9.8). Open pages reload themselves with the new version.
 
 ## Network load
 
@@ -260,12 +293,14 @@ authentication for Zabbix users (*Users → Authentication → MFA settings*, Za
 
 ## Troubleshooting
 
+Start with `spidermap doctor`: it names the problem and the fix. Then:
+
 ```bash
-systemctl status spidermap                         # the service (scans, live traffic, speed tests)
-journalctl -u spidermap -n 30                      # its log
-tail -n 30 /var/lib/spidermap/spidermap.log        # output of the scans
-cd /opt/spidermap && python3 spidermap.py          # run a scan by hand (as the spidermap user)
-cd /opt/spidermap && python3 spidermap.py --check-ports   # how every switch port is seen
+spidermap status                                   # the quick look
+spidermap logs --errors                            # what went wrong in the scans
+spidermap logs --service                           # the service's journal (journalctl -u spidermap)
+spidermap test-snmp <switch>                       # one switch over SNMP: answer, LLDP, MAC tables
+spidermap check-ports                              # how every switch port is seen
 tail -n 5 /var/lib/spidermap/audit.log             # recent changes from the map
 ```
 
@@ -282,7 +317,8 @@ tail -n 5 /var/lib/spidermap/audit.log             # recent changes from the map
 | `spidermap.html` | The map page (installed in the protected folder, served by `spidermap.php`) |
 | `spidermap_ports.py` | Switch port scanner (also usable alone: port report and HTML table) |
 | `spidermap_zabbix.py` | Zabbix API and SNMP helpers, plus the classic Zabbix map and dashboard |
-| `install.sh` | Installer and updater |
+| `spidermap_cli.py` | The `spidermap` command (status, logs, scan, doctor, test-snmp, cert, ...) |
+| `install.sh` | Installer, updater and the menu |
 | `tests/` | Automated tests (run on GitHub for every change: `.github/workflows/tests.yml`) |
 | `docs/` | Architecture and release documentation |
 | `assets/` | Logo, icons and screenshots |
@@ -290,13 +326,13 @@ tail -n 5 /var/lib/spidermap/audit.log             # recent changes from the map
 ## Uninstall
 
 ```bash
-cd /opt/spidermap && bash install.sh --uninstall
+spidermap uninstall          # or: cd /opt/spidermap && bash install.sh --uninstall
 ```
 
 It first shows everything it will remove and asks; then it writes a backup of your settings, devices and history
 to `/root/spidermap-backup-<time>.tar.gz` and removes the service, the `spidermap` user, `/etc/spidermap`,
 `/var/lib/spidermap`, SpiderMap's own files in the Zabbix web folder, and in Zabbix only SpiderMap's `autotopo.*`
-items (with their triggers), its dashboards and map. Finally remove the code: `rm -rf /opt/spidermap`.
+items (with their triggers), its dashboards and map, and the `spidermap` command. Finally remove the code: `rm -rf /opt/spidermap`.
 
 | Option | Effect |
 |---|---|
@@ -316,10 +352,12 @@ user `spidermap`, and in Zabbix the *SpiderMap* dashboard and the items whose ke
 | [CHANGELOG.md](CHANGELOG.md) | What changed in every version, and upgrade notes |
 | [SECURITY.md](SECURITY.md) | Supported versions and how to report a vulnerability |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How SpiderMap works: jobs, files, data flow, Zabbix integration, extending it |
+| [docs/COMMANDS.md](docs/COMMANDS.md) | The `spidermap` command and the installer menu, with examples |
 | [docs/RELEASING.md](docs/RELEASING.md) | Checklist for publishing a new version |
 | [tests/test_gateway.py](tests/test_gateway.py) | Security tests for `spidermap.php` (`python3 tests/test_gateway.py`, needs `php-cli`) |
 | [tests/test_core.py](tests/test_core.py) | Tests for scheduling, edits and job locking (`python3 tests/test_core.py`) |
 | [tests/test_ports.py](tests/test_ports.py) | Tests for port names and traffic counters with real switch tables (`python3 tests/test_ports.py`) |
+| [tests/test_cli.py](tests/test_cli.py) | Tests for the `spidermap` command, certificates and the menu helpers (`python3 tests/test_cli.py`) |
 
 ## License
 

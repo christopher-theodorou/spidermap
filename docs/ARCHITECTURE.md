@@ -38,10 +38,12 @@ creates only its own items, triggers and dashboard (see *Zabbix integration*).
 | `spidermap_ports.py` | Reads each switch over SNMP: interfaces, status, speed, LLDP neighbours, MAC tables, ARP. Ping sweep, reverse DNS, default gateway. |
 | `spidermap_zabbix.py` | Where files live (`CONF_DIR`, `STATE_DIR`), reading `zabbix.env`, Zabbix API client, host loading, SNMP credentials, LLDP helpers, dashboard builder. Also the *classic* Zabbix map. |
 | `spidermap.html` | The whole user interface in one file: tree layout, panels, gateway card, activity feed, editing, Settings, Collector health. No build step. |
-| `install.sh` | Installer and updater (`--update`): packages, Ookla CLI, service user, moving files to their places, the service, checks. |
+| `install.sh` | Installer, updater (`--update`) and the menu: packages, Ookla CLI, service user, moving files to their places, the service, the `spidermap` command, checks. |
+| `spidermap_cli.py` | The `spidermap` command (`/usr/local/bin/spidermap` runs it): status, logs, scan, doctor, test-snmp, cert, fix-permissions; update, uninstall and menu hand over to `install.sh`. Reads the service's files; asks for a scan through the same inbox request as the page (`scan.request`); drops to the service user before any SNMP. The menu changes `zabbix.env` through its hidden `_setenv` (values passed in `SMSET_<KEY>` environment variables, never as arguments). See [COMMANDS.md](COMMANDS.md). |
 | `tests/test_gateway.py` | Security tests for `spidermap.php` (needs `php-cli`). |
 | `tests/test_core.py` | Tests for the scheduler, settings, edits, audit, SNMP credentials, permissions. |
 | `tests/test_ports.py` | Tests for port names and traffic counters with real switch tables. |
+| `tests/test_cli.py` | Tests for the `spidermap` command: `zabbix.env` editing, certificates (against a local TLS server), the dashboard-widget and HTTPS checks, the menu helpers. |
 
 ## What runs when
 

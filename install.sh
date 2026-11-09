@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # SpiderMap installer - run on the Zabbix server (or its container) as root.
-#   bash install.sh            first install (asks for the Zabbix address and API token)
-#   bash install.sh --update   after "git pull": refresh the page, restart the service
+#   bash install.sh              the menu (install, update, doctor, Zabbix, Proxmox, permissions, logs, uninstall)
+#   bash install.sh --install    first install without the menu (asks for the Zabbix address and API token)
+#   bash install.sh --update     after "git pull": refresh the page, restart the service
+#   bash install.sh --uninstall  [--keep-data] [--keep-zabbix] [--yes]
+#   bash install.sh --menu       the menu, also when not run from a terminal
+# Without a terminal (scripts, pipes), plain "bash install.sh" installs as before.
 #
 # Since 0.5.0: one service ("spidermap") runs everything (no cron), as the user "spidermap";
 # configuration in /etc/spidermap, data in /var/lib/spidermap. SPIDERMAP_RUN_AS=root keeps it on root.
@@ -123,12 +127,49 @@ check_webserver_rules() {   # a rule written for spider-secure.php would block s
 EOW
 }
 
-if [ "${1:-}" = "--uninstall" ]; then
+CLI=/usr/local/bin/spidermap
+CLI_MARK="SpiderMap command - installed by install.sh"
+COMPLETION=/etc/bash_completion.d/spidermap
+
+install_command() {   # the "spidermap" command, usable from anywhere (see docs/COMMANDS.md)
+  if [ -e "$CLI" ] && ! grep -q "$CLI_MARK" "$CLI" 2>/dev/null; then
+    printf '\033[33m%s\033[0m\n' "  $CLI exists and is not SpiderMap's - left alone (use: python3 $DIR/spidermap_cli.py)"
+    return 0
+  fi
+  printf '#!/bin/sh\n# %s. See docs/COMMANDS.md\nexec python3 "%s/spidermap_cli.py" "$@"\n' "$CLI_MARK" "$DIR" > "$CLI"
+  chmod 755 "$CLI"
+  if [ -d "$(dirname "$COMPLETION")" ]; then
+    echo 'complete -W "status logs scan doctor test-snmp check-ports cert fix-permissions update uninstall menu version help" spidermap' > "$COMPLETION"
+  fi
+  echo "  command installed: spidermap   (spidermap help)"
+}
+
+api_check() {   # $1 API URL, $2 token. Prints what it finds; the token never appears in the process list.
+  local out rc=0 n
+  out=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json-rpc' \
+        -d '{"jsonrpc":"2.0","method":"apiinfo.version","params":{},"id":1}' "$1" 2>&1) || rc=$?
+  if [ $rc = 60 ] || [ $rc = 35 ] || [ $rc = 51 ] || [ $rc = 58 ]; then
+    echo "  $1: this server does not trust that https certificate."
+    echo "  Use http://127.0.0.1/zabbix/api_jsonrpc.php instead: SpiderMap runs on this server, so the"
+    echo "  connection never leaves it and needs no certificate."
+    return 1
+  fi
+  out=$(printf '%s' "$out" | grep -o '"result": *"[^"]*"' | cut -d'"' -f4 || true)
+  [ -n "$out" ] || { echo "  No answer from $1 - check the address."; return 1; }
+  echo "  Zabbix $out"
+  n=$(printf 'header = "Authorization: Bearer %s"\n' "$2" | curl -s -m 10 -K - -X POST -H 'Content-Type: application/json-rpc' \
+      -d '{"jsonrpc":"2.0","method":"host.get","params":{"countOutput":true},"id":2}' "$1" \
+      | grep -o '"result": *"[0-9]*"' | cut -d'"' -f4 || true)
+  [ -n "$n" ] || { echo "  The API token was refused - create one in Zabbix: Users > API tokens."; return 1; }
+  echo "  token OK, $n hosts"
+}
+
+do_uninstall() {
   # Removes what SpiderMap created, after a plan, a confirmation and a backup.
   #   --keep-data    keep /etc/spidermap, /var/lib/spidermap and the spidermap user (to install again later)
   #   --keep-zabbix  leave SpiderMap's items, triggers, dashboards and map in Zabbix
   #   --yes          do not ask (for scripts)
-  shift; KEEP_DATA=0; KEEP_ZBX=0; YES=0
+  KEEP_DATA=0; KEEP_ZBX=0; YES=0
   for a in "$@"; do
     case "$a" in --keep-data) KEEP_DATA=1 ;; --keep-zabbix) KEEP_ZBX=1 ;; --yes|-y) YES=1 ;; *) fail "Unknown option: $a" ;; esac
   done
@@ -141,6 +182,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   if [ $KEEP_DATA = 1 ]; then echo "  kept (--keep-data): $CONF, $LIB, the user $SVC_USER"
   else echo "  $CONF (settings, API token), $LIB (history, logs, backups), the user $SVC_USER"; fi
   [ -x /usr/local/bin/ookla-speedtest ] && echo "  /usr/local/bin/ookla-speedtest (installed by SpiderMap)"
+  grep -qs "$CLI_MARK" "$CLI" && echo "  the spidermap command ($CLI)"
   echo "  not touched: system packages, the API token and the iframe setting in Zabbix, $DIR (the code: remove it yourself at the end)"
   BACKUP="/root/spidermap-backup-$(date +%Y%m%d-%H%M%S).tar.gz"
   echo "  first, a backup of your settings, devices and history: $BACKUP"
@@ -161,6 +203,7 @@ if [ "${1:-}" = "--uninstall" ]; then
   remove_cron_lines 'spidermap.py'; remove_cron_lines 'zabbix_netmap.py'
   python3 spidermap.py --uninstall-web
   rm -f /usr/local/bin/ookla-speedtest /var/log/spidermap.log
+  grep -qs "$CLI_MARK" "$CLI" && rm -f "$CLI" "$COMPLETION"
   if [ $KEEP_DATA != 1 ]; then
     rm -rf "$LIB" "$CONF"
     for f in zabbix.env devices.json; do [ -L "$DIR/$f" ] && rm -f "$DIR/$f"; done
@@ -170,9 +213,9 @@ if [ "${1:-}" = "--uninstall" ]; then
   echo "Remove the code too:   rm -rf $DIR"
   echo "Your backup:           $BACKUP   (to restore after a new install: tar xzf $BACKUP -C /)"
   exit 0
-fi
+}
 
-if [ "${1:-}" = "--update" ]; then
+do_update() {
   say "Updating SpiderMap to $(python3 spidermap.py --version 2>/dev/null | cut -d' ' -f2)..."
   [ -f zabbix.env ] || [ -f "$CONF/zabbix.env" ] || fail "No zabbix.env - run: bash install.sh"
   cleanup_old_jobs
@@ -183,12 +226,14 @@ if [ "${1:-}" = "--update" ]; then
   choose_user
   python3 spidermap.py --install-web
   python3 spidermap.py --install-service
+  install_command
   check_webserver_rules
   say "Done. Open pages reload themselves with the new version within a minute."
-  echo "Service: systemctl status spidermap    Log: journalctl -u spidermap  and  $LIB/spidermap.log"
+  echo "Check:  spidermap status    spidermap doctor    spidermap logs"
   exit 0
-fi
+}
 
+do_install() {
 cat <<'EOF2'
 
    SpiderMap
@@ -223,8 +268,10 @@ stop_old_jobs
 ensure_user
 move_layout
 if [ ! -f "$CONF/zabbix.env" ]; then
+  echo "SpiderMap runs on this server, so the local address is best: it never leaves the server and needs no"
+  echo "certificate, even when your browsers use https."
   read -r -p "Zabbix API URL [http://127.0.0.1/zabbix/api_jsonrpc.php]: " url
-  url="${url:-http://127.0.0.1/zabbix/api_jsonrpc.php}"
+  url="$(normalize_api_url "${url:-http://127.0.0.1/zabbix/api_jsonrpc.php}")"
   read -r -s -p "Zabbix API token (Users > API tokens): " tok; echo
   printf 'export ZABBIX_URL="%s"\nexport ZABBIX_TOKEN="%s"\n' "$url" "$tok" > "$CONF/zabbix.env"
   ln -sfn "$CONF/zabbix.env" "$DIR/zabbix.env"
@@ -233,14 +280,7 @@ chmod 640 "$CONF/zabbix.env"
 . "$CONF/zabbix.env"
 
 say "3/5  Checking the Zabbix API"
-ver=$(curl -s -X POST -H 'Content-Type: application/json-rpc' \
-      -d '{"jsonrpc":"2.0","method":"apiinfo.version","params":{},"id":1}' "$ZABBIX_URL" | grep -o '"result":"[^"]*"' || true)
-[ -n "$ver" ] || fail "No answer from $ZABBIX_URL - check the address in zabbix.env."
-echo "  Zabbix $ver"
-ok=$(curl -s -X POST -H 'Content-Type: application/json-rpc' -H "Authorization: Bearer $ZABBIX_TOKEN" \
-      -d '{"jsonrpc":"2.0","method":"host.get","params":{"countOutput":true},"id":2}' "$ZABBIX_URL" | grep -o '"result":"[0-9]*"' || true)
-[ -n "$ok" ] || fail "The API token was refused - check ZABBIX_TOKEN in zabbix.env."
-echo "  token OK, $ok hosts"
+api_check "$ZABBIX_URL" "$ZABBIX_TOKEN" || fail "Fix it with:  bash install.sh, then 4) Zabbix connection  (or edit $CONF/zabbix.env)"
 
 say "4/5  Service user"
 choose_user
@@ -250,9 +290,10 @@ python3 spidermap.py --setup
 
 ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 path=$(python3 -c 'import os; from urllib.parse import urlparse; print(urlparse(os.environ["ZABBIX_URL"]).path.rsplit("/", 1)[0])')
+scheme=http; python3 "$DIR/spidermap_cli.py" cert --fingerprint >/dev/null 2>&1 && scheme=https
 say "SpiderMap $(python3 spidermap.py --version 2>/dev/null | cut -d' ' -f2) is running."
 cat <<EOF2
-Open the map:   http://${ip}${path}/spidermap.php   (Zabbix Super admins; see Settings > Access)
+Open the map:   ${scheme}://${ip}${path}/spidermap.php   (Zabbix Super admins; see Settings > Access)
 Or in Zabbix:   Dashboards > "SpiderMap"
 
 One manual step in Zabbix (needed for the dashboard widget):
@@ -262,4 +303,193 @@ One manual step in Zabbix (needed for the dashboard widget):
 Your names, icons and pins live in devices.json ($CONF, linked here). Scans, intervals and access: the
 Settings button on the map.
 EOF2
+install_command
+cat <<EOF2
+
+Useful commands:  spidermap status   spidermap doctor   spidermap logs   spidermap help
+No switches on the map yet?  docs/FIRST-SWITCH.md, or:  spidermap test-snmp <switch IP> --community <community>
+EOF2
 check_webserver_rules
+}
+
+# --------------------------------------------------------------------------- #
+# The menu
+# --------------------------------------------------------------------------- #
+CLIPY="$DIR/spidermap_cli.py"
+
+normalize_api_url() {   # "10.20.0.46/zabbix" -> "http://10.20.0.46/zabbix/api_jsonrpc.php"
+  local u="$1"
+  case "$u" in http://*|https://*) ;; *) u="http://$u" ;; esac
+  case "$u" in */api_jsonrpc.php) ;; *) u="${u%/}/api_jsonrpc.php" ;; esac
+  printf '%s' "$u"
+}
+
+env_get() { sed -n "s/^export $1=\"\\(.*\\)\"\$/\\1/p" "$CONF/zabbix.env" 2>/dev/null | head -1; }
+mask()    { local t="$1"; [ ${#t} -gt 10 ] && printf '%s…%s' "${t:0:4}" "${t: -4}" || printf '%s' "${t:+(set)}"; }
+pause()   { echo; read -r -p "Press Enter for the menu " _ || exit 0; }
+installed() { [ -f "$CONF/zabbix.env" ] || [ -f "$DIR/zabbix.env" ]; }
+restart_service() {
+  systemctl is-enabled spidermap >/dev/null 2>&1 || return 0
+  systemctl restart spidermap && echo "  service restarted"
+}
+
+menu_zabbix() {
+  say "Zabbix connection"
+  local cur_url cur_tok url tok a
+  cur_url=$(env_get ZABBIX_URL); cur_tok=$(env_get ZABBIX_TOKEN)
+  echo "  API address: ${cur_url:-not set}"
+  echo "  API token:   $(mask "$cur_tok")"
+  echo "  (Local http://127.0.0.1 is best: it never leaves this server, also when browsers use https.)"
+  echo
+  read -r -p "New API address (Enter keeps it): " url
+  url="${url:-$cur_url}"; url="$(normalize_api_url "${url:-http://127.0.0.1/zabbix/api_jsonrpc.php}")"
+  read -r -s -p "New API token (Enter keeps it): " tok; echo
+  tok="${tok:-$cur_tok}"
+  if [ "$url" = "$cur_url" ] && [ "$tok" = "$cur_tok" ]; then echo "  Nothing changed."; fi
+  if ! api_check "$url" "$tok"; then
+    read -r -p "Save it anyway? [y/N] " a
+    case "$a" in y|Y) ;; *) echo "  Nothing saved."; return 0 ;; esac
+  fi
+  SMSET_ZABBIX_URL="$url" SMSET_ZABBIX_TOKEN="$tok" python3 "$CLIPY" _setenv
+  restart_service
+}
+
+menu_proxmox() {
+  say "Proxmox (optional): names and state of your VMs and containers"
+  local cur a url hp tid sec fp
+  cur=$(env_get PVE_URL)
+  if [ -n "$cur" ]; then
+    echo "  Connected to $cur as $(env_get PVE_TOKEN_ID)"
+    if [ -n "$(env_get PVE_FINGERPRINT)" ]; then echo "  Certificate: pinned ($(env_get PVE_FINGERPRINT | tr -d : | cut -c1-8)…)"
+    elif [ "$(env_get PVE_VERIFY)" = 1 ] || [ -n "$(env_get PVE_CA)" ]; then echo "  Certificate: checked"
+    else printf '\033[33m%s\033[0m\n' "  Certificate: NOT checked - choose 1 to pin it"; fi
+  else
+    echo "  Not set up."
+  fi
+  echo
+  echo "  1) Set up / change     2) Remove     0) Back"
+  read -r -p "Choose: " a
+  case "$a" in
+    2) python3 "$CLIPY" _setenv --unset PVE_URL --unset PVE_TOKEN_ID --unset PVE_TOKEN_SECRET \
+         --unset PVE_FINGERPRINT --unset PVE_CA --unset PVE_VERIFY && restart_service; return 0 ;;
+    1) ;;
+    *) return 0 ;;
+  esac
+  cat <<'EOT'
+
+  In Proxmox, first: add the user spidermap@pve with the role PVEAuditor on / (Datacenter > Permissions),
+  then an API token "spidermap" for it with "Privilege Separation" unticked. Copy the secret.
+EOT
+  read -r -p "Proxmox address [${cur:-https://192.168.1.10:8006}]: " url
+  url="${url:-$cur}"; [ -n "$url" ] || { echo "  Nothing saved."; return 0; }
+  case "$url" in https://*) ;; http://*) url="https://${url#http://}" ;; *) url="https://$url" ;; esac
+  url="${url%/}"; hp="${url#https://}"; hp="${hp%%/*}"
+  case "$hp" in *:*) ;; *) hp="$hp:8006"; url="https://$hp" ;; esac
+  read -r -p "Token ID [$(env_get PVE_TOKEN_ID || true)] (like spidermap@pve!spidermap): " tid
+  tid="${tid:-$(env_get PVE_TOKEN_ID)}"
+  read -r -s -p "Token secret (Enter keeps it): " sec; echo
+  sec="${sec:-$(env_get PVE_TOKEN_SECRET)}"
+  [ -n "$tid" ] && [ -n "$sec" ] || { echo "  Token ID and secret are both needed. Nothing saved."; return 0; }
+
+  echo; echo "  The certificate Proxmox presents:"
+  if ! python3 "$CLIPY" cert "$hp"; then echo "  Nothing saved."; return 0; fi
+  if python3 "$CLIPY" cert "$hp" --check-trust >/dev/null 2>&1; then
+    echo "  This server already trusts it (a real certificate): it is checked normally, also after renewals."
+    SMSET_PVE_URL="$url" SMSET_PVE_TOKEN_ID="$tid" SMSET_PVE_TOKEN_SECRET="$sec" SMSET_PVE_VERIFY=1 \
+      python3 "$CLIPY" _setenv --unset PVE_FINGERPRINT --unset PVE_CA
+  else
+    fp=$(python3 "$CLIPY" cert "$hp" --fingerprint)
+    cat <<'EOT'
+
+  Compare the SHA-256 above with Proxmox: <node> > System > Certificates > pve-ssl.pem > View Certificate
+  (or on Proxmox: openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256).
+  If they match, SpiderMap accepts exactly this certificate and refuses any other.
+EOT
+    read -r -p "Do they match? Pin it [y/N] " a
+    case "$a" in y|Y) ;; *) echo "  Nothing saved."; return 0 ;; esac
+    SMSET_PVE_URL="$url" SMSET_PVE_TOKEN_ID="$tid" SMSET_PVE_TOKEN_SECRET="$sec" SMSET_PVE_FINGERPRINT="$fp" \
+      python3 "$CLIPY" _setenv --unset PVE_CA --unset PVE_VERIFY
+    echo "  (When Proxmox renews this certificate, come back here to pin the new one: spidermap doctor tells you.)"
+  fi
+  local code
+  code=$(printf 'header = "Authorization: PVEAPIToken=%s=%s"\n' "$tid" "$sec" \
+         | curl -sk -m 8 -K - -o /dev/null -w '%{http_code}' "$url/api2/json/version" || true)
+  case "$code" in
+    200) echo "  Proxmox answers, token accepted." ;;
+    401) printf '\033[33m%s\033[0m\n' "  Proxmox refused the token - check the ID and secret (option 1 again)." ;;
+    *)   printf '\033[33m%s\033[0m\n' "  Proxmox did not answer (HTTP ${code:-none}) - check the address." ;;
+  esac
+  restart_service
+}
+
+menu_permissions() {
+  say "Fixing permissions"
+  ensure_user
+  move_layout
+  choose_user
+  python3 "$CLIPY" fix-permissions
+}
+
+menu_update() {
+  if [ -d "$DIR/.git" ]; then
+    say "git pull"
+    git -C "$DIR" pull --ff-only || { printf '\033[31m%s\033[0m\n' "git pull failed (local changes? git -C $DIR status)"; return 0; }
+  fi
+  exec bash "$DIR/install.sh" --update        # the new install.sh, if git pull brought one
+}
+
+menu() {
+  local a v st
+  while true; do
+    v=$(python3 spidermap.py --version 2>/dev/null | cut -d' ' -f2 || true)
+    if installed; then
+      st=$(systemctl is-active spidermap 2>/dev/null || true); st="installed${st:+, service $st}"
+    else st="not installed yet"; fi
+    printf '\n\033[1;34m  SpiderMap %s\033[0m  -  %s\n' "${v:-?}" "$st"
+    cat <<'EOM'
+  Nothing touches the web unnoticed.
+
+   1) Install             first install, or run the setup again (repair)
+   2) Update              git pull, then refresh the page and restart the service
+   3) Check everything    every problem, with its fix (spidermap doctor)
+   4) Zabbix connection   API address and token
+   5) Proxmox             optional: names of your VMs and containers
+   6) Fix permissions
+   7) Status and logs
+   8) Certificate         this server's https certificate, for installing on your devices
+   9) Uninstall
+   0) Exit
+EOM
+    if installed; then read -r -p "Choose: " a || exit 0; else read -r -p "Choose [1]: " a || exit 0; a="${a:-1}"; fi
+    case "$a" in
+      1) do_install; pause ;;
+      2) installed && menu_update || echo "  Install first (1)." ;;
+      9) do_uninstall ;;
+      0|q|Q|"") exit 0 ;;
+      3|4|5|6|7|8)
+        if ! installed; then echo "  Install first (1)."; continue; fi
+        case "$a" in
+          3) python3 "$CLIPY" doctor || true ;;
+          4) menu_zabbix ;;
+          5) menu_proxmox ;;
+          6) menu_permissions ;;
+          7) python3 "$CLIPY" status || true; echo; python3 "$CLIPY" logs -n 20 || true ;;
+          8) python3 "$CLIPY" cert || true ;;
+        esac
+        pause ;;
+      *) echo "  Choose a number from the list." ;;
+    esac
+  done
+}
+
+usage() { sed -n '2,9p' "$DIR/install.sh" | sed 's/^# \{0,1\}//'; }
+
+case "${1:-}" in
+  --uninstall) shift; do_uninstall "$@" ;;
+  --update)    do_update ;;
+  --install)   do_install ;;
+  --menu)      menu ;;
+  -h|--help)   usage ;;
+  "")          if [ -t 0 ] && [ -t 1 ]; then menu; else do_install; fi ;;
+  *)           fail "Unknown option: $1   (bash install.sh --help)" ;;
+esac

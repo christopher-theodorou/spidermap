@@ -4,6 +4,40 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.8] - 2026-11-10
+
+### Added
+- **The `spidermap` command**, usable from any folder (installed as `/usr/local/bin/spidermap`, with tab
+  completion): `status`, `logs` (`-f`, `--errors`, `--service`), `scan` (with progress, run by the service like
+  *Scan now*), `doctor`, `test-snmp`, `check-ports`, `cert`, `fix-permissions`, `update`, `uninstall`, `menu`.
+  Every command with examples in the new [docs/COMMANDS.md](docs/COMMANDS.md).
+- **`spidermap doctor`** checks the service, configuration, permissions, web side, Zabbix (token, iframe sandboxing
+  exceptions, dashboard), HTTPS, Proxmox, the last scan, disk space and every switch over SNMP, and gives the fix
+  under each problem. Exit code 2 when something is wrong.
+- **`spidermap test-snmp <switch>`**: does a switch answer, and does it report LLDP neighbours, MAC tables and its
+  model - the one-line answer to "why is this switch not linked?". Also for a switch not in Zabbix yet
+  (`--community`).
+- **The installer menu**: `bash install.sh` in a terminal offers Install, Update, Check everything, Zabbix
+  connection, Proxmox, Fix permissions, Status and logs, Certificate and Uninstall. All options (`--update`,
+  `--uninstall`, ...) keep working, a new `--install` skips the menu, and without a terminal `bash install.sh`
+  installs as before.
+- **Certificates, as checks** (SpiderMap still creates none): `spidermap cert` shows an https certificate's names,
+  expiry and SHA-256 fingerprint (with a short form to compare on each device). The doctor warns 30 days before
+  expiry, when the certificate does not cover the server's IP, when `http://127.0.0.1` is redirected to https, and
+  when the dashboard widget opens an absolute `http://` address on an https Zabbix (browsers block it - the
+  relative `spidermap.php` works on both).
+- **Proxmox in the menu**: shows Proxmox's certificate and pins its fingerprint after you compare it; a certificate
+  the server already trusts is checked normally, so Let's Encrypt renewals keep working.
+
+### Changed
+- The installer's API check no longer puts the token on a command line (it was briefly visible in the process
+  list), explains an untrusted https certificate, and completes `10.20.0.46/zabbix` to the full API address.
+- The first install recommends the local `http://127.0.0.1` API address and ends with the useful commands.
+
+### Upgrade notes
+- This time update with `cd /opt/spidermap && git pull && bash install.sh --update`; it installs the command.
+  From then on: `spidermap update`.
+
 ## [0.9.7] - 2026-11-09
 
 Found on Nikolaos Karanikolas's network, with his review and diagnostics - thank you.
@@ -546,6 +580,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.8]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.8
 [0.9.7]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.7
 [0.9.6]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.6
 [0.9.5]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.5
