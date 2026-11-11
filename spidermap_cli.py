@@ -534,6 +534,9 @@ def cmd_test_snmp(args):
     if not found["LLDP neighbours"]:
         print(f"\n  {c('2', 'No LLDP neighbours: enable LLDP on the switch (and its neighbours). SpiderMap still finds links')}")
         print(f"  {c('2', 'from the other side, or from the MAC tables - see docs/COMMANDS.md > test-snmp')}")
+    q, b = found["MAC table (Q-BRIDGE)"], found["MAC table (BRIDGE)"]
+    if q and b and q != b:
+        print(f"  {c('2', f'The two MAC tables differ (Q-BRIDGE {q}, BRIDGE {b}): SpiderMap reads both and merges them.')}")
     if not (found["MAC table (Q-BRIDGE)"] or found["MAC table (BRIDGE)"]):
         print(f"  {c('2', 'No MAC table over SNMP: devices behind this switch cannot be placed on its ports.')}")
 

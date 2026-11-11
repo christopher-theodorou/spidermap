@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.12"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.13"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -726,9 +726,11 @@ def full_scan(api, community=None, quiet=False):
                    "its MAC is in no other switch's MAC table"))
 
     # ---------------- where is each MAC right now (access port with fewest MACs)
-    seen_at = {}
+    seen_at, seen_all = {}, {}
     for sid, s in sw.items():
         for p in s["ports"]:
+            for mac in p["macs"]:
+                seen_all.setdefault(mac, []).append((sid, p["name"], len(p["macs"]), (sid, p["name"]) in uplink))
             if (sid, p["name"]) in uplink:
                 continue
             for mac in p["macs"]:
@@ -742,6 +744,18 @@ def full_scan(api, community=None, quiet=False):
     online -= switch_macs
     for m in switch_macs:
         seen_at.pop(m, None)
+        sdev.pop(m, None)
+    alias_of = {}                                            # a second MAC of a known host (bonding, a second card)
+    for k, h_ in demoted.items():
+        prim = next((m for m, ip_ in ipmap.items() if ip_ in h_.get("_ips", ())), None)
+        for m in zp.IFMACS.get(k, set()):
+            if prim and m != prim:
+                alias_of[m] = prim
+    for m, prim in alias_of.items():
+        if prim not in seen_at and m in seen_at:             # only the second card is seen: it shows where the host is
+            seen_at[prim] = seen_at[m]
+        seen_at.pop(m, None)
+        online.discard(m)
         sdev.pop(m, None)
 
     gw_loc = seen_at.get(gw_mac) if gw_mac else None
@@ -1261,17 +1275,75 @@ def full_scan(api, community=None, quiet=False):
                     details=[["Proxmox", f"{g['kind'].upper()} {g['vmid']} on {g['node']}"], ["State", g["status"]],
                              ["MAC", ", ".join(g["macs"]) or "-"]])
 
-    # known devices never placed
+    # known devices whose port was not found - also a device whose parent ("behind") is missing now
     rest = [m for m in set(dcfg) | set(sdev) if m not in placed and m != gw_mac and m not in switch_macs
-            and m not in by_mac and not (sdev.get(m, {}).get("loc") or {}).get("k") == "behind"]
-    if rest and root_sw:
-        add("unplaced", "s-" + root_sw, name="Not placed yet", sub=f"{len(rest)} devices", icon="question-mark",
-            kind="group", status="off", collapsed=True,
-            details=[["Why", "Known devices not seen since tracking started. Pin them in devices.json."]])
+            and m not in by_mac and m not in alias_of]
+
+    def obs_text(m, only_links=False):
+        o = [x for x in seen_all.get(m, ()) if x[0] in sw and (x[3] or not only_links)]
+        return ", ".join(f"{sw_name[x[0]]} {plabel(x[0], x[1])}" for x in o[:4]) + (" ..." if len(o) > 4 else "")
+
+    # a switch that does not report a device (its MAC table is incomplete) still shows up through the others: a MAC
+    # seen only beyond the uplinks of other switches lies where all those uplinks lead - if that is one switch, it
+    # is on that switch, on a port it does not report
+    adj = {}
+    for k in sw:
+        par = (nodes.get("s-" + k) or {}).get("parent", "")
+        if par.startswith("s-") and par[2:] in sw:
+            adj.setdefault(k, set()).add(par[2:])
+            adj.setdefault(par[2:], set()).add(k)
+
+    def beyond(x, pname):
+        y = next((b for (a, b), (pa, pb) in sw_link.items() if a == x and pa == pname), None) or \
+            next((a for (a, b), (pa, pb) in sw_link.items() if b == x and pb == pname), None)
+        if not y or y not in adj.get(x, ()):
+            return None
+        side, todo = {y}, [y]
+        while todo:
+            for n_ in adj.get(todo.pop(), ()):
+                if n_ != x and n_ not in side:
+                    side.add(n_)
+                    todo.append(n_)
+        return side
+    for m in sorted(rest):
+        links = [x for x in seen_all.get(m, ()) if x[3] and x[0] in sw]
+        if not links or any(not x[3] for x in seen_all.get(m, ())):
+            continue
+        where = None
+        for x in links:
+            side = beyond(x[0], x[1])
+            where = side if where is None else (where & side if side is not None else set())
+            if side is None:
+                break
+        if where and len(where) == 1:
+            z = next(iter(where))
+            n = device_node(m, "s-" + z, via="behind")
+            n["details"].append(["Found at", f"on {sw_name[z]} - a port that switch does not report; seen beyond the "
+                                             f"links of {obs_text(m, True)}"])
+            placed.add(m)
+    rest = [m for m in rest if m not in placed]
+    if rest:
+        anchor = "s-" + root_sw if root_sw and "s-" + root_sw in nodes else (gw_id if gw_id in nodes else "inet")
+        add("unplaced", anchor, name="Not placed yet", sub=f"{len(rest)} devices", icon="question-mark",
+            kind="group", status="up" if any(m in online for m in rest) else "off", collapsed=True, virtual=True,
+            details=[["What", "Not a device: SpiderMap knows these devices but has not found the switch port they are "
+                              "plugged into. Their panels say why."]])
         for m in sorted(rest):
-            device_node(m, "unplaced")
+            n = device_node(m, "unplaced")
+            o = obs_text(m, True)
+            n["details"].append(["Why not placed", (f"its MAC is seen only on links between switches ({o}) - "
+                                                    "which switch it is on cannot be told") if o else
+                                 "its MAC is in no switch's MAC table" + (" - it answers on the network" if m in online else "")])
 
     # switch port panels
+    for n_ in nodes.values():                                 # where a device was found - in its panel
+        m_ = n_.get("mac", "")
+        if n_.get("kind") == "device" and m_ in seen_at and n_.get("via") == "mac" and seen_at[m_][0] in sw:
+            x_ = seen_at[m_]
+            n_["details"].append(["Found at", f"{sw_name[x_[0]]} {plabel(x_[0], x_[1])} - MAC table, "
+                                               f"{x_[2]} MAC{'s' if x_[2] != 1 else ''} on that port"])
+        if n_.get("kind") == "device" and alias_of and any(p_ == m_ for p_ in alias_of.values()):
+            n_["details"].append(["Other MACs", ", ".join(sorted(a for a, p_ in alias_of.items() if p_ == m_))])
     for n_ in nodes.values():                                 # why a device is an access point - in its panel
         if n_.get("kind") == "device" and n_.get("type") == "ap":
             m_ = n_.get("mac", "")

@@ -415,7 +415,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.12";
+const PAGE_VERSION = "0.9.13";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1648,7 +1648,8 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Core switch": "Κεντρικό switch", "Find an upstream router": "Εύρεση router πριν την πύλη", "Discard": "Απόρριψη", "Reset positions": "Επαναφορά θέσεων", "Reset and forget": "Επαναφορά και διαγραφή", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
+  "Max-repetitions": "Max-repetitions", "Found at": "Βρέθηκε", "Why not placed": "Γιατί δεν τοποθετήθηκε", "Other MACs": "Άλλες MAC",
+  "Not placed yet": "Χωρίς θέση ακόμη", "Type from": "Τύπος από", "Core switch": "Κεντρικό switch", "Find an upstream router": "Εύρεση router πριν την πύλη", "Discard": "Απόρριψη", "Reset positions": "Επαναφορά θέσεων", "Reset and forget": "Επαναφορά και διαγραφή", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
   "Export the map (PNG, SVG)": "Εξαγωγή χάρτη (PNG, SVG)", "Logical view (by subnet)": "Λογική προβολή (ανά υποδίκτυο)", "Physical view": "Φυσική προβολή",
   "Free layout": "Ελεύθερη διάταξη", "Back to the tree": "Πίσω στο δέντρο", "Reset positions": "Επαναφορά θέσεων", "Green Spider": "Πράσινη Αράχνη", "Blue Spider": "Μπλε Αράχνη", "Red Spider": "Κόκκινη Αράχνη", "Inventory": "Απογραφή", "Network devices": "Συσκευές δικτύου", "All devices": "Όλες οι συσκευές",
   "Search": "Αναζήτηση", "Serial": "Σειριακός", "Firmware": "Firmware", "Hardware": "Hardware", "Uptime": "Χρόνος λειτουργίας",

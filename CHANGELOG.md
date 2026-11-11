@@ -4,6 +4,28 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.13] - 2026-11-11
+
+Found on Nikolaos Karanikolas's network, with his review of "Not placed yet" - thank you.
+
+### Fixed
+- **Both MAC tables are read and merged.** When a switch answered Q-BRIDGE at all, its BRIDGE table was ignored. Some
+  switches (a TP-Link SG3218XP-M2 here) report Q-BRIDGE only partly: 33 entries where BRIDGE has 52, whole ports
+  missing - so a NAS, a camera and an NVR wired to it stayed "Not placed yet". A MAC in both tables keeps its
+  Q-BRIDGE entry, which also gives its VLAN. `spidermap test-snmp` says when the two tables differ.
+- **"Not placed yet"** said "Known devices not seen since tracking started" - also for devices that answer on the
+  network. It now says what it is (not a device: devices whose switch port was not found), and each device in it
+  says why. A device whose parent ("behind") was gone could disappear from the map; it now stays visible. The
+  group also appears when there is no core switch.
+
+### Added
+- **Where each device was found**, in its panel: *Found at* - the switch, the port, and how many MACs are on it.
+- **A switch that does not report a device is still found through the others:** a MAC seen only beyond the links of
+  other switches lies where all those links lead; when that is one switch, the device is drawn on it (dotted, "a port
+  that switch does not report").
+- **One device, several MACs:** an SNMP host's other interface MACs (bonding, a second card) are that host - listed
+  in its panel as *Other MACs* - not more unknown devices.
+
 ## [0.9.12] - 2026-11-10
 
 From Nikolaos Karanikolas's multi-vendor access point review - his test cases are now part of ours. Thank you.
@@ -643,6 +665,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.13]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.13
 [0.9.12]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.12
 [0.9.11]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.11
 [0.9.10]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.10

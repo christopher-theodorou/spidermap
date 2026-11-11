@@ -63,6 +63,7 @@ POE_TOTAL = {}      # hostid -> watts the switch delivers over PoE
 TTL = {}            # ip -> TTL of its ping reply, from the last sweep
 IFMACS = {}         # hostid -> the MACs of the switch's own interfaces (ifPhysAddress): who it is in other MAC tables
 ROLE = {}           # hostid -> ("ap", why) for a host that is an access point (Wi-Fi interfaces, its own description)
+FDB_COUNTS = {}     # hostid -> (Q-BRIDGE entries, BRIDGE entries): how complete each MAC table is
 WIFI_IF = re.compile(r"^(wlan|wifi|ath|ra|rai|wl|wlp|radio|apcli|wdev|mlan)\d", re.I)
 # Access point models, by family - for the system's own description, LLDP descriptions, and devices without SNMP
 # (their DHCP / DNS name). With thanks to Nikolaos Karanikolas's multi-vendor review. A family with a vendor pattern
@@ -389,8 +390,16 @@ def scan_switch(h, community, hosts):
     bport = {k: num(v) for k, v in w("bport").items()}
 
     macs, mac_vlan = {}, {}
-    qfdb = w("qfdb")
-    fdb = qfdb or w("dfdb")
+    # Both MAC tables, merged: some switches (TP-Link SG3218XP, ...) report Q-BRIDGE only partly (33 entries where
+    # BRIDGE has 52, whole ports missing). A MAC in both keeps its Q-BRIDGE entry, which also gives its VLAN.
+    qfdb, dfdb = w("qfdb"), w("dfdb")
+    FDB_COUNTS[h["hostid"]] = (len(qfdb), len(dfdb))
+    qmacs = {":".join(f"{int(x):02x}" for x in k.split(".")[-6:]) for k in qfdb if len(k.split(".")) >= 6}
+    fdb = dict(qfdb)
+    for k, v in dfdb.items():
+        parts_ = k.split(".")
+        if len(parts_) >= 6 and ":".join(f"{int(x):02x}" for x in parts_[-6:]) not in qmacs:
+            fdb[k] = v
     try:
         wx = lambda k: at.snmpwalk(auth + ["-Ox"], target, OID[k])  # noqa: E731 - port bitmaps always as hex
         vnames, vports, fdb_vlan = vlan_tables(w("vname"), wx("vegress"), wx("vuntag"), w("pvid"), w("vfdb"))

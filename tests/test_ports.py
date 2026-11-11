@@ -247,6 +247,29 @@ def scan_fake(with_vlans=True):
         zp.at.snmpwalk, zp.at.snmp_auth, zp.at.lldp_neighbors, zp.entity_media = real
 
 
+def test_both_mac_tables():
+    """Like Nikolaos's TP-Link SG3218XP: Q-BRIDGE reports only part of the table, BRIDGE all of it."""
+    global _fake_walks
+    orig = _fake_walks
+
+    def partial(with_vlans=True):
+        W = orig(with_vlans)
+        dec = lambda m: ".".join(str(int(x, 16)) for x in m.split(":"))  # noqa: E731
+        W["dfdb"] = {dec("00:11:32:98:f6:37"): "7",           # a NAS: only in BRIDGE (like port 14 there)
+                     dec("aa:bb:cc:00:00:03"): "8",           # in both tables, BRIDGE says another port
+                     dec("aa:bb:cc:00:00:05"): "5"}           # in both, the same port
+        return W
+    _fake_walks = partial
+    try:
+        P, _ = scan_fake()
+    finally:
+        _fake_walks = orig
+    g = lambda i: set(P[f"GigabitEthernet0/0/{i}"]["macs"])  # noqa: E731
+    check("MAC tables: a device only in BRIDGE (Q-BRIDGE incomplete) is on its port", "00:11:32:98:f6:37" in g(7), g(7))
+    check("MAC tables: a MAC in both keeps its Q-BRIDGE port (and its VLAN)", "aa:bb:cc:00:00:03" in g(3) and "aa:bb:cc:00:00:03" not in g(8))
+    check("MAC tables: how complete each one is is kept (Q-BRIDGE 3, BRIDGE 3)", zp.FDB_COUNTS.get("99") == (3, 3), zp.FDB_COUNTS.get("99"))
+
+
 def test_vlans_and_lag():
     P, names = scan_fake()
     g = lambda i: P[f"GigabitEthernet0/0/{i}"]  # noqa: E731
@@ -374,6 +397,7 @@ def main():
     test_labels()
     test_sfp()
     test_vlans_and_lag()
+    test_both_mac_tables()
     test_device_types()
     test_facts()
     test_inventory()
