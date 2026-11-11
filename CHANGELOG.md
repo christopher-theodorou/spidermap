@@ -4,6 +4,25 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.12] - 2026-11-10
+
+From Nikolaos Karanikolas's multi-vendor access point review - his test cases are now part of ours. Thank you.
+
+### Fixed
+- **Ambiguous models count only with their vendor.** "AP-515", "WAP571", "R550" or "MR33" on their own could be anything;
+  they are access points when Aruba, Cisco, Ruckus or Meraki is named too (in the name, the description, or the
+  maker of the MAC address). D-Link range extenders (DAP-1620, DAP-X1860), "EAP-TLS" (a Wi-Fi login method) and
+  model names inside other words ("cheap610") are no longer taken for access points.
+- **A Wi-Fi router is not a plain access point:** an LLDP neighbour announcing both router and WLAN access point is
+  left as it is. LLDP capabilities written as 0x1000 are read too.
+
+### Added
+- **More access point families:** TP-Link CAP, UniFi UK-Ultra, Cisco Catalyst CW91xx, D-Link DBA-X / DAP-E,
+  Huawei AirEngine.
+- **Two more ways to recognise an access point:** its own LLDP (it announces itself as one), and the description
+  a switch's LLDP gives of its neighbour.
+- The tests now hold 65 access points of 16 vendors and 48 devices that are not access points.
+
 ## [0.9.11] - 2026-11-10
 
 With ideas from Nikolaos Karanikolas's review - thank you.
@@ -624,6 +643,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.12]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.12
 [0.9.11]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.11
 [0.9.10]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.10
 [0.9.10]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.10

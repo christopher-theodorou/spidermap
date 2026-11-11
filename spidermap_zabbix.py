@@ -335,6 +335,7 @@ def lldp_neighbors(auth, target):
             "remote_port": remote_port,
             "mgmt_ip": mgmt.get(key, ""),
             "caps": f.get("12", ""),                     # lldpRemSysCapEnabled: bridge, router, WLAN access point ...
+            "sysdesc": f.get("10", ""),                  # lldpRemSysDesc: the neighbour's own description
         })
     return result
 

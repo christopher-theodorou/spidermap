@@ -323,23 +323,34 @@ def test_access_points():
           and zp.ap_evidence({"1": "6"}, {"1": "ether1"}, "RouterOS CRS310-8G+2S+") is None)
 
 
+# Access points and non-access-points, from our own list and from Nikolaos Karanikolas's multi-vendor review
+AP_YES = ["EAP610-Outdoor", "EAP723_OUT", "TP-Link EAP245", "UAP-AC-Pro", "U6-Lite", "U7-Pro", "UniFi AP AC LR", "GWN7605",
+          "GWN7660", "Cisco Aironet 1832", "AIR-CAP2702I", "Cisco CBW240AC", "C9115AXI", "Meraki MR36", "Meraki MR33",
+          "Cisco WAP571", "DAP-2610", "DBA-1210P", "DWL-8610AP", "Aruba AP-515", "Aruba IAP-305", "Ruckus R650",
+          "ZoneFlex 7372", "NETGEAR WAC540", "Zyxel WAX615", "NWA1123", "ECW230", "MikroTik cAP ax", "cnPilot e600",
+          "Mist AP43", "office-access-point", "FortiAP 231F", "FAP-431F"] + ['office TP-Link EAP610-Outdoor', 'office TP-Link EAP723_OUT', 'office TP-Link EAP610_IN', 'EAP225', 'TP-Link CAP300', 'UAP-AC-PRO', 'UniFi U6-Lite', 'U7-Pro-Outdoor', 'UK-Ultra', 'Grandstream GWN7610', 'GWN7660LR', 'GWN7674', 'Cisco AIR-AP1832I-E-K9', 'Cisco AIR-CAP3702I-E-K9', 'C9120AXI-E', 'CW9166I', 'Cisco CBW150AX', 'Cisco WAP571', 'D-Link DAP-2662', 'DWL-6610AP', 'DBA-X1230P', 'DAP-E3620', 'Aruba AP-515', 'Aruba Instant On AP22', 'Ruckus R550', 'Ruckus T350', 'Cambium cnPilot e410', 'FortiAP FAP-231F', 'NETGEAR WAX630', 'Huawei AirEngine 6761-21', 'MikroTik cAP ac', 'MikroTik wAP ax']
+AP_NO = ["USW-24-PoE", "UniFi Switch 8", "UCK-G2-Plus", "Cloud Key", "OC200", "Omada Controller", "GWN7813P", "GWN7062",
+         "TL-SG3218XP-M2", "SG2206MP", "CRS310-8G+2S+", "Catalyst 9300", "DESKTOP-4KQ7", "iPhone", "Synology DS418p",
+         "office TP Link Omada 6-Port SG2206MP", "pfSense", "Supermicro IPMI", "FortiGate 60F", "FortiSwitch 124F"] + ['TP-Link SG3218XP-M2', 'SG2206MP', 'Omada Controller', 'TP-Link ER707-M2', 'TP-Link', 'UniFi Cloud Key', 'UniFi USW-24-PoE', 'UniFi UDM-Pro', 'UniFi UCG-Ultra', 'Ubiquiti EdgeRouter', 'Grandstream GWN7000', 'Grandstream GWN7801', 'Grandstream GRP2612', 'Grandstream GDS3710', 'Cisco Catalyst C9300', 'Cisco WLC 9800', 'D-Link DGS-1210', 'D-Link DIR-825', 'D-Link DAP-1620', 'D-Link DAP-X1860', 'Aruba 2930F', 'Ruckus ICX7150', 'NETGEAR GS108', 'EAP-TLS', 'cheap610', 'AP-515', 'WAP571', 'R550']
+
+
 def test_ap_models():
-    yes = ["EAP610-Outdoor", "EAP723_OUT", "TP-Link EAP245", "UAP-AC-Pro", "U6-Lite", "U7-Pro", "UniFi AP AC LR", "GWN7605", "GWN7660",
-           "Cisco Aironet 1832", "AIR-CAP2702I", "CBW240AC", "C9115AXI", "Meraki MR36", "MR33", "WAP571", "DAP-2610", "DBA-1210P",
-           "DWL-8610AP", "Aruba AP-515", "IAP-305", "Ruckus R650", "ZoneFlex 7372", "WAC540", "WAX615", "NWA1123", "ECW230",
-           "MikroTik cAP ax", "cnPilot e600", "Mist AP43", "office-access-point", "FortiAP 231F", "FAP-431F"]
-    no = ["USW-24-PoE", "UniFi Switch 8", "UCK-G2-Plus", "Cloud Key", "OC200", "Omada Controller", "GWN7813P", "GWN7062",
-          "TL-SG3218XP-M2", "SG2206MP", "CRS310-8G+2S+", "Catalyst 9300", "DESKTOP-4KQ7", "iPhone", "Synology DS418p",
-          "karanik TP Link Omada 6-Port SG2206MP", "pfSense", "Supermicro IPMI", "FortiGate 60F", "FortiSwitch 124F"]
-    wrong_yes = [x for x in yes if not zp.ap_model(x)]
-    wrong_no = [x for x in no if zp.ap_model(x)]
-    check(f"AP models: {len(yes)} access points of 15 vendors are recognised", not wrong_yes, wrong_yes)
-    check(f"AP models: {len(no)} switches, controllers, routers and computers are not", not wrong_no, wrong_no)
+    wrong_yes = [x for x in AP_YES if not zp.ap_model(x)]
+    wrong_no = [x for x in AP_NO if zp.ap_model(x)]
+    check(f"AP models: {len(AP_YES)} access points of 16 vendors are recognised", not wrong_yes, wrong_yes)
+    check(f"AP models: {len(AP_NO)} switches, controllers, routers, extenders, phones and computers are not "
+          "(also EAP-TLS, 'cheap610', and AP-515 / WAP571 / R550 with no vendor named)", not wrong_no, wrong_no)
+    check("AP models: an ambiguous model counts when the vendor is known from elsewhere (the MAC's maker)",
+          zp.ap_model("AP-515", "Aruba Networks") and zp.ap_model("R550", "Ruckus Wireless") and not zp.ap_model("R550", "Dell"))
     check("AP models: a device without SNMP named like an AP is typed 'ap'; a UniFi switch is not",
           sm.classify("EAP610_IN", "TP-Link", "98:ba:5f:00:00:01") == "ap" and sm.classify("USW-Lite-8", "Ubiquiti", "74:83:c2:00:00:01") != "ap")
-    check("LLDP: 'WLAN access point' capability, as text or hex (bit 3), and not a plain bridge/router",
-          zp.lldp_says_ap("wlanAccessPoint(3)") and zp.lldp_says_ap("14 00") and zp.lldp_says_ap("10 00")
-          and not zp.lldp_says_ap("28 00") and not zp.lldp_says_ap("bridge(2) router(4)") and not zp.lldp_says_ap(""))
+    yes = ("wlanAccessPoint(3)", "wlanAccessPoint(3) bridge(2)", "14 00", "10 00", "Hex-STRING: 30 00", "0x1000", "BITS: 14 00 bridge(2) wlanAccessPoint(3)")
+    no = ("28 00", "18 00", "wlanAccessPoint(3) router(4)", "bridge(2) router(4)", "garbage", "9", "")
+    check("LLDP: 'WLAN access point' enabled, as text or hex - and not a Wi-Fi router (router + AP), nor junk",
+          all(zp.lldp_says_ap(c) for c in yes) and not any(zp.lldp_says_ap(c) for c in no),
+          [c for c in yes if not zp.lldp_says_ap(c)] + [c for c in no if zp.lldp_says_ap(c)])
+    check("AP: its own LLDP (lldpLocSysCapEnabled) when nothing else says it",
+          zp.ap_evidence({"1": "6"}, {"1": "eth0"}, "Linux", "10 00") == "its own LLDP: WLAN access point")
 
 
 def test_device_types():

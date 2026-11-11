@@ -83,7 +83,7 @@ def classify(name, vendor, mac, off=()):
     text = f"{name} {vendor}".lower()
     if mac.startswith("bc:24:11"):
         return "guest"
-    if ap_model(name):                                   # an access point by its model name, from any vendor
+    if ap_model(name, vendor):                           # an access point by its model name, from any vendor
         return "ap"
     for key, typ, _t, _e, _d, rx in DEVICE_CATEGORIES:
         if key not in off and re.search(rx, text):

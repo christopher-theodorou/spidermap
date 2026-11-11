@@ -64,46 +64,69 @@ TTL = {}            # ip -> TTL of its ping reply, from the last sweep
 IFMACS = {}         # hostid -> the MACs of the switch's own interfaces (ifPhysAddress): who it is in other MAC tables
 ROLE = {}           # hostid -> ("ap", why) for a host that is an access point (Wi-Fi interfaces, its own description)
 WIFI_IF = re.compile(r"^(wlan|wifi|ath|ra|rai|wl|wlp|radio|apcli|wdev|mlan)\d", re.I)
-# Access point models, by vendor - for the system's own description, and for devices without SNMP (their DHCP / DNS
-# name). The brand alone is never enough: the same vendors make switches, controllers and routers (AP_NOT).
-AP_MODEL = re.compile(r"(?<![a-z0-9])("
-    r"eap\d{3}|omada eap"                                   # TP-Link Omada
-    r"|uap(-|\b)|u6-|u7-|unifi ap|uap-ac|unifi u[67]"       # Ubiquiti UniFi
-    r"|gwn7[56]\d\d"                                       # Grandstream (GWN76xx / 75xx; 78xx are switches)
-    r"|air-[a-z]*ap|aironet|cbw\d{3}|c91\d\d|meraki mr|mr\d\d[a-z]?(?![a-z0-9])|wap\d{3}|wap\d{2}"   # Cisco
-    r"|dap-\d{3,4}|dba-\d{4}|dwl-\d{3,4}"                  # D-Link
-    r"|aruba ap|iap-\d{3}|ap-\d{3}|instant on ap"           # HPE Aruba
-    r"|ruckus r\d{3}|zoneflex|ruckus t\d{3}"                # Ruckus
-    r"|wac\d{3}|wax\d{3}"                                   # Netgear / Zyxel WAX
-    r"|nwa\d{2,4}"                                          # Zyxel
-    r"|ecw\d{3}|ews\d{3}ap"                                 # EnGenius
-    r"|cap ac|cap ax|cap xl|wap ac|wap ax|wap lte|cap lite"  # MikroTik
-    r"|cnpilot|xv\d-\d|xe\d-\d"                             # Cambium
-    r"|fap-\d{3}|fortiap"                                     # Fortinet (FortiGate / FortiSwitch are not)
-    r"|mist ap|access[ _-]?point|wireless ap"
-    r")", re.I)
-AP_NOT = re.compile(r"(?<![a-z0-9])(usw|unifi switch|us-\d|uck|cloud ?key|udm|uxg|oc\d{3}|omada controller|gwn78\d\d|"
-                    r"gwn70\d\d|tl-sg|sg\d{4}|catalyst 9[2-6]|crs\d{3}|fortigate|fortiswitch|fgt|fsw-|switch)", re.I)
+# Access point models, by family - for the system's own description, LLDP descriptions, and devices without SNMP
+# (their DHCP / DNS name). With thanks to Nikolaos Karanikolas's multi-vendor review. A family with a vendor pattern
+# is ambiguous on its own ("AP-515", "WAP571", "R550") and counts only when that vendor is named too. The brand alone
+# never counts: the same vendors make switches, controllers and routers (AP_NOT).
+AP_FAMILIES = (
+    ("TP-Link EAP", r"eap[0-9]{3,4}(?:[-_](?:outdoor|wall|hd))?", None),
+    ("TP-Link CAP", r"cap[0-9]{3,4}", r"tp[- ]?link"),
+    ("UniFi AP", r"uap(?:[-_](?:ac|nano|iw|hd|lr|pro|mesh|m|xg)){0,4}|u[67][-_](?:pro|lite|lr|mesh|enterprise|iw|in[-_]wall"
+                 r"|outdoor|plus|long[-_]range)(?:[-_][a-z0-9]+)*|uk[-_]ultra|unifi ap|unifi u[67]", None),
+    ("Grandstream AP", r"gwn76[0-9]{2}[a-z]{0,3}", None),
+    ("Cisco Aironet", r"air[-_](?:ap|cap|lap)[0-9]{3,4}[a-z0-9]*(?:[-_][a-z0-9]+)*|aironet", None),
+    ("Cisco Catalyst AP", r"c91[0-9]{2}[a-z0-9]*(?:[-_][a-z0-9]+)*|cw91[0-9]{2}[a-z0-9]*(?:[-_][a-z0-9]+)*", None),
+    ("Cisco Business AP", r"cbw[0-9]{3}[a-z]{0,3}|wap[0-9]{3}[a-z]{0,2}", r"cisco"),
+    ("Cisco Meraki", r"mr[0-9]{2}[a-z]?", r"meraki|cisco"),
+    ("D-Link AP", r"dap[-_](?:[23][0-9]{3}|x(?:28|30)[0-9]{2}|e36[0-9]{2})[a-z]*|dba[-_][a-z]?[0-9]{3,4}[a-z]*|dwl[-_][0-9]{3,4}ap", None),
+    ("NETGEAR / Zyxel AP", r"wa[xc][0-9]{3}[a-z]{0,2}|wndap[0-9]{3}", r"netgear|zyxel"),
+    ("Zyxel AP", r"nwa[0-9]{2,4}[a-z0-9-]*", None),
+    ("Huawei AP", r"airengine[-_ ]?[0-9]{4}[a-z0-9]*(?:[-_][a-z0-9]+)*", None),
+    ("MikroTik AP", r"cap(?:[-_ ]?ac|[-_ ]?ax|[-_ ]?xl|[-_ ]?lite)?|wap(?:[-_ ]?ac|[-_ ]?ax|[-_ ]?lte)?", r"mikrotik"),
+    ("Aruba AP", r"(?:iap|ap)[-_][0-9]{3}[a-z]{0,2}|ap[0-9]{2}", r"aruba|instant.?on"),
+    ("Ruckus AP", r"[rth][0-9]{3}[a-z]{0,2}|zoneflex", r"ruckus|zoneflex"),
+    ("EnGenius AP", r"ecw[0-9]{3}|ews[0-9]{3}ap", None),
+    ("Cambium AP", r"cnpilot|e[0-9]{3}[a-z]?|xv?2[-_][0-9]{2,3}[a-z]?", r"cambium|cnpilot"),
+    ("Fortinet AP", r"fap[-_][0-9]{2,4}[a-z]{0,3}|fortiap(?:[-_ ][a-z0-9]+)*", None),
+    ("Juniper Mist AP", r"mist ap[0-9]*", None),
+    ("access point", r"access[ _-]?point|wireless ap", None),
+)
+AP_NOT = re.compile(r"(?<![a-z0-9])(usw|unifi switch|us-[0-9]|udm|ucg|uxg|uck|cloud ?key|oc[0-9]{3}|controller|manager|wlc|"
+                    r"gwn70[0-9]{2}|gwn78[0-9]{2}|tl-sg|sg[0-9]{3,4}|er[0-9]{3,4}|catalyst 9[2-6]|crs[0-9]{3}|"
+                    r"fortigate|fortiswitch|fgt|fsw-|switch|eap-tls|eap-ttls|eap-peap)(?![a-z0-9])", re.I)
 
 
-def ap_model(text):
-    """The access-point model named in a text (a description, a host or DHCP name), or None - never for a
-    switch, controller or router of the same vendor."""
+def ap_model(text, vendor=""):
+    """The access-point family named in a text (a description, a host or DHCP name), or None - never for a switch,
+    controller or router of the same vendor; an ambiguous model only when its vendor is named (text or vendor)."""
     t = str(text or "")
-    m = AP_MODEL.search(t)
-    return m.group(1) if m and not AP_NOT.search(t) else None
+    if not t or AP_NOT.search(t):
+        return None
+    context = f"{t} {vendor or ''}"
+    for family, pattern, need in AP_FAMILIES:
+        if need and not re.search(need, context, re.I):
+            continue
+        m = re.search(r"(?<![a-z0-9])(?:" + pattern + r")(?![a-z0-9])", t, re.I)
+        if m:
+            return m.group(0) if family != "access point" else "access point"
+    return None
 
 
 def lldp_says_ap(caps):
     """LLDP 'system capabilities enabled' includes WLAN Access Point (bit 3) - text or hex, as snmpwalk prints it."""
     c = str(caps or "").strip()
     if "(" in c or re.search(r"[g-zG-Z]{3,}", c.split(":", 1)[-1] if c.lower().startswith(("hex", "bits")) else c):
-        return "wlanaccesspoint" in c.lower().replace(" ", "")      # named bits: only the name counts
-    h = re.sub(r"[^0-9a-fA-F]", "", c.split(":", 1)[-1] if ":" in c else c)
-    return len(h) >= 2 and bool(int(h[:2], 16) & 0x10)
+        low = c.lower().replace(" ", "")                             # named bits: only the names count
+        return "wlanaccesspoint" in low and "router(" not in low      # router + AP: a Wi-Fi router, not a plain AP
+    h = c.split(":", 1)[-1] if ":" in c else c
+    h = re.sub(r"[^0-9a-fA-F]", "", re.sub(r"(?i)\b0x", "", h))
+    if len(h) < 2:
+        return False
+    b = int(h[:2], 16)
+    return bool(b & 0x10) and not b & 0x08                         # WLAN access point (bit 3), not also a router (bit 4)
 
 
-def ap_evidence(iftypes, descrs, sysdescr=""):
+def ap_evidence(iftypes, descrs, sysdescr="", own_caps=""):
     """Why a host is an access point, or None. iftypes / descrs: {ifIndex: value} from IF-MIB.
     Wi-Fi interfaces (ifType 71, ieee80211) are the proof; Wi-Fi interface names or the system's own description
     (EAP..., UAP, "access point") are the next best thing."""
@@ -114,7 +137,9 @@ def ap_evidence(iftypes, descrs, sysdescr=""):
     if named:
         return "Wi-Fi interfaces " + ", ".join(named[:3])
     m = ap_model(sysdescr)
-    return f"it describes itself as {m!r}" if m else None
+    if m:
+        return f"it describes itself as {m!r}"
+    return "its own LLDP: WLAN access point" if lldp_says_ap(own_caps) else None
 INVENTORY = {}      # hostid -> {"model", "serial", "firmware", "hardware", "vendor", "descr", "location", "contact", "object_id"}
 ENTITY = "1.3.6.1.2.1.47.1.1.1.1"   # ENTITY-MIB entPhysicalTable
 SYSTEM = {"descr": "1.3.6.1.2.1.1.1", "object_id": "1.3.6.1.2.1.1.2", "contact": "1.3.6.1.2.1.1.4", "location": "1.3.6.1.2.1.1.6"}
@@ -415,8 +440,10 @@ def scan_switch(h, community, hosts):
     except Exception:  # noqa: BLE001
         INVENTORY[h["hostid"]] = {}
     try:                                                      # is it an access point? (read as text, not hex)
+        inv = INVENTORY.get(h["hostid"]) or {}
         why = ap_evidence(at.snmpwalk(auth, target, "1.3.6.1.2.1.2.2.1.3"), at.snmpwalk(auth, target, "1.3.6.1.2.1.2.2.1.2"),
-                          (INVENTORY.get(h["hostid"]) or {}).get("descr", "") + " " + h.get("name", ""))
+                          f"{inv.get('descr', '')} {inv.get('model', '')} {h.get('name', '')}",
+                          next(iter(at.snmpwalk(auth, target, "1.0.8802.1.1.2.1.3.6").values()), ""))   # lldpLocSysCapEnabled
     except Exception:  # noqa: BLE001
         why = None
     if why:

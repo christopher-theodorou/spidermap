@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.11"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.12"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -649,10 +649,12 @@ def full_scan(api, community=None, quiet=False):
     for s_ in sw.values():
         for p_ in s_["ports"]:
             for nb, _peer in p_.get("lldp", ()):
-                if zp.lldp_says_ap(nb.get("caps")):
+                said = ("announces itself as a WLAN access point" if zp.lldp_says_ap(nb.get("caps")) else
+                        (lambda m: m and f"describes itself as {m!r}")(zp.ap_model(f"{nb.get('sysdesc', '')} {nb.get('sysname', '')}")))
+                if said:
                     m_ = zp.mac_of(nb.get("chassis", "")) or next((m for m, ip_ in ipmap.items() if ip_ == nb.get("mgmt_ip")), None)
                     if m_ and m_ not in role_type:
-                        role_type[m_], role_why[m_] = "ap", f"LLDP of {s_['host']['name']}: announces itself as a WLAN access point"
+                        role_type[m_], role_why[m_] = "ap", f"LLDP of {s_['host']['name']}: {said}"
     dns = zp.rdns_all(sorted(set(ipmap.values())))
     gw_ip = zp.default_gateway()
     gw_mac = next((m for m, v in arp.items() if v[0] == gw_ip), None)
@@ -1274,7 +1276,8 @@ def full_scan(api, community=None, quiet=False):
         if n_.get("kind") == "device" and n_.get("type") == "ap":
             m_ = n_.get("mac", "")
             why = (role_why.get(m_) or (dcfg.get(m_, {}).get("type") and "your choice on the map")
-                   or (zp.ap_model(n_.get("name", "")) and f"its name: an access point model ({zp.ap_model(n_.get('name', ''))})"))
+                   or (zp.ap_model(n_.get("name", ""), n_.get("vendor", "")) and
+                       f"its name: an access point model ({zp.ap_model(n_.get('name', ''), n_.get('vendor', ''))})"))
             if why:
                 n_["details"].append(["Type from", why])
     switches_out = {}
