@@ -119,6 +119,10 @@ SETTINGS_SCHEMA = [
        choices=[["router", "The router's WAN (SNMP, else UPnP)"], ["switch", "Switch port to the gateway"]],
        help="The router's WAN: read over SNMP when the gateway is a Zabbix host with an SNMP interface (best: 64-bit "
             "counters), else over UPnP. When neither works, the card shows a warning instead of other numbers."),
+    _S("wan_links", "wanlinks", [], "Measurements", "Traffic", "WAN from Zabbix",
+       help="The gateway's own traffic items in Zabbix - for any router or firewall, measured by agent, SNMP or HTTP. "
+            "Interfaces whose name or tags say WAN are used by themselves; otherwise tick the WAN interface (or "
+            "interfaces, for several connections)."),
     _S("wan_interface", "str", "", "Measurements", "Traffic", "Router's WAN interface", maxlen=40,
        help="SNMP only. The interface name on the router, e.g. ether1, pppoe-out1, igb0. Empty: the interface of the "
             "default route."),
@@ -235,6 +239,19 @@ def validate_settings(new, current=None):
                 v = str(v)
                 if len(v) > 128 or re.search(r"[\x00-\x1f]", v):
                     raise ValueError("at most 128 characters, no control characters")
+            elif typ == "wanlinks":
+                if not isinstance(v, list) or len(v) > 4:
+                    raise ValueError("at most 4 WAN connections")
+                out_ = []
+                for x in v:
+                    if not isinstance(x, dict) or not re.fullmatch(r"\d{1,12}", str(x.get("down", ""))) \
+                            or not re.fullmatch(r"\d{1,12}", str(x.get("up", ""))):
+                        raise ValueError("each WAN needs a Zabbix item for download and one for upload")
+                    nm = str(x.get("name") or "WAN").strip()[:30]
+                    if re.search(r"[<>\x00-\x1f]", nm):
+                        raise ValueError("a WAN name without < > or control characters")
+                    out_.append({"name": nm, "down": str(x["down"]), "up": str(x["up"])})
+                v = out_
             elif typ == "list":
                 if not isinstance(v, list) or any(x not in DEVICE_CATEGORY_KEYS for x in v):
                     raise ValueError("unknown category")

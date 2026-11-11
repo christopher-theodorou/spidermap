@@ -236,6 +236,15 @@ body.dash #modebar,body.inv #modebar{display:none!important}
 #ask{background:var(--card);color:var(--text);border-radius:12px;box-shadow:0 24px 60px rgba(10,10,40,.3);width:min(440px,100%);padding:18px 20px}
 #ask p{margin:0 0 16px;font-size:14px;line-height:1.5;white-space:pre-line}.ask-btns{display:flex;justify-content:flex-end;gap:10px}
 .ask-btns .sm-btn{width:auto;padding:0 18px;margin:0}.sm-btn.danger{background:var(--bad);border-color:var(--bad)}
+.wl{display:flex;flex-direction:column;gap:6px;margin-top:8px}.wl-row{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:7px 10px}
+.wl-row.on{border-color:var(--sm-accent,var(--accent));background:var(--sm-soft,var(--accent-bg))}.wl-row label{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.wl-rate{color:var(--muted);font-size:12px;white-space:nowrap}.wl-name{grid-column:1/-1;height:28px;border:1px solid var(--border);border-radius:6px;padding:0 8px;font:inherit;background:var(--card);color:var(--text)}
+.stat[role=button]{cursor:pointer;border-radius:6px;padding:1px 4px;margin:0 -4px}.stat[role=button]:hover{background:var(--bg)}
+.ls-top{display:flex;gap:8px;margin-bottom:10px}.ls-top input{flex:1;height:32px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);padding:0 10px;font:inherit}
+.ls{display:flex;flex-direction:column}.ls-row{display:flex;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--border)}
+.ls-main{display:flex;align-items:center;gap:9px;flex:1;min-width:0;cursor:pointer}.ls-main i{font-size:18px;color:var(--muted)}.ls-main span{display:flex;flex-direction:column;min-width:0}
+.ls-main b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ls-main small{color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ls-main:hover b{color:var(--accent)}.ls-r{font-size:11.5px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:6px}.ls-r .btn{height:26px;padding:0 8px;font-size:12px}
 .ln.lag{stroke-width:4.5}.ln.redundant{stroke:var(--muted);stroke-dasharray:9 6;stroke-width:1.5}.ln.guess{stroke-dasharray:2 4;stroke-linecap:round}
 .tag.t-stale{background:var(--bg);color:var(--muted);border:1px dashed var(--border)}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
 #mapctl{position:absolute;right:16px;top:12px;max-height:calc(100% - 24px);overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:6;transition:right .25s}
@@ -415,7 +424,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.13";
+const PAGE_VERSION = "0.9.14";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -669,13 +678,18 @@ function gwCard() {
   if (mu) h += row("Monthly Data Usage", bytes(mu[0] + mu[1]) + (since ? ` <span style="color:var(--muted)">since ${esc(since)}</span>` : ""),
                    `↓ ${bytes(mu[0])} · ↑ ${bytes(mu[1])}, ` + (fromRouter ? "counted by the router (all internet traffic)" : "measured on the switch port to the gateway"));
   const via = WS && WS.via, wanBad = WS && routerMode && !via;
-  const wTitle = via === "snmp" ? `The router's WAN interface over SNMP (${WS.router || ""}${WS.interface ? ", " + WS.interface : ""}): all internet traffic.`
+  const wTitle = via === "zabbix" ? `The gateway's own traffic items in Zabbix (${WS.router || ""}${WS.interface ? ", " + WS.interface : ""}): all internet traffic.`
+    : via === "snmp" ? `The router's WAN interface over SNMP (${WS.router || ""}${WS.interface ? ", " + WS.interface : ""}): all internet traffic.`
     : via === "upnp" ? "The router's own counters over UPnP: all internet traffic, including Wi-Fi devices."
     : via === "switch" ? "The switch port to the gateway (chosen in Settings): devices on the gateway's own Wi-Fi / LAN ports are not included."
-    : wanBad ? "The WAN cannot be measured: " + (WS.error || "") + ". Options: add the gateway to Zabbix with an SNMP interface, turn UPnP on in the router, or choose the switch port in Settings > Measurements." : "";
-  const wLabel = via === "snmp" ? "router · SNMP" : via === "upnp" ? "router · UPnP" : via === "switch" ? "switch port" : wanBad ? "WAN unavailable ⚠" : "";
+    : wanBad ? "The WAN cannot be measured: " + (WS.error || "") + ". Options: add the gateway to Zabbix (agent or SNMP) and choose its WAN in Settings > Measurements, turn UPnP on in the router, or choose the switch port." : "";
+  const wLabel = via === "zabbix" ? "router · Zabbix" : via === "snmp" ? "router · SNMP" : via === "upnp" ? "router · UPnP" : via === "switch" ? "switch port" : wanBad ? "WAN unavailable ⚠" : "";
   const wVal = WS && !via ? "-" : wan ? `<span style="color:var(--accent)">↓ ${mbps(wan.down)}</span> &nbsp;<span style="color:var(--pur)">↑ ${mbps(wan.up)}</span>` : "-";
   h += `<div class="gr" title="${esc(wTitle)}"><span>Throughput${wLabel ? `<small style="display:block;font-size:10.5px;color:${wanBad ? "var(--warn)" : "var(--muted)"}">${wLabel}</small>` : ""}</span><span>${wVal}</span></div>`;
+  if (wan && wan.links && (wan.links.length > 1 || wan.links.some(x => x.stale)))   // several WAN connections, each on its own
+    h += wan.links.map(x => `<div class="gr" style="font-size:12px"><span style="color:var(--muted)">↳ ${esc(x.name)}</span><span>${x.stale
+      ? `<span class="warnc" title="Its Zabbix items have not been updated for ${Math.round(x.age / 60)} min">not updated ${Math.round(x.age / 60)} min ⚠</span>`
+      : `↓ ${mbps(x.rx)} · ↑ ${mbps(x.tx)}`}</span></div>`).join("");
   if (!wanBad) h += spark(wanRows, 1, 2);              // no graph of old values when the WAN cannot be measured
   const TG = live && RT.targets ? RT.targets : {};
   h += `<div class="tiles">${Object.entries(lat).map(([k, v]) => { const x = TG[k]; return `<div class="tile" title="${x ? `loss ${x.loss} % · jitter ${x.jit ?? "-"} ms` : ""}"><b style="color:${v == null ? "var(--bad)" : v > 80 ? "var(--warn)" : "var(--text)"}">${v == null ? "—" : Math.round(v) + "ms"}</b><span>${esc(k)}</span>${x && x.loss >= 5 ? `<small style="color:var(--warn)">loss ${x.loss}%</small>` : ""}</div>`; }).join("")}</div>`;
@@ -750,10 +764,13 @@ function healthHtml() {
     + (H.unifi.error ? `<div class="note warnc" style="margin-top:-4px">${esc(H.unifi.error)}</div>` : "");
   const WH = H.wan;
   if (WH && WH.mode !== "switch") {
-    if (WH.snmp) h += row("WAN over SNMP", !WH.snmp.error ? okb(true, `ok · ${esc(WH.snmp.router || "")}${WH.snmp.interface ? " · " + esc(WH.snmp.interface) : ""}`) : '<span class="warnc">not working</span>')
+    if (WH.zabbix) h += row("WAN from Zabbix", WH.zabbix.ok ? okb(true, `ok · ${esc(WH.zabbix.host || "")}${WH.zabbix.links ? " · " + esc(WH.zabbix.links) : ""}`)
+        : '<span class="warnc">not set</span>') + (WH.zabbix.error ? `<div class="note warnc" style="margin-top:-4px">${esc(WH.zabbix.error)}</div>` : "");
+    if (WH.zabbix && WH.zabbix.ok) h += row("WAN over SNMP / UPnP", '<span style="color:var(--muted)">not needed</span>');
+    else if (WH.snmp) h += row("WAN over SNMP", !WH.snmp.error ? okb(true, `ok · ${esc(WH.snmp.router || "")}${WH.snmp.interface ? " · " + esc(WH.snmp.interface) : ""}`) : '<span class="warnc">not working</span>')
       + (WH.snmp.error ? `<div class="note warnc" style="margin-top:-4px">${esc(WH.snmp.error)}</div>` : "");
     else h += row("WAN over SNMP", '<span style="color:var(--muted)">the gateway is not an SNMP host in Zabbix</span>');
-    h += row("WAN over UPnP", WH.upnp.ok ? okb(true, "ok" + (WH.upnp.name ? " · " + esc(WH.upnp.name) : "")) : '<span class="warnc">not usable</span>')
+    if (!(WH.zabbix && WH.zabbix.ok)) h += row("WAN over UPnP", WH.upnp.ok ? okb(true, "ok" + (WH.upnp.name ? " · " + esc(WH.upnp.name) : "")) : '<span class="warnc">not usable</span>')
       + (WH.upnp.error ? `<div class="note warnc" style="margin-top:-4px">${esc(WH.upnp.error)}</div>` : "");
   }
   const hist = (st.history || []).slice().reverse();
@@ -829,6 +846,19 @@ function smField(f) {
   const lbl = `<label for="${id}">${esc(f.label)}${smInfo(f.help)}${f.preview ? `<span class="sm-mini">v${esc(f.preview)}</span>` : ""}</label>`;
   const err = SM.errors[f.key] ? `<div class="sm-err">${esc(SM.errors[f.key])}</div>` : "";
   const attrs = `id="${id}" data-k="${esc(f.key)}"${dis ? " disabled" : ""}`;
+  if (f.type === "wanlinks") {
+    const C = (typeof RT !== "undefined" && RT && RT.wan_candidates) || [], sel = v || [];
+    const has = c => sel.find(x => String(x.down) === String(c.down) && String(x.up) === String(c.up));
+    const auto = !sel.length && C.some(c => c.hint);
+    const rows = C.map(c => { const x = has(c); return `<div class="wl-row${x ? " on" : ""}">
+        <label><input type="checkbox" data-wl="${esc(c.down)}|${esc(c.up)}|${esc(c.iface)}"${x ? " checked" : ""}> <b>${esc(c.iface)}</b>
+        ${c.hint && !sel.length ? '<span class="sm-mini">used by itself: its name says WAN</span>' : ""}</label>
+        <span class="wl-rate">↓ ${c.rx != null ? mbps(c.rx) : "-"} · ↑ ${c.tx != null ? mbps(c.tx) : "-"}</span>
+        ${x ? `<input class="wl-name" data-wln="${esc(c.down)}|${esc(c.up)}" value="${esc(x.name)}" maxlength="30" aria-label="Name of this WAN">` : ""}</div>`; }).join("");
+    return `<div class="sm-row" style="display:block">${lbl}<div class="wl">${rows ||
+      '<div class="sm-help">The gateway has no traffic items in Zabbix, or is not in Zabbix yet. Add it as a host (agent, SNMP or any template that measures its interfaces) and its interfaces appear here within 10 minutes.</div>'}
+      ${rows ? `<div class="sm-help">${auto ? "Used now: the interfaces whose name says WAN. " : sel.length ? "" : "Tick the interface that goes to the internet (the traffic next to each one helps). "}Several ticks for several connections, e.g. fibre and 4G.</div>` : ""}</div></div>`;
+  }
   if (f.type === "bool")
     return `<div class="sm-row sw${dis ? " dis" : ""}">${lbl}<label class="sm-switch"><input type="checkbox" role="switch" ${attrs} ${v ? "checked" : ""}><span></span></label></div>`;
   let ctl;
@@ -994,6 +1024,20 @@ function smSet(k, raw) {
   if (SM.errors.load_crit === cross) delete SM.errors.load_crit;
   if (!SM.errors.load_crit && !SM.errors.load_warn && Number.isInteger(w) && Number.isInteger(c) && c <= w) SM.errors.load_crit = cross;
 }
+function smWanPick(main) {
+  main.addEventListener("change", e => {
+    const t = e.target.closest("[data-wl]"); if (!t) return;
+    const [down, up, iface] = t.dataset.wl.split("|"), cur = (SM.draft.wan_links || []).filter(x => !(String(x.down) === down && String(x.up) === up));
+    SM.draft.wan_links = t.checked ? [...cur, { name: iface.slice(0, 30), down, up }].slice(0, 4) : cur;
+    smRender();
+  });
+  main.addEventListener("input", e => {
+    const t = e.target.closest("[data-wln]"); if (!t) return;
+    const [down, up] = t.dataset.wln.split("|");
+    SM.draft.wan_links = (SM.draft.wan_links || []).map(x => String(x.down) === down && String(x.up) === up ? { ...x, name: t.value.slice(0, 30) } : x);
+    smFoot();
+  });
+}
 function smWire() {
   $("#sm-close").onclick = smClose;
   $("#smb").onclick = e => { if (e.target.id === "smb") smClose(); };
@@ -1069,6 +1113,7 @@ function smWire() {
       sendToService({ action: "reset", reset: keep });
     }
   });
+  smWanPick(main);
   main.addEventListener("change", e => { if (e.target.id === "st-imp" && e.target.files[0]) { previewImport(e.target.files[0]); e.target.value = ""; } });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && SM.open) smClose(); });
 }
@@ -1648,7 +1693,8 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Found at": "Βρέθηκε", "Why not placed": "Γιατί δεν τοποθετήθηκε", "Other MACs": "Άλλες MAC",
+  "Max-repetitions": "Max-repetitions", "Online": "Σε σύνδεση", "Offline": "Εκτός σύνδεσης", "New / unknown": "Νέες / άγνωστες",
+  "Click for the list": "Κλικ για τη λίστα", "Search in this list": "Αναζήτηση στη λίστα", "None.": "Καμία.", "WAN from Zabbix": "WAN από το Zabbix", "router · Zabbix": "router · Zabbix", "not needed": "δεν χρειάζεται", "Found at": "Βρέθηκε", "Why not placed": "Γιατί δεν τοποθετήθηκε", "Other MACs": "Άλλες MAC",
   "Not placed yet": "Χωρίς θέση ακόμη", "Type from": "Τύπος από", "Core switch": "Κεντρικό switch", "Find an upstream router": "Εύρεση router πριν την πύλη", "Discard": "Απόρριψη", "Reset positions": "Επαναφορά θέσεων", "Reset and forget": "Επαναφορά και διαγραφή", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
   "Export the map (PNG, SVG)": "Εξαγωγή χάρτη (PNG, SVG)", "Logical view (by subnet)": "Λογική προβολή (ανά υποδίκτυο)", "Physical view": "Φυσική προβολή",
   "Free layout": "Ελεύθερη διάταξη", "Back to the tree": "Πίσω στο δέντρο", "Reset positions": "Επαναφορά θέσεων", "Green Spider": "Πράσινη Αράχνη", "Blue Spider": "Μπλε Αράχνη", "Red Spider": "Κόκκινη Αράχνη", "Inventory": "Απογραφή", "Network devices": "Συσκευές δικτύου", "All devices": "Όλες οι συσκευές",
@@ -1765,7 +1811,7 @@ function renderDash() {
   // throughput
   const W = live ? RT.wan : null, WS = live ? RT.wan_state : null, wrows = live && RT.hist ? RT.hist.wan || [] : [];
   const mu = live && RT.usage && RT.usage.wan && RT.usage.wan.m;
-  const tp = (W ? `<div class="db-big" style="color:var(--accent)">↓ ${mbps(W.down)}</div><div class="db-sub">↑ ${mbps(W.up)} · ${W.src === "switch" ? "switch port" : "router"}</div>${wrows.length > 2 ? spark(wrows, 1, 2) : ""}`
+  const tp = (W ? `<div class="db-big" style="color:var(--accent)">↓ ${mbps(W.down)}</div><div class="db-sub">↑ ${mbps(W.up)} · ${W.src === "switch" ? "switch port" : W.src === "zabbix" ? "router · Zabbix" : "router"}</div>${wrows.length > 2 ? spark(wrows, 1, 2) : ""}`
                 : `<div class="db-big">-</div><div class="db-sub">${esc(WS && WS.error ? "WAN unavailable: " + WS.error : "no measurement")}</div>`)
            + (mu ? `<div class="db-row"><span>This month</span><span class="r">↓ ${bytes(mu[0])} · ↑ ${bytes(mu[1])}</span></div>` : "");
   h += dbCard("arrows-down-up", "Throughput", tp);
@@ -2007,6 +2053,57 @@ function modeBar() {
   };
 }
 
+/* ---------- the header counters as lists: online, offline, new / unknown (the same rules as the counts) ---------- */
+let LQ = "";
+function listNodes(kind) {
+  const all = DATA.nodes.filter(n => n.kind === "device" || n.kind === "router");
+  if (kind === "on") return all.filter(n => status(n) === "up").sort((a, b) => a.name.localeCompare(b.name));
+  if (kind === "off") return all.filter(n => status(n) !== "up").sort((a, b) => (b.last || 0) - (a.last || 0) || a.name.localeCompare(b.name));
+  return all.filter(n => n.flags.includes("new") || n.flags.includes("unknown")).sort((a, b) => (b.first || 0) - (a.first || 0) || a.name.localeCompare(b.name));
+}
+function listWhere(n) {
+  const p = DATA.nodes.find(x => x.id === n.parent);
+  return p ? (p.id === "unplaced" ? "Not placed yet" : p.name + (n.port ? " · " + n.port : "")) : "";
+}
+function listHtml(kind) {
+  const L = listNodes(kind);
+  const since = n => kind === "off" ? (n.last ? "offline · " + ago(n.last) : "offline") : kind === "new" ? (n.flags.includes("unknown") ? "unknown" : "new") + (n.first ? " · " + ago(n.first) : "") : "";
+  const rows = L.map(n => `<div class="ls-row" data-text="${esc([n.name, n.ip, n.mac, listWhere(n)].join(" ").toLowerCase())}">
+      <div class="ls-main" data-go="${esc(n.id)}" role="button" tabindex="0"><i class="ti ti-${esc(n.icon || "device-desktop")}" aria-hidden="true"></i>
+        <span><b>${esc(n.name)}</b><small>${esc([n.ip, listWhere(n)].filter(Boolean).join(" · "))}</small></span></div>
+      <span class="ls-r">${esc(since(n))}${kind === "new" && n.mac && ME.can && ME.can.edit ? ` <button class="btn" data-ap="${esc(n.mac)}" title="I know this device: it is no longer marked new or unknown"><i class="ti ti-circle-check"></i>Approve</button>` : ""}</span></div>`).join("");
+  return `<div class="ls-top"><input id="ls-q" placeholder="Search" aria-label="Search in this list" value="${esc(LQ)}"><button class="btn" id="ls-csv"><i class="ti ti-download"></i>CSV</button></div>
+    <div class="ls">${rows || '<p style="color:var(--muted)">None.</p>'}</div>`;
+}
+function listWire(kind) {
+  const P = $("#panel"), q = $("#ls-q");
+  const filt = () => { const t = q.value.toLowerCase(); LQ = q.value; P.querySelectorAll(".ls-row").forEach(r => { r.style.display = !t || r.dataset.text.includes(t) ? "" : "none"; }); };
+  q.oninput = filt; filt();
+  P.querySelectorAll(".ls-main").forEach(r => r.onkeydown = e => { if (e.key === "Enter") select(r.dataset.go, true); });
+  P.querySelectorAll("[data-ap]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const r = await postApi({ mac: b.dataset.ap, approved: true }); const j = await r.json().catch(() => ({}));
+    if (!j.ok) { b.disabled = false; return toast(j.error || "Refused."); }
+    const n = DATA.nodes.find(x => x.mac === b.dataset.ap); if (n) n.flags = n.flags.filter(f => f !== "new" && f !== "unknown");
+    index(); render(); special("l" + kind); toast("Approved. It stays so after the next scan.");   // index(): the header counts too
+  });
+  $("#ls-csv").onclick = () => {
+    const cell = v => { let t = String(v ?? ""); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return /[",\n;]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+    const t = q.value.toLowerCase();
+    const L = listNodes(kind).filter(n => !t || [n.name, n.ip, n.mac, listWhere(n)].join(" ").toLowerCase().includes(t));
+    const csv = [["Name", "IP", "MAC", "Type", "Where", "Status", "First seen", "Last seen"], ...L.map(n => [n.name, n.ip, n.mac, TYPE_LABEL[n.type] || n.type || "",
+      listWhere(n), status(n), n.first ? new Date(n.first * 1000).toISOString().slice(0, 16) : "", n.last ? new Date(n.last * 1000).toISOString().slice(0, 16) : ""])]
+      .map(r => r.map(cell).join(",")).join("\r\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: "text/csv" }));
+    a.download = `spidermap-${kind === "on" ? "online" : kind === "off" ? "offline" : "new-unknown"}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+}
+[["#s-on", "lon"], ["#s-off", "loff"], ["#s-new", "lnew"]].forEach(([id, k]) => {
+  const el = $(id); el.setAttribute("role", "button"); el.tabIndex = 0; el.title = "Click for the list";
+  el.onclick = () => { LQ = ""; special(k); };
+  el.onkeydown = e => { if (e.key === "Enter") { LQ = ""; special(k); } };
+});
+
 /* ---------- clicks ---------- */
 let nodeDrag = null, justDragged = false;
 $("#stage").addEventListener("pointerdown", e => {
@@ -2120,7 +2217,7 @@ function panel(id, quiet) {
     ap.disabled = true;
     const r = await postApi({ mac: n.mac, approved: true }); const j = await r.json().catch(() => ({}));
     if (!j.ok) { ap.disabled = false; return toast(j.error || "Refused."); }
-    n.flags = n.flags.filter(f => f !== "new" && f !== "unknown"); render(); panel(n.id, true);
+    n.flags = n.flags.filter(f => f !== "new" && f !== "unknown"); index(); render(); panel(n.id, true);
     toast("Approved. It stays so after the next scan.");
   };
   const cm = $("#cmac"); if (cm) cm.onclick = () => { navigator.clipboard && navigator.clipboard.writeText(n.mac); cm.innerHTML = '<i class="ti ti-check"></i>Copied'; };
@@ -2257,7 +2354,9 @@ function internetHtml() {
 
 /* ---------- special panels (activity, people, top talkers) ---------- */
 const SPECIAL = { activity: ["Activity", "bell", activityHtml], people: ["Who's online", "users", peopleHtml], top: ["Top talkers", "chart-bar", topHtml],
-                  speed: ["ISP Speed Test", "gauge", speedHtml], health: ["Collector health", "heart-rate-monitor", healthHtml] };
+                  speed: ["ISP Speed Test", "gauge", speedHtml], health: ["Collector health", "heart-rate-monitor", healthHtml],
+                  lon: ["Online", "circle-check", () => listHtml("on")], loff: ["Offline", "plug-connected-x", () => listHtml("off")],
+                  lnew: ["New / unknown", "sparkles", () => listHtml("new")] };
 function special(kind) {
   const [title, icon, fn] = SPECIAL[kind], P = $("#panel");
   sel = "#" + kind;
@@ -2269,6 +2368,7 @@ function special(kind) {
   P.querySelectorAll("[data-pa]").forEach(c => c.onclick = () => { pplAll = c.dataset.pa === "1"; special("people"); });
   P.querySelectorAll("[data-tp]").forEach(c => c.onclick = () => { topPer = c.dataset.tp; special("top"); });
   if (kind === "activity") { store("nm-seen", Date.now() / 1000); actBadge(); }
+  if (kind[0] === "l" && kind.length === 4 || kind === "lon") listWire(kind.slice(1));
   const s2 = $("#spt2"); if (s2) s2.onclick = () => startSpeedtest($("#spm2"));
   if (DATA) render();
 }

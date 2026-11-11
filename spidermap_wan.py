@@ -198,15 +198,143 @@ def read_router_snmp(rs, h, t0, usage, wan_name=""):
     return {"rx": r_rx, "tx": r_tx}
 
 
-def measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0):
-    """The WAN throughput: (rate or None, "snmp" | "upnp" | "switch" | None, reason when there is no rate).
-    The router's WAN by default - SNMP when the gateway is an SNMP host in Zabbix, else UPnP. No other numbers are
-    put in its place: without a router reading the result is None, with the reason."""
+# ---------------------------------------------------------------------------------------------------------------
+# WAN from the gateway's own items in Zabbix - any router or firewall, however Zabbix measures it (agent, SNMP, HTTP)
+# ---------------------------------------------------------------------------------------------------------------
+WAN_HINT = re.compile(r"(?i)(?<![a-z0-9])(wan\d*|pppoe\d*|ppp\d+|wwan\d*|lte|4g|5g|v?dsl|adsl|internet|isp|uplink|fib(re|er)|ftth|"
+                      r"starlink|outside|external)(?![a-z0-9])")
+_DIR = re.compile(r"(?i)(received|incoming|inbound|download|\bin\b|rx|sent|outgoing|outbound|upload|\bout\b|tx)")
+
+
+def _seconds(delay):
+    m = re.fullmatch(r"\s*(\d+)\s*([smhd]?)\s*", str(delay or ""))
+    return int(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)] if m else 60
+
+
+def item_bps(it, t=None):
+    """An item's current value in bit/s, and whether it is stale: (bps or None, age in s).
+    bps / b/s - as is; Bps - x8; a raw byte counter (B or no unit) - from its last two values over its interval."""
+    t = t or time.time()
+    try:
+        last, units = float(it.get("lastvalue")), str(it.get("units") or "")
+    except (TypeError, ValueError):
+        return None, None
+    age = t - int(it.get("lastclock") or 0) if it.get("lastclock") else None
+    if units in ("bps", "b/s", "bit/s", "bits/s") or units.lower() in ("bps", "bit/s") and units != "Bps":
+        return last, age
+    if units in ("Bps", "B/s"):
+        return last * 8, age
+    try:
+        prev = float(it.get("prevvalue"))
+    except (TypeError, ValueError):
+        return None, age
+    return (max(0.0, (last - prev)) * 8 / max(1, _seconds(it.get("delay"))) if last >= prev else None), age
+
+
+def wan_candidates(items):
+    """The gateway's traffic items, grouped by interface: [{"iface", "down", "up", "hint"}] - "down" is what comes in,
+    "up" what goes out. Found by what they measure (net.if.in/out keys, interface counters, or bps units with an
+    in / out name), never by vendor or template."""
+    groups = {}
+    for it in items:
+        key, name = str(it.get("key_", "")), str(it.get("name", ""))
+        m = re.match(r"net\.if\.(in|out)\[\s*\"?([^\",\]]+)", key)
+        if m:
+            d, gid = ("down" if m.group(1) == "in" else "up"), m.group(2)
+            gid = re.sub(r"(?i)^if(hc)?(in|out)octets\.?", "idx", gid)          # SNMP templates: by interface index
+        elif re.search(r"(?i)if(hc)?(in|out)octets", key):
+            d = "down" if re.search(r"(?i)if(hc)?inoctets", key) else "up"
+            gid = "idx" + (re.findall(r"\d+", key) or ["?"])[-1]
+        elif str(it.get("units", "")) in ("bps", "Bps", "b/s", "B/s") and _DIR.search(name):
+            d = "down" if re.search(r"(?i)received|incoming|inbound|download|\bin\b|rx", name) else "up"
+            gid = _DIR.sub("", name).strip(" :-")
+        else:
+            continue
+        label = (re.search(r"(?i)interface\s+(.+?)\s*:", name) or re.search(r"(.+)", gid)).group(1)
+        g = groups.setdefault(gid, {"iface": label, "tags": ""})
+        g[d] = it
+        g["tags"] += " " + " ".join(f"{x.get('tag', '')} {x.get('value', '')}" for x in it.get("tags") or [])
+    out = []
+    for g in groups.values():
+        if g.get("down") and g.get("up"):
+            out.append({"iface": g["iface"], "down": g["down"], "up": g["up"],
+                        "hint": bool(WAN_HINT.search(f"{g['iface']} {g['down'].get('name', '')} {g['tags']}"))})
+    return sorted(out, key=lambda x: (not x["hint"], x["iface"]))
+
+
+def read_zabbix_wan(api, zs, S, gh, t0, usage):
+    """The WAN from the gateway's items in Zabbix: {"rx", "tx", "links"} in bit/s, or None (zs["error"] says why).
+    The links chosen in Settings, else every interface whose name or tags say WAN. Items are asked for every 15 s."""
+    if t0 >= zs.get("cands_next", 0) or zs.get("host") != gh["hostid"]:
+        try:
+            try:
+                items = api.call("item.get", {"hostids": gh["hostid"], "output": ["itemid", "name", "key_", "units", "lastvalue",
+                                 "prevvalue", "lastclock", "delay", "status"], "selectTags": "extend", "filter": {"status": "0"}})
+            except Exception:  # noqa: BLE001 - older Zabbix without item tags
+                items = api.call("item.get", {"hostids": gh["hostid"], "output": ["itemid", "name", "key_", "units", "lastvalue",
+                                 "prevvalue", "lastclock", "delay", "status"], "filter": {"status": "0"}})
+            zs.update(cands=wan_candidates(items), cands_next=t0 + 600, host=gh["hostid"], hostname=gh["name"])
+        except Exception as e:  # noqa: BLE001
+            zs.update(error=f"Zabbix items of {gh['name']}: {str(e)[:150]}", cands_next=t0 + 120)
+            return None
+    chosen = [x for x in (S.get("wan_links") or []) if x.get("down") and x.get("up")]
+    links = chosen or [{"name": c["iface"], "down": c["down"]["itemid"], "up": c["up"]["itemid"]} for c in zs.get("cands", []) if c["hint"]]
+    if not links:
+        zs["error"] = (f"choose the WAN interface of {gh['name']} in Settings > Measurements (WAN from Zabbix)"
+                       if zs.get("cands") else "")
+        return None
+    if t0 < zs.get("next", 0) and zs.get("last"):
+        return zs["last"]
+    try:
+        ids = sorted({str(x[k]) for x in links for k in ("down", "up")})
+        got = {i["itemid"]: i for i in api.call("item.get", {"itemids": ids, "output": ["itemid", "name", "units", "lastvalue",
+                                                                                         "prevvalue", "lastclock", "delay"]})}
+    except Exception as e:  # noqa: BLE001
+        zs.update(error=f"Zabbix items of {gh['name']}: {str(e)[:150]}", next=t0 + 30)
+        return None
+    out, rx, tx, now_ = [], 0.0, 0.0, time.time()
+    for x in links:
+        d_, u_ = got.get(str(x["down"])), got.get(str(x["up"]))
+        if not d_ or not u_:
+            zs.update(error=f"the WAN item {x['down'] if not d_ else x['up']} is no longer in Zabbix - choose it again", next=t0 + 60)
+            return None
+        (r, age_r), (s_, age_s) = item_bps(d_, now_), item_bps(u_, now_)
+        stale = max(age_r or 0, age_s or 0) > max(3 * _seconds(d_.get("delay")), 180)
+        out.append({"name": x.get("name") or "WAN", "rx": r or 0, "tx": s_ or 0, "stale": stale, "age": int(max(age_r or 0, age_s or 0))})
+        if r is not None and s_ is not None and not stale:
+            rx, tx = rx + r, tx + s_
+    if all(o["stale"] for o in out):
+        zs.update(error=f"the WAN items of {gh['name']} have not been updated for {out[0]['age'] // 60} min", next=t0 + 15)
+        return None
+    dt = min(300, t0 - zs["t"]) if zs.get("t") else 0          # day / month totals from the rate over the time since
+    if dt > 0:
+        w = usage.setdefault("wan", {})
+        for per in ("d", "m"):
+            u = w.setdefault(per, [0, 0])
+            u[0] += rx * dt / 8
+            u[1] += tx * dt / 8
+        usage.setdefault("wan_since", now())
+    zs.update(t=t0, next=t0 + 15, error="", last={"rx": rx, "tx": tx, "links": out})
+    return zs["last"]
+
+
+def measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0, api=None):
+    """The WAN throughput: (rate or None, "zabbix" | "snmp" | "upnp" | "switch" | None, reason when there is no rate).
+    The router's WAN by default: its own traffic items in Zabbix (any router or firewall, also without SNMP), else its
+    SNMP when it is an SNMP host in Zabbix, else UPnP. No other numbers are put in its place: without a router reading
+    the result is None, with the reason."""
     if S["wan_source"] == "switch":
         return sw_wan, ("switch" if sw_wan else None), ("" if sw_wan else "no traffic data for the switch port to the gateway")
     gw_ip = next((n.get("ip") for n in data["nodes"] if n.get("kind") == "router" and n.get("ip")), None)
-    gh = next((h for h in hosts if h.get("_snmp") and gw_ip and gw_ip in (h.get("_ips") or [h["_snmp"].get("ip")])), None)
     why = []
+    gz = next((h for h in hosts if gw_ip and gw_ip in (h.get("_ips") or ()) and str(h.get("status", "0")) == "0"), None)
+    if gz and api is not None:
+        r = read_zabbix_wan(api, rsnmp.setdefault("zbx", {}), S, gz, t0, usage)
+        if r:
+            return r, "zabbix", ""
+        if rsnmp["zbx"].get("error"):
+            why.append(rsnmp["zbx"]["error"])
+    gh = next((h for h in hosts if h.get("_snmp") and gw_ip and gw_ip in (h.get("_ips") or [h["_snmp"].get("ip")])), None)
     if gh:
         r = read_router_snmp(rsnmp, gh, t0, usage, S["wan_interface"])
         if r:
@@ -220,8 +348,8 @@ def measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0):
     if upnp.get("svc") and upnp.get("prev") and not upnp.get("stuck_until"):
         return None, "upnp", "first reading, measuring…"
     why.append(upnp.get("error") or "the router does not answer UPnP")
-    if not gh:
-        why.append("for exact WAN figures add the gateway to Zabbix with an SNMP interface")
+    if not gh and not gz:
+        why.append("for exact WAN figures add the gateway to Zabbix (with an agent or SNMP)")
     return None, None, "; ".join(why)
 
 

@@ -31,7 +31,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.13"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.14"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -2617,7 +2617,12 @@ def rt_loop(api):
             threading.Thread(target=lambda: (ookla_servers(refresh=True), publish_settings()), daemon=True).start()
         if t0 - last_health > 30:
             health, last_health = health_report(api_state, snmp_state), t0
-            health["wan"] = {"mode": S["wan_source"], "snmp": {"router": rsnmp.get("router"), "interface": rsnmp.get("ifname"),
+            zh_ = rsnmp.get("zbx") or {}
+            health["wan"] = {"mode": S["wan_source"],
+                             "zabbix": {"ok": not zh_.get("error") and bool(zh_.get("last")), "host": zh_.get("hostname", ""),
+                                        "links": ", ".join(x["name"] for x in (zh_.get("last") or {}).get("links") or []),
+                                        "error": zh_.get("error", "")} if zh_.get("host") else None,
+                             "snmp": {"router": rsnmp.get("router"), "interface": rsnmp.get("ifname"),
                                                                 "error": rsnmp.get("error", "")} if rsnmp else None,
                              "upnp": {"ok": bool(upnp["svc"]) and not upnp.get("stuck_until"),
                                       "name": (upnp["svc"] or {}).get("name", ""), "error": upnp["error"]}}
@@ -2769,7 +2774,7 @@ def rt_loop(api):
             if update_traffic_hints(hints, {k: list(v) for k, v in series.items()}, meta, linked, t):
                 save_json(HINTS_FILE, hints)
         sw_wan = ports.get(root["port_ref"][0], {}).get(str(root["port_ref"][1])) if root else None
-        wan, wan_src, wan_err = measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0)
+        wan, wan_src, wan_err = measure_wan(S, data, hosts, sw_wan, upnp, rsnmp, usage, t0, api=api)
         # tell once when the WAN cannot be measured (after a minute), and when it can again
         if S["wan_source"] == "router":
             if wan_src is None and not wan_bad.get("since"):
@@ -2861,11 +2866,16 @@ def rt_loop(api):
         upt, outs, cov = month_uptime(inet, t)
         save_json(os.path.join(DATA_DIR, RT), {
             "t": t, "every": every, "ports": ports, "flaps": flaps,
-            "wan": {"down": wan["rx"], "up": wan["tx"], "src": wan_src} if wan else None,
+            "wan": {"down": wan["rx"], "up": wan["tx"], "src": wan_src, "links": wan.get("links")} if wan else None,
+            "wan_candidates": [{"iface": c["iface"], "down": c["down"]["itemid"], "up": c["up"]["itemid"], "hint": c["hint"],
+                                "rx": item_bps(c["down"])[0], "tx": item_bps(c["up"])[0]}
+                               for c in (rsnmp.get("zbx") or {}).get("cands", [])][:24],
             "suggestions": link_suggestions(hints, data, load_json(DEVICES_FILE, {}).get("links", [])),
             "wan_state": {"mode": S["wan_source"], "via": wan_src, "error": wan_err,
-                          "router": rsnmp.get("router") if wan_src == "snmp" else (upnp["svc"] or {}).get("name", ""),
-                          "interface": rsnmp.get("ifname", "") if wan_src == "snmp" else ""},
+                          "router": (rsnmp.get("router") if wan_src == "snmp" else (rsnmp.get("zbx") or {}).get("hostname", "")
+                                     if wan_src == "zabbix" else (upnp["svc"] or {}).get("name", "")),
+                          "interface": (rsnmp.get("ifname", "") if wan_src == "snmp" else
+                                        ", ".join(x["name"] for x in (wan or {}).get("links") or []) if wan_src == "zabbix" else "")},
             "latency": {k: v["ms"] for k, v in targets.items() if k != "Gateway"}, "targets": targets,
             "inet": {"up": not inet.get("down_since"), "down_since": inet.get("down_since"),
                      "last_outage": inet["outages"][-1] if inet["outages"] else None,
@@ -3335,7 +3345,7 @@ def job_lock(name, wait):
 from spidermap_infer import mac_switch_links, CLASSIFY, DEVICE_CATEGORIES, DEVICE_CATEGORY_KEYS, HINTS_FILE, PLACE_KINDS, VIA_GUESSED, VIA_TEXT, classify, link_state_pairs, link_suggestions, traffic_match, update_hints, update_traffic_hints  # noqa: E402,F401
 from spidermap_settings import SECRETS_FILE, SECRET_KEYS, SETTINGS_BY_KEY, SETTINGS_KEYS, SETTINGS_SCHEMA, _S, effective_settings, load_secrets, permissions, save_secrets, scan_target_count, scan_targets, validate_settings  # noqa: E402,F401
 from spidermap_speed import CF_BASE, FAST_API, FAST_HOME, OOKLA_SERVERS, SPEED_SECONDS, _latency, _speedtest_cloudflare, _speedtest_fast, _speedtest_once, _transfer, ookla_servers  # noqa: E402,F401
-from spidermap_wan import upstream_router, GAP_S, UPNP_SEARCH, UPNP_STUCK, _overlap, inet_start, inet_update, measure_wan, month_uptime, read_router_snmp, read_upnp, router_wan_ifindex, unifi_fetch, upnp_call, upnp_counters, upnp_discover, upnp_link_mbps, upnp_wan_service  # noqa: E402,F401
+from spidermap_wan import item_bps, wan_candidates, read_zabbix_wan, upstream_router, GAP_S, UPNP_SEARCH, UPNP_STUCK, _overlap, inet_start, inet_update, measure_wan, month_uptime, read_router_snmp, read_upnp, router_wan_ifindex, unifi_fetch, upnp_call, upnp_counters, upnp_discover, upnp_link_mbps, upnp_wan_service  # noqa: E402,F401
 from spidermap_gateway import GATEWAY_PHP, gateway_code  # noqa: E402,F401
 
 

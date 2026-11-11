@@ -709,7 +709,7 @@ def test_measure_wan():
               r[0] is None and r[1] is None and "SNMP: Timeout" in r[2] and "2,147,483,647" in r[2], r)
         r = sm.measure_wan(S, data, [], sw, {}, {}, {}, 0)
         check("WAN: gateway not in Zabbix and UPnP stuck -> the reason says how to get exact figures",
-              r[0] is None and "add the gateway to Zabbix with an SNMP interface" in r[2], r)
+              r[0] is None and "add the gateway to Zabbix (with an agent or SNMP)" in r[2], r)
     finally:
         smw.read_router_snmp, smw.read_upnp = real
     check("WAN: the 0.5.1 setting 'auto' now means the router",
@@ -932,6 +932,67 @@ def test_traffic_correlation():
     check("traffic: switches already linked are not compared", hints2 == {})
 
 
+def test_wan_from_zabbix():
+    import time as _t
+    now_ = int(_t.time())
+    # pfSense monitored by the Zabbix agent (Nikolaos's case): igb0 = WAN, igb1 = LAN, nothing says which
+    pf = [{"itemid": "49775", "name": "Interface igb0: Bits received", "key_": "net.if.in[igb0]", "units": "bps", "lastvalue": "235760",
+           "lastclock": str(now_ - 25), "delay": "1m"},
+          {"itemid": "49788", "name": "Interface igb0: Bits sent", "key_": "net.if.out[igb0]", "units": "bps", "lastvalue": "101790",
+           "lastclock": str(now_ - 12), "delay": "1m"},
+          {"itemid": "49776", "name": "Interface igb1: Bits received", "key_": "net.if.in[igb1]", "units": "bps", "lastvalue": "90000",
+           "lastclock": str(now_ - 20), "delay": "1m"},
+          {"itemid": "49789", "name": "Interface igb1: Bits sent", "key_": "net.if.out[igb1]", "units": "bps", "lastvalue": "250000",
+           "lastclock": str(now_ - 20), "delay": "1m"},
+          {"itemid": "5", "name": "CPU utilization", "key_": "system.cpu.util", "units": "%", "lastvalue": "3", "lastclock": str(now_)}]
+    c = sm.wan_candidates(pf)
+    check("WAN from Zabbix: the gateway's interfaces are found from its items (agent keys), CPU and the rest left out",
+          sorted(x["iface"] for x in c) == ["igb0", "igb1"] and all(not x["hint"] for x in c), c)
+    snmp = [{"itemid": "1", "name": "Interface igb0(WAN): Bits received", "key_": "net.if.in[ifHCInOctets.1]", "units": "bps", "lastvalue": "1"},
+            {"itemid": "2", "name": "Interface igb0(WAN): Bits sent", "key_": "net.if.out[ifHCOutOctets.1]", "units": "bps", "lastvalue": "1"},
+            {"itemid": "3", "name": "Interface igb1(LAN): Bits received", "key_": "net.if.in[ifHCInOctets.2]", "units": "bps", "lastvalue": "1"},
+            {"itemid": "4", "name": "Interface igb1(LAN): Bits sent", "key_": "net.if.out[ifHCOutOctets.2]", "units": "bps", "lastvalue": "1"}]
+    c2 = sm.wan_candidates(snmp)
+    check("WAN from Zabbix: an SNMP template naming the WAN - that interface is marked, the LAN is not",
+          [(x["iface"], x["hint"]) for x in c2] == [("igb0(WAN)", True), ("igb1(LAN)", False)], c2)
+    check("WAN from Zabbix: units - bps as is, Bps x8, a raw byte counter from its last two values over its interval",
+          sm.item_bps({"lastvalue": "1000", "units": "bps"})[0] == 1000 and sm.item_bps({"lastvalue": "1000", "units": "Bps"})[0] == 8000
+          and sm.item_bps({"lastvalue": "6000", "prevvalue": "0", "units": "B", "delay": "60s"})[0] == 800)
+
+    class Api:
+        def __init__(self, items): self.items, self.calls = items, 0
+        def call(self, m, p):
+            self.calls += 1
+            return [i for i in self.items if "itemids" not in p or i["itemid"] in p["itemids"]]
+    gh = {"hostid": "77", "name": "pfSense", "_ips": {"192.168.5.1"}, "status": "0"}
+    S0 = {"wan_links": [], "wan_source": "router"}
+    zs, use = {}, {}
+    check("WAN from Zabbix: nothing says which is WAN - it asks (Settings), it does not guess",
+          sm.read_zabbix_wan(Api(pf), zs, S0, gh, 1000, use) is None and "Settings > Measurements" in zs["error"], zs.get("error"))
+    zs = {}
+    r = sm.read_zabbix_wan(Api(pf), zs, {"wan_links": [{"name": "Fibre", "down": "49775", "up": "49788"}]}, gh, 1000, use)
+    check("WAN from Zabbix: the chosen items give the same figures as Zabbix (236 / 102 Kbps)",
+          r and r["rx"] == 235760 and r["tx"] == 101790 and r["links"][0]["name"] == "Fibre", r)
+    sm.read_zabbix_wan(Api(pf), zs, {"wan_links": [{"name": "Fibre", "down": "49775", "up": "49788"}]}, gh, 1020, use)
+    check("WAN from Zabbix: day and month totals grow (20 s of 236 Kbps = 590 kB)", round(use["wan"]["d"][0]) == 589400, use.get("wan"))
+    zs, r2 = {}, sm.read_zabbix_wan(Api(snmp), {}, S0, gh, 1000, {})
+    check("WAN from Zabbix: a WAN named by the template is used by itself", r2 and [x["name"] for x in r2["links"]] == ["igb0(WAN)"], r2)
+    two = sm.read_zabbix_wan(Api(pf), {}, {"wan_links": [{"name": "Fibre", "down": "49775", "up": "49788"},
+                                                          {"name": "4G", "down": "49776", "up": "49789"}]}, gh, 1000, {})
+    check("WAN from Zabbix: two WAN connections, each on its own and the total",
+          two and len(two["links"]) == 2 and two["rx"] == 235760 + 90000, two)
+    old = [dict(i, lastclock=str(now_ - 3600)) for i in pf]
+    zs = {}
+    check("WAN from Zabbix: items not updated for an hour - no old figures, a reason",
+          sm.read_zabbix_wan(Api(old), zs, {"wan_links": [{"name": "Fibre", "down": "49775", "up": "49788"}]}, gh, 1000, {}) is None
+          and "have not been updated" in zs["error"], zs.get("error"))
+    data = {"nodes": [{"kind": "router", "ip": "192.168.5.1"}]}
+    up_ = {"svc": None, "next": 0, "error": "", "prev": None}
+    w, src, why = sm.measure_wan({"wan_source": "router", "wan_links": [{"name": "Fibre", "down": "49775", "up": "49788"}], "wan_interface": ""},
+                                 data, [gh], None, up_, {}, {}, 1000, api=Api(pf))
+    check("WAN: the gateway's Zabbix items come first - no SNMP needed, UPnP not even asked", src == "zabbix" and not up_.get("error"), (src, why))
+
+
 def test_virtual_macs():
     check("virtual MACs: VMware, Proxmox, Hyper-V, KVM are virtual; a real NIC is not",
           all(sm.is_virtual_mac(m) for m in ("00:50:56:aa:bb:cc", "00:0C:29:11:22:33", "bc:24:11:46:63:8f", "00:15:5d:01:02:03", "52:54:00:12:34:56"))
@@ -994,6 +1055,7 @@ def main():
     test_unifi()
     test_mac_switch_links()
     test_virtual_macs()
+    test_wan_from_zabbix()
     test_080()
     test_traffic_correlation()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")

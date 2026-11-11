@@ -4,6 +4,24 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.14] - 2026-11-11
+
+### Added
+- **WAN throughput from the gateway's own items in Zabbix** - for any router or firewall, however Zabbix measures it
+  (agent, SNMP, HTTP API): pfSense, OPNsense, FortiGate, MikroTik, Linux routers ... No SNMP needed on the gateway.
+  Its traffic items are found by what they measure (net.if.in / out, interface counters, bps), never by vendor. An
+  interface whose name or tags say WAN (WAN, PPPoE, LTE, DSL, internet ...) is used by itself; otherwise Settings >
+  Measurements > *WAN from Zabbix* lists the gateway's interfaces with their traffic now - tick the WAN. Several
+  connections (fibre + 4G) are shown each on its own and as a total. Units (bps, Bps, raw byte counters) are
+  converted; items Zabbix has stopped updating are shown as such, never as current figures. This comes first; the
+  router's SNMP and UPnP after it - and are not even mentioned while it works.
+- **The header counters are lists:** a click on *online*, *offline* or *new / unknown* opens the devices behind the
+  number - where each one is plugged in and since when, with search, a click to find it on the map, CSV, and
+  *Approve* for new and unknown devices.
+
+### Fixed
+- After *Approve*, the "new / unknown" count in the header changes at once (it waited for the next refresh).
+
 ## [0.9.13] - 2026-11-11
 
 Found on Nikolaos Karanikolas's network, with his review of "Not placed yet" - thank you.
@@ -665,6 +683,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.14]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.14
 [0.9.13]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.13
 [0.9.12]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.12
 [0.9.11]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.11
