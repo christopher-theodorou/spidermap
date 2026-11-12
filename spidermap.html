@@ -245,6 +245,13 @@ body.dash #modebar,body.inv #modebar{display:none!important}
 .ls-main{display:flex;align-items:center;gap:9px;flex:1;min-width:0;cursor:pointer}.ls-main i{font-size:18px;color:var(--muted)}.ls-main span{display:flex;flex-direction:column;min-width:0}
 .ls-main b{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ls-main small{color:var(--muted);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ls-main:hover b{color:var(--accent)}.ls-r{font-size:11.5px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:6px}.ls-r .btn{height:26px;padding:0 8px;font-size:12px}
+.ln.wls{stroke-dasharray:1 7;stroke-linecap:round;stroke-width:3}
+.tag.t-sig{background:var(--warn);color:#1b1b1f}.tag.t-sigc{background:var(--bad);color:#fff}.tag.t-sigok{background:var(--bg);color:var(--muted)}
+.ctl{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:8px 0;display:flex;flex-direction:column;gap:6px}
+.ctl-h{display:flex;justify-content:space-between;align-items:center}.ctl-f{display:grid;grid-template-columns:200px 1fr;gap:8px;align-items:center;font-size:13px}
+.ctl-f input{height:30px;border:1px solid var(--border);border-radius:6px;padding:0 8px;font:inherit;background:var(--card);color:var(--text)}
+.ctl-sites{display:flex;flex-direction:column;gap:4px;margin-top:4px;font-size:13px}.ctl-add{display:flex;gap:8px;margin-top:8px}
+.ctl-add select{height:32px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--text);font:inherit;padding:0 8px}
 .ln.lag{stroke-width:4.5}.ln.redundant{stroke:var(--muted);stroke-dasharray:9 6;stroke-width:1.5}.ln.guess{stroke-dasharray:2 4;stroke-linecap:round}
 .tag.t-stale{background:var(--bg);color:var(--muted);border:1px dashed var(--border)}.ln.fib{stroke:var(--pur);stroke-dasharray:7 3}.ln.fib.off{stroke:var(--off)}
 #mapctl{position:absolute;right:16px;top:12px;max-height:calc(100% - 24px);overflow-y:auto;display:flex;flex-direction:column;gap:2px;padding:4px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:6;transition:right .25s}
@@ -424,7 +431,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.14";
+const PAGE_VERSION = "0.9.15";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -595,6 +602,10 @@ function tags(n) {
   if (pb) out.push(`<span class="tag" style="background:${SEV[pb.sev][1]};color:#1b1b1f" title="${esc(SEV[pb.sev][0])}">${pb.list.length} problem${pb.list.length > 1 ? "s" : ""}</span>`);
   issues(n).forEach(i => out.push(`<span class="tag t-${i.k}">${i.k === "cable" ? "cable?" : i.k === "traffic" ? "traffic" : "IP conflict"}</span>`));
   if (status(n) === "down") out.push('<span class="tag t-down">down</span>');
+  if (typeof n.signal === "number") {
+    const w = -(DISP.signal_warn || 70), c = -(DISP.signal_crit || 80);
+    if (n.signal < w || n.type === "ptp") out.push(`<span class="tag ${n.signal < c ? "t-sigc" : n.signal < w ? "t-sig" : "t-sigok"}" title="Signal">${Math.round(n.signal)} dBm</span>`);
+  }
   (n.flags || []).forEach(f => {
     if (f === "new") out.push('<span class="tag t-new">new</span>');
     else if (f === "unknown") out.push('<span class="tag t-unknown">unknown</span>');
@@ -689,7 +700,13 @@ function gwCard() {
   if (wan && wan.links && (wan.links.length > 1 || wan.links.some(x => x.stale)))   // several WAN connections, each on its own
     h += wan.links.map(x => `<div class="gr" style="font-size:12px"><span style="color:var(--muted)">↳ ${esc(x.name)}</span><span>${x.stale
       ? `<span class="warnc" title="Its Zabbix items have not been updated for ${Math.round(x.age / 60)} min">not updated ${Math.round(x.age / 60)} min ⚠</span>`
-      : `↓ ${mbps(x.rx)} · ↑ ${mbps(x.tx)}`}</span></div>`).join("");
+      : `↓ ${mbps(x.rx)} · ↑ ${mbps(x.tx)}${x.active === true ? ' <span class="sm-mini">active</span>' : x.active === false ? ' <span style="color:var(--muted)">· idle</span>' : ""}`}</span></div>`).join("");
+  if (wan && wan.extras && wan.extras.length) {                // a 4G / 5G router's or a Starlink's own values
+    const w = -(DISP.signal_warn || 70), c = -(DISP.signal_crit || 80);
+    h += wan.extras.map(e => { const v = parseFloat(e.value), dbm = /dbm/i.test(e.units) || /rsrp|rssi/i.test(e.name);
+      const col = dbm && !isNaN(v) ? (v < c ? "var(--bad)" : v < w ? "var(--warn)" : "var(--ok)") : "var(--text)";
+      return `<div class="gr" style="font-size:12px"><span style="color:var(--muted)">↳ ${esc(e.name)}</span><span style="color:${col}">${esc(String(e.value))}${e.units ? " " + esc(e.units) : ""}</span></div>`; }).join("");
+  }
   if (!wanBad) h += spark(wanRows, 1, 2);              // no graph of old values when the WAN cannot be measured
   const TG = live && RT.targets ? RT.targets : {};
   h += `<div class="tiles">${Object.entries(lat).map(([k, v]) => { const x = TG[k]; return `<div class="tile" title="${x ? `loss ${x.loss} % · jitter ${x.jit ?? "-"} ms` : ""}"><b style="color:${v == null ? "var(--bad)" : v > 80 ? "var(--warn)" : "var(--text)"}">${v == null ? "—" : Math.round(v) + "ms"}</b><span>${esc(k)}</span>${x && x.loss >= 5 ? `<small style="color:var(--warn)">loss ${x.loss}%</small>` : ""}</div>`; }).join("")}</div>`;
@@ -764,6 +781,9 @@ function healthHtml() {
     + (H.unifi.error ? `<div class="note warnc" style="margin-top:-4px">${esc(H.unifi.error)}</div>` : "");
   const WH = H.wan;
   if (WH && WH.mode !== "switch") {
+    (H.controllers || []).forEach(c => { h += row(c.name, c.ok ? okb(true, `ok · ${c.devices} devices · ${c.clients} clients`) : '<span class="warnc">not working</span>')
+      + (c.error ? `<div class="note warnc" style="margin-top:-4px">${esc(c.error)}</div>` : "")
+      + (c.tls_unchecked ? '<div class="note" style="margin-top:-4px">Its certificate is not checked: add its SHA-256 fingerprint in Settings > Wireless & WAN.</div>' : ""); });
     if (WH.zabbix) h += row("WAN from Zabbix", WH.zabbix.ok ? okb(true, `ok · ${esc(WH.zabbix.host || "")}${WH.zabbix.links ? " · " + esc(WH.zabbix.links) : ""}`)
         : '<span class="warnc">not set</span>') + (WH.zabbix.error ? `<div class="note warnc" style="margin-top:-4px">${esc(WH.zabbix.error)}</div>` : "");
     if (WH.zabbix && WH.zabbix.ok) h += row("WAN over SNMP / UPnP", '<span style="color:var(--muted)">not needed</span>');
@@ -846,6 +866,25 @@ function smField(f) {
   const lbl = `<label for="${id}">${esc(f.label)}${smInfo(f.help)}${f.preview ? `<span class="sm-mini">v${esc(f.preview)}</span>` : ""}</label>`;
   const err = SM.errors[f.key] ? `<div class="sm-err">${esc(SM.errors[f.key])}</div>` : "";
   const attrs = `id="${id}" data-k="${esc(f.key)}"${dis ? " disabled" : ""}`;
+  if (f.type === "controllers") {
+    const L = v || [], K = SETTINGS.controller_kinds || {}, ST = SETTINGS.controller_sites || {}, SS = SETTINGS.secrets_set || {};
+    const need = { omada: [["url", "Controller address (Interface Access Address)", "https://192.168.0.10:8043"], ["omada_id", "Omada ID", ""], ["client_id", "Client ID", ""]],
+      unifi_cloud: [], unifi_local: [["url", "Console address", "https://192.168.1.1"]], gwn: [["url", "GWN address", "https://www.gwn.cloud"], ["client_id", "APP ID", ""]] };
+    const secName = { omada: "Client Secret", unifi_cloud: "API key (Site Manager)", unifi_local: "API key", gwn: "Secret Key" };
+    const where = { omada: "Omada > Global > Settings > Platform Integration > Open API > Add New App - Client mode, role Viewer.",
+      unifi_cloud: "unifi.ui.com > API > Create API Key - scopes Site Manager and Network.", unifi_local: "UniFi Network > Settings > Control Plane > Integrations > Create API Key.",
+      gwn: "GWN Cloud / Manager > API Developer > enable - the APP ID and Secret Key. Experimental: tell us how it works." };
+    const cards = L.map((c, i) => { const st = ST[c.id];
+      const fl = [["name", "Name on the map", K[c.kind] ? K[c.kind].split(" (")[0] : ""], ...(need[c.kind] || [])]
+        .map(([k, t, ph]) => `<label class="ctl-f"><span>${esc(t)}</span><input data-ctl="${i}" data-cf="${k}" value="${esc(c[k] || "")}" placeholder="${esc(ph)}" maxlength="200"></label>`).join("");
+      const sec = `<label class="ctl-f"><span>${esc(secName[c.kind] || "Secret")}</span><input type="password" data-ctl="${i}" data-cf="secret" autocomplete="new-password" value="${esc(c.secret || "")}" placeholder="${SS["ctl:" + c.id] ? "saved - type to replace" : "required"}"></label>`;
+      const fp = c.kind === "omada" || c.kind === "unifi_local" ? `<label class="ctl-f"><span>Certificate fingerprint (SHA-256, optional)</span><input data-ctl="${i}" data-cf="fingerprint" value="${esc(c.fingerprint || "")}" maxlength="120"></label>` : "";
+      const sites = !st ? '<div class="sm-help">Save, and its sites appear here within seconds.</div>' : !st.ok ? `<div class="sm-err">${esc(st.error)}</div>`
+        : st.sites.length ? `<div class="ctl-sites"><b>Sites to import</b>${st.sites.map(x => `<label><input type="checkbox" data-ctl="${i}" data-site="${esc(x.id)}"${(c.sites || []).includes(x.id) ? " checked" : ""}> ${esc(x.name)}</label>`).join("")}</div>`
+        : '<div class="sm-help">This controller has no sites.</div>';
+      return `<div class="ctl"><div class="ctl-h"><b>${esc(K[c.kind] || c.kind)}</b><button class="btn" data-ctl-rm="${i}">Remove</button></div><div class="sm-help">${esc(where[c.kind] || "")}</div>${fl}${sec}${fp}${sites}</div>`; }).join("");
+    return `<div class="sm-row" style="display:block">${lbl}${cards}<div class="ctl-add"><select id="ctl-kind" aria-label="Controller type">${Object.entries(K).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join("")}</select><button class="btn" id="ctl-add"><i class="ti ti-plus"></i>Add connection</button></div></div>`;
+  }
   if (f.type === "wanlinks") {
     const C = (typeof RT !== "undefined" && RT && RT.wan_candidates) || [], sel = v || [];
     const has = c => sel.find(x => String(x.down) === String(c.down) && String(x.up) === String(c.up));
@@ -915,13 +954,7 @@ function smCard() {
     + (j.last_result && j.last_result !== "ok" && !j.running ? `<div class="note warnc" style="margin-top:8px">Last scan: ${esc(j.last_result)}${j.error ? " - " + esc(j.error) : ""}</div>` : "");
 }
 const SM_PREVIEW = {
-  "Wireless & WAN": [["Controllers", [["TP-Link Omada", "Switches, access points and their uplinks straight from the Omada controller (read-only API account), so the topology of TP-Link equipment is as exact as in Omada itself."]]],
-    ["Links between buildings (PtP / PtMP)", [["Wireless link detection", "Matches both ends of a link through the remote station's MAC in the registration table, so it does not look like a cable."],
-      ["Vendor profiles", "MikroTik, Ubiquiti, Cambium, Mimosa, Siklu, LigoWave: signal, capacity, distance and frequency from each vendor's MIB."],
-      ["Signal warning / critical", "Thresholds in dBm, and how wireless links are drawn on the map."]]],
-    ["WAN & satellite", [["Starlink", "Latency, obstruction, speeds and outages from the dish's local gRPC API (Starlink has no SNMP)."],
-      ["4G / 5G routers", "Teltonika, MikroTik LTE, Huawei, ZTE: RSRP / SINR, provider and cell."],
-      ["Active WAN in failover", "Which connection carries the traffic right now, e.g. fibre or Starlink."]]]],
+  "Wireless & WAN": [["Radios", [["Vendor profiles", "Deeper figures of each radio vendor's own link (capacity, airtime, frequency) beside the signal SpiderMap shows now."]]]],
   "Device types": [["Firewalls & gateways", "pfSense, OPNsense, FortiGate, Sophos", "SNMP, ARP and routing tables, VPN tunnels"],
     ["ONT / modem", "Fibre routers, VDSL, cable", "ICMP to the WAN side, TR-069 where the provider allows"],
     ["UPS", "APC, Eaton, CyberPower, Riello", "UPS-MIB: load, battery, runtime, powered devices"],
@@ -1038,6 +1071,29 @@ function smWanPick(main) {
     smFoot();
   });
 }
+function smCtl(main) {
+  const copy = () => (SM.draft.controllers || []).map(c => ({ ...c, sites: [...(c.sites || [])] }));
+  main.addEventListener("input", e => {
+    const t = e.target.closest("[data-cf]"); if (!t) return;
+    const L = copy(); L[+t.dataset.ctl][t.dataset.cf] = t.value; SM.draft.controllers = L; smFoot();
+  });
+  main.addEventListener("change", e => {
+    const t = e.target.closest("[data-site]"); if (!t) return;
+    const L = copy(), c = L[+t.dataset.ctl]; c.sites = t.checked ? [...new Set([...c.sites, t.dataset.site])] : c.sites.filter(x => x !== t.dataset.site);
+    SM.draft.controllers = L; smFoot();
+  });
+  main.addEventListener("click", async e => {
+    const rm = e.target.closest("[data-ctl-rm]"), ad = e.target.closest("#ctl-add");
+    if (rm && await askConfirm("Remove this connection? Its secret is deleted when you save.", "Remove", true)) {
+      const L = copy(); L.splice(+rm.dataset.ctlRm, 1); SM.draft.controllers = L; smRender();
+    }
+    if (ad) {
+      const L = copy(), k = $("#ctl-kind").value, n = Math.max(0, ...L.map(c => +String(c.id).slice(1) || 0)) + 1;
+      L.push({ id: "c" + n, kind: k, name: "", url: k === "gwn" ? "https://www.gwn.cloud" : "", client_id: "", omada_id: "", fingerprint: "", sites: [] });
+      SM.draft.controllers = L; smRender();
+    }
+  });
+}
 function smWire() {
   $("#sm-close").onclick = smClose;
   $("#smb").onclick = e => { if (e.target.id === "smb") smClose(); };
@@ -1114,6 +1170,7 @@ function smWire() {
     }
   });
   smWanPick(main);
+  smCtl(main);
   main.addEventListener("change", e => { if (e.target.id === "st-imp" && e.target.files[0]) { previewImport(e.target.files[0]); e.target.value = ""; } });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && SM.open) smClose(); });
 }
@@ -1211,10 +1268,10 @@ function statsHtml(id) {
   if (hs && (st.cpu || st.mem)) h += `<div class="lgd" style="margin-top:8px"><span><i style="background:var(--accent)"></i>CPU</span><span><i style="background:var(--pur)"></i>Memory</span><span style="margin-left:auto">last ${Math.round(hs.length)} min</span></div>` + spark(hs, 1, 2, 100);
   return h;
 }
-const TYPES = { router: "router", switch: "server-2", unifi: "cloud", camera: "device-cctv", tv: "device-tv", laptop: "device-laptop", desktop: "device-desktop", phone: "device-mobile", printer: "printer", appliance: "wash-machine", iot: "bulb", nas: "database", server: "server", vm: "device-desktop", lxc: "box", unknown: "help-circle",
+const TYPES = { router: "router", switch: "server-2", ptp: "antenna", unifi: "cloud", camera: "device-cctv", tv: "device-tv", laptop: "device-laptop", desktop: "device-desktop", phone: "device-mobile", printer: "printer", appliance: "wash-machine", iot: "bulb", nas: "database", server: "server", vm: "device-desktop", lxc: "box", unknown: "help-circle",
   firewall: "shield-lock", ont: "building-broadcast-tower", ups: "battery-charging", voip: "phone", hypervisor: "server-cog",
   industrial: "building-factory-2", mediaconv: "arrows-exchange", oob: "terminal-2" };
-const TYPE_LABEL = { ont: "ONT / modem", ups: "UPS / PDU", voip: "IP phone / PBX", mediaconv: "powerline / media converter", oob: "out-of-band management", iot: "IoT", lxc: "LXC", vm: "VM", tv: "TV", nas: "NAS" };
+const TYPE_LABEL = { ptp: "wireless link (PtP)", ont: "ONT / modem", ups: "UPS / PDU", voip: "IP phone / PBX", mediaconv: "powerline / media converter", oob: "out-of-band management", iot: "IoT", lxc: "LXC", vm: "VM", tv: "TV", nas: "NAS" };
 function editForm(n) {
   const url = (n.url || "").split(n.ip || "\u0000").join("{ip}");
   return `<div class="ef" id="ef" style="display:none"><div class="sec">Edit device</div>
@@ -1421,8 +1478,8 @@ function render() {
         xs.push(cc);
         // the child's own line: from the bus to the child
         const [x1, y1, x2, y2] = H ? [bus, cc, (d + 1) * HD + 62 - 27, cc] : [cc, bus, cc, bus + 36];
-        if (FREE) { edges.push({ p: id, c: k, cls: (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : "") + (GUESSED.includes(ch.via) ? " guess" : ""), w: lk.w, dur, port: ch.port }); place(k, cl, d + 1); cl += W(k) * span; return; }
-        line(x1, y1, x2, y2, (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : "") + (GUESSED.includes(ch.via) ? " guess" : ""), k, lk.w);
+        if (FREE) { edges.push({ p: id, c: k, cls: (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : "") + (ch.via === "wireless" ? " wls" : "") + (GUESSED.includes(ch.via) ? " guess" : ""), w: lk.w, dur, port: ch.port }); place(k, cl, d + 1); cl += W(k) * span; return; }
+        line(x1, y1, x2, y2, (off ? "off" : lk.cls) + (ch.link === "lag" ? " lag" : ch.link === "fiber" ? " fib" : "") + (ch.via === "wireless" ? " wls" : "") + (GUESSED.includes(ch.via) ? " guess" : ""), k, lk.w);
         if (dur) svg += `<line class="fl" style="animation-duration:${dur}s" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
         if (ch.port) extra += H ? `<div class="pt" style="left:${(x1 + x2) / 2}px;top:${cc - 21}px">${esc(ch.port)}</div>`
                                : `<div class="pt" style="left:${cc}px;top:${bus + 12}px">${esc(ch.port)}</div>`;
@@ -1693,7 +1750,9 @@ const EL = {
   "UPS & smart PDU": "UPS & έξυπνα PDU", "Units": "Μονάδες", "VLANs (Q-BRIDGE-MIB)": "VLAN (Q-BRIDGE-MIB)", "Who may change devices": "Ποιος αλλάζει συσκευές",
   "Who may open SpiderMap": "Ποιος ανοίγει το SpiderMap", "Who may start speed tests": "Ποιος ξεκινά τεστ ταχύτητας", "Wi-Fi bridge": "Wi-Fi γέφυρα",
   "Zabbix Super admins": "Zabbix Super admins", "Zabbix admins": "Zabbix admins", "Zabbix users": "Χρήστες Zabbix", "Zooms the map": "Μεγεθύνει τον χάρτη",
-  "Max-repetitions": "Max-repetitions", "Online": "Σε σύνδεση", "Offline": "Εκτός σύνδεσης", "New / unknown": "Νέες / άγνωστες",
+  "Max-repetitions": "Max-repetitions", "Controller connections": "Συνδέσεις controller", "Add connection": "Προσθήκη σύνδεσης",
+  "Sites to import": "Sites για εισαγωγή", "Remove": "Αφαίρεση", "Signal warning below": "Προειδοποίηση σήματος κάτω από",
+  "Signal critical below": "Κρίσιμο σήμα κάτω από", "wireless link (PtP)": "ασύρματη ζεύξη (PtP)", "active": "ενεργή", "idle": "αδρανής", "Online": "Σε σύνδεση", "Offline": "Εκτός σύνδεσης", "New / unknown": "Νέες / άγνωστες",
   "Click for the list": "Κλικ για τη λίστα", "Search in this list": "Αναζήτηση στη λίστα", "None.": "Καμία.", "WAN from Zabbix": "WAN από το Zabbix", "router · Zabbix": "router · Zabbix", "not needed": "δεν χρειάζεται", "Found at": "Βρέθηκε", "Why not placed": "Γιατί δεν τοποθετήθηκε", "Other MACs": "Άλλες MAC",
   "Not placed yet": "Χωρίς θέση ακόμη", "Type from": "Τύπος από", "Core switch": "Κεντρικό switch", "Find an upstream router": "Εύρεση router πριν την πύλη", "Discard": "Απόρριψη", "Reset positions": "Επαναφορά θέσεων", "Reset and forget": "Επαναφορά και διαγραφή", "Also forget my device names, types, pins and web addresses (only ": "Επίσης διαγραφή ονομάτων, τύπων, καρφιτσωμάτων και διευθύνσεων των συσκευών μου (μόνο το ", "PNG image": "Εικόνα PNG", "SVG (draw.io, Visio, Inkscape)": "SVG (draw.io, Visio, Inkscape)",
   "Export the map (PNG, SVG)": "Εξαγωγή χάρτη (PNG, SVG)", "Logical view (by subnet)": "Λογική προβολή (ανά υποδίκτυο)", "Physical view": "Φυσική προβολή",

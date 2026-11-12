@@ -8,6 +8,7 @@ Run it before every release. Every line must say OK.
 """
 import datetime
 import json
+import time as _t
 import re
 import os
 import subprocess
@@ -932,6 +933,51 @@ def test_traffic_correlation():
     check("traffic: switches already linked are not compared", hints2 == {})
 
 
+def test_failover_and_cellular():
+    import spidermap_wan as sw_
+    links = [{"name": "Fibre", "rx": 2000, "tx": 1000}, {"name": "4G", "rx": 30_000_000, "tx": 4_000_000}]
+    check("failover: with two WAN connections, the one carrying the traffic is active, the idle one is not",
+          sw_.active_links(links) == ["4G"] and links[0]["active"] is False, links)
+    both = [{"name": "A", "rx": 40e6, "tx": 1e6}, {"name": "B", "rx": 30e6, "tx": 1e6}]
+    check("failover: load balancing - both active", sw_.active_links(both) == ["A", "B"])
+    items = [{"itemid": "1", "name": "Mobile: RSRP", "units": "dBm", "key_": "rsrp"},
+             {"itemid": "2", "name": "Mobile: Operator", "key_": "op"}, {"itemid": "3", "name": "Starlink: obstruction fraction", "key_": "sl"},
+             {"itemid": "4", "name": "Interface wwan0: Bits received", "key_": "net.if.in[wwan0]", "units": "bps"},
+             {"itemid": "5", "name": "CPU utilization", "key_": "system.cpu.util"}]
+    got = [x["name"] for x in sw_.link_extras(items)]
+    check("4G / 5G and Starlink: the gateway's link items by name (signal, operator, obstructions) - not its traffic, not its CPU",
+          got == ["Mobile: RSRP", "Mobile: Operator", "Starlink: obstruction fraction"], got)
+
+
+def test_controller_secrets():
+    tmp = _sandbox()
+    smset.SECRETS_FILE = os.path.join(tmp, "secrets.json")
+    asked = []
+    real = sm.refresh_controller_sites
+    sm.refresh_controller_sites = lambda: asked.append(1)
+    try:
+        conn = {"id": "c1", "kind": "omada", "url": "https://192.0.2.10:8043", "client_id": "CID", "omada_id": "OID", "sites": [],
+                "secret": "Om4da-S3cret"}
+        r = sm.apply_settings_request({"by": "Admin", "settings": {"controllers": [conn]}})
+        _t.sleep(0.2)
+        sm.publish_settings()
+        pub = open(os.path.join(sm.DATA_DIR, "spidermap_settings.json")).read()
+        dev = open(sm.DEVICES_FILE).read()
+        sec = json.load(open(smset.SECRETS_FILE))
+        check("controllers: the secret is kept apart - in secrets.json as ctl:<id>, not in devices.json, not on the page",
+              r.get("ok") and sec.get("ctl:c1") == "Om4da-S3cret" and "Om4da" not in dev and "Om4da" not in pub
+              and json.loads(pub)["secrets_set"].get("ctl:c1") is True, (r, sec))
+        check("controllers: the secret is not in the audit log, nor in the activity feed",
+              "Om4da" not in open(sm.AUDIT_FILE).read() and "Om4da" not in json.dumps(sm.load_json(os.path.join(sm.STATE_DIR, "spidermap_events_all.json"), [])))
+        check("controllers: after a save the sites are asked for at once", asked == [1], asked)
+        bad = sm.apply_settings_request({"by": "Admin", "settings": {"controllers": [dict(conn, url="http://192.0.2.10")]}})
+        check("controllers: an address without https:// is refused", not bad.get("ok") and bad.get("errors"), bad)
+        sm.apply_settings_request({"by": "Admin", "settings": {"controllers": []}})
+        check("controllers: removing a connection removes its secret", "ctl:c1" not in json.load(open(smset.SECRETS_FILE)))
+    finally:
+        sm.refresh_controller_sites = real
+
+
 def test_wan_from_zabbix():
     import time as _t
     now_ = int(_t.time())
@@ -1056,6 +1102,8 @@ def main():
     test_mac_switch_links()
     test_virtual_macs()
     test_wan_from_zabbix()
+    test_controller_secrets()
+    test_failover_and_cellular()
     test_080()
     test_traffic_correlation()
     print(f"\n{sum(RESULTS)}/{len(RESULTS)} passed")

@@ -23,6 +23,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import requests
@@ -31,7 +32,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.14"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.15"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -82,7 +83,7 @@ def web_url(name, ip, cfg_url=""):
     return f"http://{ip}"
 
 
-TYPE_ICON = {"router": "router", "switch": "server-2", "ap": "access-point", "unifi": "cloud",
+TYPE_ICON = {"router": "router", "switch": "server-2", "ap": "access-point", "ptp": "antenna", "unifi": "cloud",
              "camera": "device-cctv", "tv": "device-tv", "laptop": "device-laptop",
              "desktop": "device-desktop", "phone": "device-mobile", "printer": "printer",
              "appliance": "wash-machine", "iot": "bulb", "nas": "database", "server": "server",
@@ -1141,6 +1142,20 @@ def full_scan(api, community=None, quiet=False):
         if len(live_macs) > 1 and (sid, pname) not in host_port:
             # several devices on one port: behind an access point / hypervisor that is one of them,
             # or behind a switch nobody manages (inferred: drawn dashed)
+            radios = sorted(m for m in live_macs if dtype(m) == "ptp")
+            if radios and not not_a_device:                  # a link between buildings: near radio - far radio - the far side
+                near = device_node(radios[0], "s-" + sid, pr, lbl, "mac")
+                placed.add(radios[0])
+                far = None
+                if len(radios) > 1:
+                    far = device_node(radios[1], near["id"], via="wireless")
+                    far["details"].append(["Link from", "a wireless link between buildings (which radio is the near one is a guess)"])
+                    placed.add(radios[1])
+                for m in macs:
+                    if m not in radios[:2]:
+                        device_node(m, (far or near)["id"], via="behind")
+                        placed.add(m)
+                continue
             hub = next((m for m in live_macs if dtype(m) == "ap"), None)   # not "unifi": a Cloud Key is no AP
             if not hub:                                      # a hypervisor only with its virtual machines behind it
                 virt = [m for m in live_macs if is_virtual_mac(m)]
@@ -1262,6 +1277,123 @@ def full_scan(api, community=None, quiet=False):
         except Exception as e:  # noqa: BLE001
             report["unifi"] = {"ok": False, "error": str(e)[:200]}
             report["warnings"].append(f"UniFi controller: {str(e)[:150]}")
+
+    # ---------------- network controllers (Omada, UniFi, GWN): what they know, merged by MAC address. A controller
+    # counts more than a MAC table's guess and less than your own choice ("connected through", a pin).
+    ctl_health = []
+    ctl_conns = cfg.get("settings", {}).get("controllers") or []
+    if ctl_conns:
+        from spidermap_controllers import fetch as ctl_fetch, KINDS as CTL_KINDS
+        sec_ = load_secrets()
+        sw_by_mac = {}
+        for k, s_ in sw.items():
+            for m_ in ({m for m, ip_ in ipmap.items() if ip_ in s_["host"]["_ips"]} | zp.IFMACS.get(k, set())
+                       | ({zp.BRIDGE[k]["mac"]} if zp.BRIDGE.get(k, {}).get("mac") else set())):
+                sw_by_mac[m_] = k
+
+        def loops(nid, tid):
+            up = tid
+            while up:
+                if up == nid:
+                    return True
+                up = nodes.get(up, {}).get("parent")
+            return False
+
+        def port_of(sid, num):                           # "Port 7" as the switch is labelled - never an internal id first
+            return next((p for p in sw[sid]["ports"] if p.get("label") == f"Port {num}"), None) or \
+                next((p for p in sw[sid]["ports"] if p.get("base") == f"Port {num}"), None)
+        weak = (None, "", "remembered", "behind", "arp", "unifi", "controller", "wireless")
+        for c in ctl_conns:
+            label = c.get("name") or CTL_KINDS[c["kind"]].split(" (")[0]
+            if not c.get("sites"):
+                ctl_health.append({"name": label, "kind": CTL_KINDS[c["kind"]], "ok": False, "error": "no site chosen yet (Settings > Wireless & WAN)"})
+                continue
+            r = ctl_fetch(c, sec_.get("ctl:" + c["id"], ""), _PinnedAdapter)
+            ctl_health.append({"name": label, "kind": CTL_KINDS[c["kind"]], "ok": r["ok"], "error": r["error"], "devices": len(r["devices"]),
+                               "clients": len(r["clients"]), "tls_unchecked": r["unchecked_tls"], "shape": r["shape"]})
+            if not r["ok"]:
+                say(f"  ! {label}: {r['error']}")
+                continue
+            say(f"  {label}: {len(r['devices'])} devices, {len(r['clients'])} clients")
+            for d in r["devices"]:                       # its access points, switches, gateways
+                nid = by_mac.get(d["mac"]) or ("s-" + sw_by_mac[d["mac"]] if d["mac"] in sw_by_mac else None)
+                if not nid or nid not in nodes:
+                    continue
+                n = nodes[nid]
+                if n.get("kind") == "device":
+                    if d["type"] in ("ap", "switch", "gateway") and not dcfg.get(d["mac"], {}).get("type"):
+                        n["type"] = {"gateway": "router"}.get(d["type"], d["type"])
+                        n["icon"] = TYPE_ICON.get(n["type"], n.get("icon"))
+                        n["details"].append(["Type from", f"{label}: {d['type']}"])
+                    if not dcfg.get(d["mac"], {}).get("name") and d["name"] and n["name"] in (d["mac"], n.get("ip"), dname(d["mac"])):
+                        n["name"] = d["name"]
+                    if d["model"] or d["firmware"]:
+                        unifi_inv.setdefault(nid, {"model": d["model"], "serial": "", "firmware": d["firmware"], "vendor": "", "source": label})
+                n["details"].append([label, " · ".join(x for x in (d["model"], d["firmware"]) if x) or "known to the controller"])
+                up = d["uplink_mac"]
+                tid = by_mac.get(up) or ("s-" + sw_by_mac[up] if up in sw_by_mac else None)
+                if n.get("kind") == "device" and tid and tid in nodes and tid != nid and not loops(nid, tid) \
+                        and n.get("via") != "manual" and (n.get("via") in weak or d["wireless_uplink"]):
+                    n["parent"], n["via"] = tid, "wireless" if d["wireless_uplink"] else "controller"
+                    pr = port_of(sw_by_mac[up], d["uplink_port"]) if up in sw_by_mac and d["uplink_port"] else None
+                    n["port"], n["port_ref"] = (plabel(sw_by_mac[up], pr["name"]), [sw_by_mac[up], pr["pid"]]) if pr else ("", None)
+                    n["details"] = [x for x in n["details"] if x[0] != "Link from"] + [
+                        ["Link from", f"{label}: " + ("a wireless link (mesh)" if d["wireless_uplink"] else "its uplink")]]
+            for cl in r["clients"]:                      # every client: on its access point, or on its switch port
+                cm = cl["mac"]
+                if not cl["wired"] and cl["ap_mac"] in by_mac:
+                    tid = by_mac[cl["ap_mac"]]
+                    if cm not in by_mac:
+                        if cm in switch_macs or cm == gw_mac:
+                            continue
+                        device_node(cm, tid, via="controller")
+                    n = nodes[by_mac[cm]]
+                    if n["id"] == tid or loops(n["id"], tid) or n.get("via") == "manual":
+                        continue
+                    n["parent"], n["via"], n["port"], n["port_ref"] = tid, "controller", "", None
+                    if not dcfg.get(cm, {}).get("name") and cl["name"] and n["name"] in (cm, n.get("ip"), dname(cm)):
+                        n["name"] = cl["name"]
+                    wifi = " · ".join(x for x in (cl["ssid"], f"{cl['signal']:.0f} dBm" if cl["signal"] is not None else "") if x)
+                    n["details"] = [x for x in n["details"] if x[0] not in ("Link from", "Wi-Fi")] + [
+                        ["Link from", f"{label}: a wireless client of this access point"]] + ([["Wi-Fi", wifi]] if wifi else [])
+                    if cl["signal"] is not None:
+                        n["signal"] = cl["signal"]
+                elif cl["wired"] and cl["switch_mac"] and cl["port"] and cm not in switch_macs and cm != gw_mac:
+                    sid = sw_by_mac.get(cl["switch_mac"])
+                    pr = port_of(sid, cl["port"]) if sid else None
+                    if sid and pr and cm not in by_mac:      # known to the controller, not placed by SpiderMap yet
+                        n = device_node(cm, "s-" + sid, [sid, pr["pid"]], plabel(sid, pr["name"]), via="controller")
+                        n["details"].append(["Link from", f"{label}: wired, {sw_name[sid]} Port {cl['port']}"])
+                        if not dcfg.get(cm, {}).get("name") and cl["name"]:
+                            n["name"] = cl["name"]
+                        continue
+                    n = nodes[by_mac[cm]] if cm in by_mac else None
+                    if n and sid and pr and n.get("via") != "manual":
+                        if n.get("via") in weak or n.get("parent") == "unplaced":
+                            n["parent"], n["via"], n["port"], n["port_ref"] = "s-" + sid, "controller", plabel(sid, pr["name"]), [sid, pr["pid"]]
+                            n["details"] = [x for x in n["details"] if x[0] != "Link from"] + [["Link from", f"{label}: wired, {sw_name[sid]} Port {cl['port']}"]]
+                        elif n.get("port") and n["port"] != plabel(sid, pr["name"]):
+                            n["details"].append([label + " says", f"{sw_name[sid]} Port {cl['port']} (MAC table: {n['port']})"])
+
+    report["controllers"] = ctl_health
+    radio_events = []                                        # added to the scan's events below, once they exist
+    radio_hosts = {n["zbx"]: n for n in nodes.values() if n.get("zbx") and n.get("type") in ("ptp", "ap")}
+    if radio_hosts and api is not None:
+        try:
+            for it in api.call("item.get", {"hostids": list(radio_hosts), "output": ["hostid", "name", "lastvalue", "units"],
+                                            "search": {"name": "signal"}, "searchByAny": True, "filter": {"status": "0"}}) \
+                    + api.call("item.get", {"hostids": list(radio_hosts), "output": ["hostid", "name", "lastvalue", "units"],
+                                            "search": {"name": "rssi"}, "filter": {"status": "0"}}):
+                n_, v_ = radio_hosts.get(it["hostid"]), _num(it.get("lastvalue"))
+                if n_ is not None and v_ is not None and v_ < 0 and "signal" not in n_:
+                    n_["signal"] = v_
+                    n_["details"].append(["Signal", f"{v_:.0f} dBm ({it['name'][:40]})"])
+                    if v_ < -S["signal_crit"] and n_.get("type") == "ptp":
+                        radio_events.append(ev("device", "warn", f"{n_['name']}: wireless link signal {v_:.0f} dBm (critical below -{S['signal_crit']})", n_["id"]))
+        except Exception as e:  # noqa: BLE001
+            say(f"  ! radio signals from Zabbix: {str(e)[:120]}")
+    if ctl_conns:                                            # their site lists, for Settings (a new site shows up there)
+        threading.Thread(target=refresh_controller_sites, daemon=True).start()
 
     # stopped Proxmox guests the network never saw
     pve_node = next((n for n in nodes.values() if n.get("type") in ("server", "hypervisor") and "proxmox" in n["name"].lower()), None)
@@ -1386,7 +1518,7 @@ def full_scan(api, community=None, quiet=False):
     down = [n["name"] for n in nodes.values() if n["status"] == "down"]
 
     # ---------------- activity feed
-    evs = []
+    evs = list(radio_events)
 
     def nid(mac):
         return by_mac.get(mac)
@@ -1949,6 +2081,13 @@ def is_virtual_mac(mac):
     return str(mac).lower().startswith(VIRTUAL_OUI)
 
 
+def _num(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def core_switch_id(sw, want):
     """The switch named (or with the IP) set as core switch in Settings, or None."""
     want = str(want or "").strip().lower()
@@ -2175,13 +2314,21 @@ def apply_settings_request(req):
             else:
                 ns[k] = v
         ns.pop("discovery_paused", None)
+        ctl_secrets = {}                                                   # out first: nothing below may ever see them
+        for c_ in ns.get("controllers") or []:
+            if c_.get("secret"):
+                ctl_secrets["ctl:" + c_["id"]] = c_.pop("secret")
         changed = {k: [old[k], v] for k, v in effective_settings(ns).items() if old[k] != v and k not in SECRET_KEYS}
         if any(k in clean for k in SECRET_KEYS) and not changed:
             changed = {}                                          # only a password: still saved below
-        if not changed and not any(k in clean for k in SECRET_KEYS):
+        if not changed and not any(k in clean for k in SECRET_KEYS) and not ctl_secrets:
             res.update(ok=True, message="Nothing changed.")
             return res
         secrets = {k: ns.pop(k) for k in SECRET_KEYS if k in ns}          # secrets never go into devices.json
+        secrets.update(ctl_secrets)                                        # a controller's secret: "ctl:<id>"
+        gone = {"ctl:" + c_["id"] for c_ in cur.get("controllers") or []} - {"ctl:" + c_["id"] for c_ in ns.get("controllers") or []}
+        if gone:                                                           # a removed connection takes its secret with it
+            save_secrets({k: v for k, v in load_secrets().items() if k not in gone})
         if secrets:
             save_secrets({**load_secrets(), **secrets})
             changed.update({k: ["(set)", "(changed)"] for k in secrets})
@@ -2190,6 +2337,9 @@ def apply_settings_request(req):
         audit("settings", by, {"changes": changed})
         add_events([ev("audit", "info", f"{by} changed settings: " + ", ".join(sorted(changed))[:300])])
         res.update(ok=True, changed=sorted(changed), message="Saved.")
+        if "controllers" in changed or any(k.startswith("ctl:") for k in secrets):
+            threading.Thread(target=refresh_controller_sites, daemon=True).start()
+            res["message"] = "Saved. Asking the controllers for their sites…"
         return res
     if "import" in req:
         imp = req["import"] if isinstance(req["import"], dict) else {}
@@ -2326,6 +2476,21 @@ def apply_settings_request(req):
     return res
 
 
+CTL_FILE = os.path.join(STATE_DIR, "spidermap_controllers.json")
+
+
+def refresh_controller_sites():
+    """Ask every controller connection for its sites (shown in Settings to tick) - after a save, and at each scan."""
+    from spidermap_controllers import list_sites
+    cfg, sec = load_json(DEVICES_FILE, DEFAULT_DEVICES), load_secrets()
+    out = {}
+    for c in (cfg.get("settings", {}).get("controllers") or []):
+        r = list_sites(c, sec.get("ctl:" + c["id"], ""), _PinnedAdapter)
+        out[c["id"]] = {"ok": r["ok"], "error": r["error"], "sites": r["sites"][:200], "at": now()}
+    save_json(CTL_FILE, out)
+    publish_settings()
+
+
 def publish_settings():
     """What the Settings panel shows (settings permission only), and the permissions spidermap.php enforces."""
     cfg = load_json(DEVICES_FILE, DEFAULT_DEVICES)
@@ -2333,7 +2498,10 @@ def publish_settings():
     save_json(os.path.join(DATA_DIR, SETTINGS_OUT), {
         "schema": SETTINGS_SCHEMA,
         "values": {k: ("" if k in SECRET_KEYS else v) for k, v in effective_settings(st).items()},
-        "secrets_set": {k: bool(load_secrets().get(k)) for k in SECRET_KEYS},
+        "secrets_set": {**{k: bool(load_secrets().get(k)) for k in SECRET_KEYS},
+                        **{"ctl:" + c["id"]: bool(load_secrets().get("ctl:" + c["id"])) for c in st.get("controllers") or []}},
+        "controller_kinds": __import__("spidermap_controllers").KINDS,
+        "controller_sites": load_json(CTL_FILE, {}),
         "effective_permissions": permissions(st),
         "advanced": {k: st[k] for k in ADVANCED_SETTINGS if k in st},
         "device_categories": [{"key": k, "title": t, "examples": e, "detect": d, "icon": TYPE_ICON.get(ty, "help-circle")}
@@ -2343,7 +2511,7 @@ def publish_settings():
     save_json(os.path.join(DATA_DIR, ACCESS), permissions(st))
 
 
-DISPLAY_KEYS = ("skin", "language", "layout", "default_view", "zabbix_triggers", "wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
+DISPLAY_KEYS = ("skin", "signal_warn", "signal_crit", "language", "layout", "default_view", "zabbix_triggers", "wheel", "map_name", "page_refresh_s", "show_offline", "ip_labels", "link_thickness", "units", "load_warn", "load_crit")
 
 
 def in_scan_window(S, dt):
@@ -2617,6 +2785,7 @@ def rt_loop(api):
             threading.Thread(target=lambda: (ookla_servers(refresh=True), publish_settings()), daemon=True).start()
         if t0 - last_health > 30:
             health, last_health = health_report(api_state, snmp_state), t0
+            health["controllers"] = (load_json(SCAN_REPORT, {}) or {}).get("controllers") or []
             zh_ = rsnmp.get("zbx") or {}
             health["wan"] = {"mode": S["wan_source"],
                              "zabbix": {"ok": not zh_.get("error") and bool(zh_.get("last")), "host": zh_.get("hostname", ""),
@@ -2786,6 +2955,20 @@ def rt_loop(api):
                 if wan_bad.get("said"):
                     evs.append(ev("internet", "ok", f"WAN throughput is measured again (router, {wan_src.upper()})", "inet"))
                 wan_bad.clear()
+        if wan and wan.get("links") and len(wan["links"]) > 1:      # failover: which connection carries the traffic now
+            act = [x["name"] for x in wan["links"] if x.get("active")]
+            if act and wan_bad.get("active") is not None and act != wan_bad["active"]:
+                idle = [x["name"] for x in wan["links"] if not x.get("active")]
+                evs.append(ev("internet", "warn" if wan_bad["active"] and wan_bad["active"][0] not in act else "ok",
+                              f"WAN: traffic now on {', '.join(act)}" + (f" ({', '.join(idle)} idle)" if idle else ""), "inet"))
+            if act:
+                wan_bad["active"] = act
+        for e in (wan or {}).get("extras") or []:                    # a 4G / 5G signal below the critical threshold
+            val = _num(e.get("value"))
+            if val is not None and (e["units"].lower() == "dbm" or re.search(r"(?i)rsrp|rssi", e["name"])) and val < -S["signal_crit"]:
+                if t0 - wan_bad.get("sig_said", 0) > 1800:
+                    wan_bad["sig_said"] = t0
+                    evs.append(ev("internet", "warn", f"WAN signal weak: {e['name']} {val:.0f} dBm (critical below -{S['signal_crit']})", "inet"))
         if wan:
             hist["wan"].append([t, round(wan["rx"]), round(wan["tx"])])
             del hist["wan"][:-RT_KEEP]
@@ -2866,7 +3049,7 @@ def rt_loop(api):
         upt, outs, cov = month_uptime(inet, t)
         save_json(os.path.join(DATA_DIR, RT), {
             "t": t, "every": every, "ports": ports, "flaps": flaps,
-            "wan": {"down": wan["rx"], "up": wan["tx"], "src": wan_src, "links": wan.get("links")} if wan else None,
+            "wan": {"down": wan["rx"], "up": wan["tx"], "src": wan_src, "links": wan.get("links"), "extras": wan.get("extras")} if wan else None,
             "wan_candidates": [{"iface": c["iface"], "down": c["down"]["itemid"], "up": c["up"]["itemid"], "hint": c["hint"],
                                 "rx": item_bps(c["down"])[0], "tx": item_bps(c["up"])[0]}
                                for c in (rsnmp.get("zbx") or {}).get("cands", [])][:24],

@@ -376,6 +376,16 @@ def test_ap_models():
           zp.ap_evidence({"1": "6"}, {"1": "eth0"}, "Linux", "10 00") == "its own LLDP: WLAN access point")
 
 
+def test_ptp_models():
+    yes = ["NanoStation 5AC", "LiteBeam 5AC Gen2", "PowerBeam M5", "airFiber 60", "Rocket Prism 5AC", "Wave Pro", "LHG 5 ac", "SXTsq 5",
+           "wAP 60G", "Cambium ePMP Force 300", "PTP 550", "TP-Link CPE510", "WBS510", "Mimosa B5c", "Ubiquiti airMAX", "bldg-B ptp"]
+    no = ["EAP610-Outdoor", "U6-Lite", "CRS310-8G+2S+", "TL-SG3218XP", "Synology DS418p", "B5 vitamin", "office printer"]
+    wrong = [x for x in yes if not zp.ptp_model(x)] + [x for x in no if zp.ptp_model(x)]
+    check(f"PtP radios: {len(yes)} radios of Ubiquiti, MikroTik, Cambium, TP-Link and Mimosa - and {len(no)} other devices are not", not wrong, wrong)
+    check("PtP radios: a radio is a radio, not an access point (it has Wi-Fi interfaces too)",
+          sm.classify("NanoStation 5AC loco", "Ubiquiti", "74:83:c2:00:00:09") == "ptp" and sm.classify("EAP245", "TP-Link", "98:ba:5f:00:00:01") == "ap")
+
+
 def test_device_types():
     cases = [("idrac-7XK2", "Dell Inc.", "oob"), ("pve1", "Dell Inc.", "hypervisor"), ("esx01", "VMware", "hypervisor"),
              ("", "American Power Conversion", "ups"), ("nvr-office", "Hikvision", "camera"), ("SIP-T46U", "Yealink", "voip"),
@@ -404,6 +414,7 @@ def main():
     test_local_nets()
     test_access_points()
     test_ap_models()
+    test_ptp_models()
     test_report()
     test_counters()
     test_zabbix_items()

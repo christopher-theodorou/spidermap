@@ -4,7 +4,7 @@ Part of SpiderMap (see spidermap.py and docs/ARCHITECTURE.md)."""
 import os
 import re
 
-from spidermap_ports import ap_model  # noqa: E402
+from spidermap_ports import ap_model, ptp_model  # noqa: E402
 from spidermap import STATE_DIR, is_private_mac  # noqa: E402 - spidermap.py loads this module at its end
 
 
@@ -16,7 +16,8 @@ PLACE_KINDS = {"switch": ("Unmanaged switch", "server-2"), "ap": ("Access point"
 VIA_TEXT = {"stp": "spanning tree (the switch names its neighbour)", "lacp": "LACP (the link aggregation partner)",
             "unifi": "UniFi controller (a wireless client of this access point)","lldp": "LLDP (the device announced itself)", "mac": "MAC table of the switch", "manual": "pinned in devices.json",
             "proxmox": "Proxmox API", "arp": "guessed: seen only through the gateway (Wi-Fi or its LAN ports)",
-            "behind": "guessed: behind another device", "remembered": "guessed: where it was last seen"}
+            "behind": "guessed: behind another device", "remembered": "guessed: where it was last seen",
+            "controller": "the network controller (Omada / UniFi / GWN)", "wireless": "a wireless link (the controller or the radio says so)"}
 
 
 VIA_GUESSED = ("arp", "behind", "remembered")
@@ -83,6 +84,8 @@ def classify(name, vendor, mac, off=()):
     text = f"{name} {vendor}".lower()
     if mac.startswith("bc:24:11"):
         return "guest"
+    if ptp_model(name, vendor):                          # a radio of a link between buildings
+        return "ptp"
     if ap_model(name, vendor):                           # an access point by its model name, from any vendor
         return "ap"
     for key, typ, _t, _e, _d, rx in DEVICE_CATEGORIES:

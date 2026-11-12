@@ -262,6 +262,32 @@ def wan_candidates(items):
     return sorted(out, key=lambda x: (not x["hint"], x["iface"]))
 
 
+# what a 4G / 5G router or a Starlink says about its link - from the gateway's own items, whatever the template
+LINK_EXTRA = re.compile(r"(?i)(rsrp|rsrq|sinr|snr|rssi|signal|operator|carrier|provider|network\s*(type|mode)|access\s*tech|"
+                        r"\blte\b|\b5g\b|nr5g|band\b|cell\s*id|\bimsi\b|sim\s*(slot|state)|starlink|dish|obstruct|pop\s*ping|"
+                        r"(active|current)\s*wan|wan\s*(status|state|failover))")
+
+
+def link_extras(items):
+    """The gateway's items about its link (4G / 5G signal, operator, technology, Starlink state) - not its traffic."""
+    out = []
+    for it in items:
+        k, n = str(it.get("key_", "")), str(it.get("name", ""))
+        if re.match(r"net\.if\.(in|out)\[", k) or re.search(r"(?i)if(hc)?(in|out)octets", k) or not LINK_EXTRA.search(n):
+            continue
+        out.append({"itemid": str(it.get("itemid")), "name": n[:60], "units": str(it.get("units") or "")[:10]})
+    return out[:16]
+
+
+def active_links(links):
+    """With several WAN connections: which carry the traffic now (failover / load balancing) - a link counts as
+    active above 50 kbit/s or 5 % of the total."""
+    tot = sum((x.get("rx") or 0) + (x.get("tx") or 0) for x in links)
+    for x in links:
+        x["active"] = not x.get("stale") and ((x.get("rx") or 0) + (x.get("tx") or 0)) >= max(50_000, 0.05 * tot)
+    return [x["name"] for x in links if x["active"]]
+
+
 def read_zabbix_wan(api, zs, S, gh, t0, usage):
     """The WAN from the gateway's items in Zabbix: {"rx", "tx", "links"} in bit/s, or None (zs["error"] says why).
     The links chosen in Settings, else every interface whose name or tags say WAN. Items are asked for every 15 s."""
@@ -273,7 +299,7 @@ def read_zabbix_wan(api, zs, S, gh, t0, usage):
             except Exception:  # noqa: BLE001 - older Zabbix without item tags
                 items = api.call("item.get", {"hostids": gh["hostid"], "output": ["itemid", "name", "key_", "units", "lastvalue",
                                  "prevvalue", "lastclock", "delay", "status"], "filter": {"status": "0"}})
-            zs.update(cands=wan_candidates(items), cands_next=t0 + 600, host=gh["hostid"], hostname=gh["name"])
+            zs.update(cands=wan_candidates(items), extras=link_extras(items), cands_next=t0 + 600, host=gh["hostid"], hostname=gh["name"])
         except Exception as e:  # noqa: BLE001
             zs.update(error=f"Zabbix items of {gh['name']}: {str(e)[:150]}", cands_next=t0 + 120)
             return None
@@ -286,7 +312,7 @@ def read_zabbix_wan(api, zs, S, gh, t0, usage):
     if t0 < zs.get("next", 0) and zs.get("last"):
         return zs["last"]
     try:
-        ids = sorted({str(x[k]) for x in links for k in ("down", "up")})
+        ids = sorted({str(x[k]) for x in links for k in ("down", "up")} | {x["itemid"] for x in zs.get("extras", [])})
         got = {i["itemid"]: i for i in api.call("item.get", {"itemids": ids, "output": ["itemid", "name", "units", "lastvalue",
                                                                                          "prevvalue", "lastclock", "delay"]})}
     except Exception as e:  # noqa: BLE001
@@ -314,7 +340,11 @@ def read_zabbix_wan(api, zs, S, gh, t0, usage):
             u[0] += rx * dt / 8
             u[1] += tx * dt / 8
         usage.setdefault("wan_since", now())
-    zs.update(t=t0, next=t0 + 15, error="", last={"rx": rx, "tx": tx, "links": out})
+    extras = [{"name": e["name"], "value": (got.get(e["itemid"]) or {}).get("lastvalue", ""), "units": e["units"]}
+              for e in zs.get("extras", []) if e["itemid"] in got]
+    if len(out) > 1:
+        active_links(out)
+    zs.update(t=t0, next=t0 + 15, error="", last={"rx": rx, "tx": tx, "links": out, "extras": extras})
     return zs["last"]
 
 

@@ -44,6 +44,13 @@ The map (tree or free layout, vertical or horizontal, physical or by subnet, wit
 of cards, and an **inventory** of models, serial numbers and firmware - with devices of one model running different
 firmware marked.
 
+### 📡 Controllers and wireless
+TP-Link Omada, UniFi (Site Manager or a local console) and Grandstream GWN, read only and several at once - one
+map across vendors: Wi-Fi clients under their access point with SSID and signal, wired clients on their switch port,
+mesh links. Links between buildings (Ubiquiti, MikroTik, Cambium, TP-Link, Mimosa radios) drawn as wireless, with
+their signal. WAN throughput from the gateway's own Zabbix items - any router or firewall - with several
+connections, the active one in a failover, and a 4G / 5G router's or a Starlink's own figures.
+
 ### 🎨 Yours
 Device types with their own icons, names and web addresses edited on the map, map edits (an unmanaged switch here,
 a device connected through another), UniFi access points with their wireless clients, themes (SpiderMap and the

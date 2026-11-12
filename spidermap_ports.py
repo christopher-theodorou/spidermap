@@ -97,6 +97,31 @@ AP_NOT = re.compile(r"(?<![a-z0-9])(usw|unifi switch|us-[0-9]|udm|ucg|uxg|uck|cl
                     r"fortigate|fortiswitch|fgt|fsw-|switch|eap-tls|eap-ttls|eap-peap)(?![a-z0-9])", re.I)
 
 
+# Point-to-point / point-to-multipoint radios (links between buildings): their own families. Checked before the access
+# points - a radio also has Wi-Fi interfaces.
+PTP_MODEL = re.compile(r"(?<![a-z0-9])(nanostation|nanobeam|litebeam|powerbeam|rocket\s?(m|ac|prism|5ac)|airfiber|af-?\d{1,2}|"
+                       r"isostation|wave[-_ ]?(ap|pro|lr|nano)|airmax|loco\s?m|bullet\s?(m|ac)|"
+                       r"lhg[a-z]*|sxt[a-z]*|dynadish|wireless\s?wire|wap\s?60g|cube\s?60|mantbox|qrt|"
+                       r"epmp|force\s?\d{3}|ptp\s?\d{3}|cnwave|"
+                       r"cpe\s?\d{3}|wbs\s?\d{3}|"
+                       r"mimosa|b5[cx]?|c5[cx]?|a5[c]?|"
+                       r"ligowave|deliberant|dlb\s?\d|"
+                       r"ptp|ptmp|point[- ]to[- ]point|wireless bridge|airos)(?![a-z0-9])", re.I)
+
+
+def ptp_model(text, vendor=""):
+    """The radio family named in a text (a description, a name), or None. Its MAC maker counts too for the shortest
+    names (Mimosa B5, Cambium Force)."""
+    t = str(text or "")
+    m = PTP_MODEL.search(t)
+    if not m:
+        return None
+    short = m.group(1).lower()
+    if re.fullmatch(r"b5[cx]?|c5[cx]?|a5c?", short) and not re.search(r"(?i)mimosa", f"{t} {vendor}"):
+        return None
+    return m.group(1)
+
+
 def ap_model(text, vendor=""):
     """The access-point family named in a text (a description, a host or DHCP name), or None - never for a switch,
     controller or router of the same vendor; an ambiguous model only when its vendor is named (text or vendor)."""
@@ -455,7 +480,10 @@ def scan_switch(h, community, hosts):
                           next(iter(at.snmpwalk(auth, target, "1.0.8802.1.1.2.1.3.6").values()), ""))   # lldpLocSysCapEnabled
     except Exception:  # noqa: BLE001
         why = None
-    if why:
+    ptp = ptp_model(f"{(INVENTORY.get(h['hostid']) or {}).get('descr', '')} {(INVENTORY.get(h['hostid']) or {}).get('model', '')} {h.get('name', '')}")
+    if ptp:
+        ROLE[h["hostid"]] = ("ptp", f"a radio for a link between buildings ({ptp})")
+    elif why:
         ROLE[h["hostid"]] = ("ap", why)
     else:
         ROLE.pop(h["hostid"], None)

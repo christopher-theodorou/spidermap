@@ -4,6 +4,35 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.15] - 2026-11-12
+
+### Added
+- **Network controllers: TP-Link Omada, UniFi and Grandstream GWN** (Settings > Wireless & WAN > Controllers) - read
+  only, several at once, of different vendors, on one map. Omada through its Open API (Client mode, role Viewer;
+  hardware, software or cloud controller); UniFi through the Site Manager API (api.ui.com, an API key - also consoles
+  far away) or a local UniFi OS console with an API key; GWN Cloud / GWN Manager through its API (experimental). Add
+  a connection, save, tick the sites to import. What a controller knows is merged by MAC address: every Wi-Fi client
+  under its access point (with SSID and signal), wired clients on their switch port - also devices SpiderMap had not
+  placed yet - names, models, firmware, and wireless uplinks (mesh). A controller counts more than a MAC table's
+  guess and less than your own choice; when it disagrees with a MAC table, the panel shows both. Secrets are kept in
+  secrets.json only - never in devices.json, on the page, in exports or in the audit log. Collector health has one line
+  per connection; a local controller whose certificate is not checked says so (add its fingerprint).
+- **Active WAN in failover:** with several WAN connections (WAN from Zabbix), each is marked active or idle, and a
+  change is in Activity ("WAN: traffic now on 4G (Fibre idle)").
+- **4G / 5G and Starlink:** the gateway's own Zabbix items about its link - RSRP, RSRQ, SINR, RSSI, operator,
+  technology, Starlink obstructions and latency, whatever the template - on the gateway card, coloured by the signal
+  thresholds; a 4G / 5G signal below the critical one is in Activity.
+- **Wireless links between buildings (PtP / PtMP):** radios of Ubiquiti (NanoStation, LiteBeam, PowerBeam, airFiber,
+  Wave ...), MikroTik (LHG, SXT, wAP 60G ...), Cambium (ePMP, PTP), TP-Link (CPE, WBS) and Mimosa are recognised -
+  by name, model or their own SNMP - and two radios on one switch port become the two ends of a link: the far
+  building behind the far radio, the link drawn as wireless. A radio or access point in Zabbix shows its signal;
+  a radio below the critical signal is in Activity.
+- **Signal thresholds** (Settings > Wireless & WAN): warning and critical, for Wi-Fi clients, radios and 4G / 5G.
+- The Planned list holds only what is still planned.
+
+### Fixed
+- GitHub's automatic tests now also run the command tests and the controller tests.
+
 ## [0.9.14] - 2026-11-11
 
 ### Added
@@ -683,6 +712,7 @@ First release as **SpiderMap** (earlier development versions were called *zabbix
 - Who's online (presence timeline), top talkers, CSV export, editing from the map, light and dark theme.
 - Installer with migration from the earlier *zabbix-netmap* install.
 
+[0.9.15]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.15
 [0.9.14]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.14
 [0.9.13]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.13
 [0.9.12]: https://github.com/christopher-theodorou/spidermap/releases/tag/v0.9.12

@@ -110,6 +110,13 @@ SETTINGS_SCHEMA = [
     _S("unifi_site", "str", "default", "Wireless & WAN", "UniFi controller", "Site", maxlen=40),
     _S("unifi_user", "str", "", "Wireless & WAN", "UniFi controller", "User", maxlen=60,
        help="A local user with the role View only."),
+    _S("controllers", "controllers", [], "Wireless & WAN", "Controllers", "Controller connections",
+       help="TP-Link Omada, UniFi (Site Manager or a local console) and Grandstream GWN - read only. Add a connection, "
+            "save, then tick the sites to import. Several connections, of different vendors, work together on one map."),
+    _S("signal_warn", "int", 70, "Wireless & WAN", "Signal", "Signal warning below", unit="-dBm", range=[40, 110],
+       help="Wi-Fi clients, wireless links between buildings and 4G / 5G: a signal weaker than this is shown in orange."),
+    _S("signal_crit", "int", 80, "Wireless & WAN", "Signal", "Signal critical below", unit="-dBm", range=[40, 120],
+       help="Weaker than this: red, and an event in Activity for a wireless link between buildings or a 4G / 5G WAN."),
     _S("unifi_password", "secret", "", "Wireless & WAN", "UniFi controller", "Password",
        help="Stored only on the server (/etc/spidermap/secrets.json); never shown again or exported."),
     _S("unifi_fingerprint", "str", "", "Wireless & WAN", "UniFi controller", "Certificate fingerprint", maxlen=100,
@@ -239,6 +246,40 @@ def validate_settings(new, current=None):
                 v = str(v)
                 if len(v) > 128 or re.search(r"[\x00-\x1f]", v):
                     raise ValueError("at most 128 characters, no control characters")
+            elif typ == "controllers":
+                from spidermap_controllers import KINDS
+                if not isinstance(v, list) or len(v) > 8:
+                    raise ValueError("at most 8 controller connections")
+                out_, ids = [], set()
+                for x in v:
+                    if not isinstance(x, dict) or x.get("kind") not in KINDS:
+                        raise ValueError("unknown controller type")
+                    cid = str(x.get("id", ""))
+                    if not re.fullmatch(r"c\d{1,4}", cid) or cid in ids:
+                        raise ValueError("each connection needs its own id")
+                    ids.add(cid)
+                    url = str(x.get("url") or "").strip()
+                    if x["kind"] in ("omada", "unifi_local") and not re.fullmatch(r"https://[^\s<>\"']{3,200}", url):
+                        raise ValueError(f"{KINDS[x['kind']]}: the controller's address must start with https://")
+                    if url and not re.fullmatch(r"https://[^\s<>\"']{3,200}", url):
+                        raise ValueError("a controller's address must start with https://")
+                    clean_ = {"id": cid, "kind": x["kind"], "url": url}
+                    for k_, mx in (("name", 40), ("client_id", 120), ("omada_id", 120), ("fingerprint", 120)):
+                        val = str(x.get(k_) or "").strip()
+                        if len(val) > mx or re.search(r"[<>\x00-\x1f\"']", val):
+                            raise ValueError(f"{k_}: at most {mx} characters, no < > or quotes")
+                        clean_[k_] = val
+                    sites = x.get("sites") or []
+                    if not isinstance(sites, list) or len(sites) > 50 or any(not re.fullmatch(r"[\w\-|.:]{1,120}", str(z)) for z in sites):
+                        raise ValueError("unknown site")
+                    clean_["sites"] = [str(z) for z in sites]
+                    sec = x.get("secret")
+                    if sec:                                   # kept apart from the settings (secrets.json), never published
+                        if not isinstance(sec, str) or len(sec) > 512 or re.search(r"[\x00-\x1f]", sec):
+                            raise ValueError("a secret: at most 512 characters")
+                        clean_["secret"] = sec
+                    out_.append(clean_)
+                v = out_
             elif typ == "wanlinks":
                 if not isinstance(v, list) or len(v) > 4:
                     raise ValueError("at most 4 WAN connections")
