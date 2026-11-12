@@ -256,7 +256,10 @@ interface name in the item name as a fallback.
 
 ## Zabbix integration
 
-SpiderMap uses the API token in `zabbix.env` and creates, on the Zabbix server host:
+SpiderMap uses the API token in `zabbix.env`. In **read-only mode** (`SPIDERMAP_ZABBIX_READONLY="1"`, and always
+in the standalone deployment) it only reads: `Zabbix.call` in `spidermap_zabbix.py` refuses every method outside
+`READ_METHODS` before sending it, and the event and speed-test writers return early. Otherwise it creates, on the
+Zabbix server host:
 
 | Item key | Trigger |
 |---|---|

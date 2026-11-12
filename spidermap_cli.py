@@ -770,6 +770,8 @@ def doctor(args):
             api = at.Zabbix(at.ZABBIX_URL, at.ZABBIX_TOKEN, at.VERIFY_TLS)
             n = api.call("host.get", {"countOutput": True})
             ok(f"API {at.ZABBIX_URL}: token accepted, {n} host{'' if str(n) == '1' else 's'}")
+            if at.readonly_mode():
+                ok("Zabbix read-only: SpiderMap creates nothing in Zabbix (events stay in its Activity)")
         except Exception as e:  # noqa: BLE001
             msg = str(e)
             if "CERTIFICATE_VERIFY_FAILED" in msg or "certificate verify failed" in msg:
@@ -787,7 +789,17 @@ def doctor(args):
             api = None
         if at.ZABBIX_URL.lower().startswith("https://") and not at.VERIFY_TLS:
             W("ZABBIX_VERIFY_TLS=0: the API certificate is not checked", "use http://127.0.0.1 locally instead")
-    if api is not None:
+    if api is not None and at.readonly_mode():
+        try:
+            left = api.call("item.get", {"output": ["itemid"], "search": {"key_": "autotopo."}, "startSearch": True,
+                                         "templated": False, "countOutput": True})
+            if str(left) not in ("0", ""):
+                W(f"{left} earlier SpiderMap item(s) are still in Zabbix and no longer updated (their problems stay open)",
+                  "remove them once: SPIDERMAP_ZABBIX_READONLY=0 python3 " + os.path.join(HERE, "spidermap.py")
+                  + " --uninstall-zabbix   (or bash install.sh > 4) Zabbix connection)")
+        except Exception:  # noqa: BLE001
+            pass
+    if api is not None and not at.readonly_mode():
         try:
             s = api.call("settings.get", {"output": ["iframe_sandboxing_enabled", "iframe_sandboxing_exception"]})
             if str(s.get("iframe_sandboxing_enabled", "1")) == "1":
@@ -912,13 +924,13 @@ def cmd_fix_permissions(args):
 
 
 def cmd_update(args):
-    need_root()
-    if os.path.isdir(os.path.join(HERE, ".git")):
-        print(f"git pull in {HERE}")
-        r = subprocess.run(["git", "-C", HERE, "pull", "--ff-only"])
-        if r.returncode != 0:
-            raise SystemExit("git pull failed - see above (local changes? run: git -C " + HERE + " status)")
-    os.execvp("bash", ["bash", os.path.join(HERE, "install.sh"), "--update"])
+    import spidermap_update as up
+    if not args.check:
+        need_root()                                   # --check only reads, so it works without sudo
+    try:
+        raise SystemExit(up.update(args))
+    except up.UpdateError as e:
+        raise SystemExit(f"Update: {e}")
 
 
 def cmd_uninstall(args):
@@ -949,7 +961,9 @@ HELP = """SpiderMap commands (run as root)
   spidermap check-ports             how SpiderMap sees every switch port
   spidermap cert [host[:port]]      the https certificate: names, expiry, SHA-256 fingerprint
   spidermap fix-permissions         put file owners and modes right, restart the service
-  spidermap update                  git pull + bash install.sh --update
+  spidermap update [--check] [--yes] [--main]
+                                    a newer version on GitHub? asks, then downloads, backs up, installs
+                                    (rolls back by itself if it fails; --reinstall: the files already here)
   spidermap uninstall [--keep-data] [--keep-zabbix]
   spidermap menu                    the installer menu
   spidermap version
@@ -984,7 +998,10 @@ def main(argv=None):
     p.add_argument("--check-trust", action="store_true", help="exit 0 if this server trusts the certificate")
     p.set_defaults(fn=cmd_cert)
     sub.add_parser("fix-permissions").set_defaults(fn=cmd_fix_permissions)
-    sub.add_parser("update").set_defaults(fn=cmd_update)
+    p = sub.add_parser("update")
+    import spidermap_update as up
+    up.add_arguments(p)
+    p.set_defaults(fn=cmd_update)
     p = sub.add_parser("uninstall")
     p.add_argument("rest", nargs=argparse.REMAINDER)
     p.set_defaults(fn=cmd_uninstall)

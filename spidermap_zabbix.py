@@ -133,6 +133,26 @@ class ZabbixError(Exception):
     pass
 
 
+def readonly_mode():
+    """Read-only Zabbix: SpiderMap creates, changes and deletes nothing in Zabbix - no items, triggers,
+    dashboards or maps, no history.push and no zabbix_sender. Set by SPIDERMAP_ZABBIX_READONLY="1" in
+    zabbix.env, and always on in the standalone deployment (SPIDERMAP_DEPLOYMENT=standalone)."""
+    return (os.environ.get("SPIDERMAP_DEPLOYMENT") == "standalone"
+            or os.environ.get("SPIDERMAP_ZABBIX_READONLY", "0").strip() in ("1", "yes", "true"))
+
+
+# The only methods a read-only SpiderMap may call. Fail closed: a new or misspelled method is refused, not
+# assumed to be a read. (The Zabbix token should be read-only too - this is the second lock, not the only one.)
+READ_METHODS = frozenset({"apiinfo.version", "host.get", "item.get", "trigger.get", "usermacro.get",
+                          "image.get", "history.get", "trend.get", "problem.get", "hostgroup.get",
+                          "template.get", "dashboard.get", "map.get", "settings.get"})
+
+
+def check_api_method(method):
+    if readonly_mode() and method not in READ_METHODS:
+        raise ZabbixError(f"read-only mode: SpiderMap does not call {method} (it changes Zabbix)")
+
+
 class Zabbix:
     def __init__(self, url, token, verify=True):
         self.url, self.verify, self._id = url, verify, 0
@@ -148,6 +168,7 @@ class Zabbix:
         return r.json()["result"]
 
     def call(self, method, params=None):
+        check_api_method(method)                 # before anything leaves the server
         self._id += 1
         r = self.s.post(self.url, json={"jsonrpc": "2.0", "method": method,
                                         "params": params if params is not None else {},

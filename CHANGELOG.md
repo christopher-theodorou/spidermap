@@ -4,6 +4,40 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.16] - 2026-11-12
+
+From Nikolaos Karanikolas's proposal and prototype (read-only Zabbix, standalone, confirmation on update) -
+thank you.
+
+### Added
+- **Zabbix read-only mode** - SpiderMap reads Zabbix (hosts, traffic, problems, the gateway's WAN items) and creates,
+  changes and deletes **nothing** there: no `autotopo.*` items or triggers, no dashboard, no `history.push`, no
+  `zabbix_sender`. New devices, moves, cable problems and speed tests stay in SpiderMap's Activity and history.
+  The API client refuses every method that is not on its read list before the request leaves the server, so a
+  read-only Zabbix token is enough. The installer asks (read-only is the suggestion); *menu > 4) Zabbix connection*
+  switches it, lists what SpiderMap created in Zabbix earlier and offers to remove it once; `spidermap doctor`
+  says which mode is on and warns about earlier items still left. Existing installations keep working as before
+  until you switch. See docs/COMMANDS.md, *Zabbix read-only mode*.
+- **`spidermap update` downloads the new version itself** - `Installed 0.9.16 / Available 0.9.17 / Upgrade to
+  0.9.17? [y/N]`. Only after *y*: it downloads the latest GitHub release (https), checks it (paths, every file,
+  the version, it compiles, no settings inside), backs up code, settings and history to `/var/backups/spidermap`
+  (the last five), installs, and **rolls back by itself** if anything fails. `--check` only checks (no sudo
+  needed), `--yes` installs without asking (for automation), `--main` takes the latest code before it is a release,
+  `--reinstall` re-runs the installer on the files already there. A git checkout keeps using git, now with the
+  same question. The menu's *2) Update* does the same.
+- **Standalone deployment (preview)** - SpiderMap outside Zabbix: Docker Compose, its own Apache with bcrypt users
+  and the roles viewer / editor / admin, always Zabbix read-only, nothing installed on the Zabbix server. The web
+  container gets no API token. See docs/STANDALONE.md.
+- Tests: `tests/test_readonly.py` (read-only mode, and the standalone web server's login, roles, Origin check and
+  paths with real PHP), `tests/test_update.py` (the update's checks, question, backup and rollback).
+
+### Upgrade
+- **From 0.9.15 or older, update once by hand** - the old `spidermap update` only re-installs the files already
+  there. `git pull` (or unpack the new zip over the folder), then `sudo bash install.sh --update`. From 0.9.16 on,
+  `sudo spidermap update` is enough.
+- Nothing changes in Zabbix by upgrading: an installation that sends events to Zabbix keeps doing so until you
+  switch to read-only.
+
 ## [0.9.15] - 2026-11-12
 
 ### Added

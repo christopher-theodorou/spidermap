@@ -1,0 +1,5 @@
+.git
+standalone/auth
+standalone/.env
+**/__pycache__
+**/*.pyc

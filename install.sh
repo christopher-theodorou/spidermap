@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+if [ "${SPIDERMAP_DEPLOYMENT:-}" = "standalone" ]; then
+  echo "Standalone deployment: install and update it with docker compose (docs/STANDALONE.md), not install.sh." >&2
+  exit 2
+fi
 # SpiderMap installer - run on the Zabbix server (or its container) as root.
 #   bash install.sh              the menu (install, update, doctor, Zabbix, Proxmox, permissions, logs, uninstall)
 #   bash install.sh --install    first install without the menu (asks for the Zabbix address and API token)
-#   bash install.sh --update     after "git pull": refresh the page, restart the service
+#   bash install.sh --update     refresh the page, restart the service (spidermap update downloads first)
 #   bash install.sh --uninstall  [--keep-data] [--keep-zabbix] [--yes]
 #   bash install.sh --menu       the menu, also when not run from a terminal
 # Without a terminal (scripts, pipes), plain "bash install.sh" installs as before.
@@ -144,6 +148,17 @@ install_command() {   # the "spidermap" command, usable from anywhere (see docs/
   echo "  command installed: spidermap   (spidermap help)"
 }
 
+ask_zabbix_mode() {   # sets ZRO: 1 = read-only (nothing created in Zabbix), 0 = events also go to Zabbix
+  echo
+  echo "How should SpiderMap use Zabbix?"
+  echo "  1) Read only (recommended): it reads hosts, traffic and problems - and creates nothing in Zabbix."
+  echo "     New devices, moves and cable problems are in SpiderMap's Activity. A read-only API token is enough."
+  echo "  2) Also send its events to Zabbix: creates 'autotopo.*' items and triggers on the Zabbix server host and"
+  echo "     the SpiderMap dashboard, so Zabbix actions can notify you. The token must be allowed to create them."
+  local m; read -r -p "Choose [1]: " m || m=1
+  case "${m:-1}" in 2) ZRO=0 ;; *) ZRO=1 ;; esac
+}
+
 api_check() {   # $1 API URL, $2 token. Prints what it finds; the token never appears in the process list.
   local out rc=0 n
   out=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json-rpc' \
@@ -273,7 +288,9 @@ if [ ! -f "$CONF/zabbix.env" ]; then
   read -r -p "Zabbix API URL [http://127.0.0.1/zabbix/api_jsonrpc.php]: " url
   url="$(normalize_api_url "${url:-http://127.0.0.1/zabbix/api_jsonrpc.php}")"
   read -r -s -p "Zabbix API token (Users > API tokens): " tok; echo
-  printf 'export ZABBIX_URL="%s"\nexport ZABBIX_TOKEN="%s"\n' "$url" "$tok" > "$CONF/zabbix.env"
+  ask_zabbix_mode
+  printf 'export ZABBIX_URL="%s"\nexport ZABBIX_TOKEN="%s"\nexport SPIDERMAP_ZABBIX_READONLY="%s"\n' \
+    "$url" "$tok" "$ZRO" > "$CONF/zabbix.env"
   ln -sfn "$CONF/zabbix.env" "$DIR/zabbix.env"
 fi
 chmod 640 "$CONF/zabbix.env"
@@ -285,20 +302,31 @@ api_check "$ZABBIX_URL" "$ZABBIX_TOKEN" || fail "Fix it with:  bash install.sh, 
 say "4/5  Service user"
 choose_user
 
-say "5/5  Setup: page, icons, Zabbix items, dashboard, service (it runs the scans: no cron needed)"
+if [ "${SPIDERMAP_ZABBIX_READONLY:-0}" = "1" ]; then
+  say "5/5  Setup: page, icons, service (Zabbix read-only: nothing is created in Zabbix)"
+else
+  say "5/5  Setup: page, icons, Zabbix items, dashboard, service (it runs the scans: no cron needed)"
+fi
 python3 spidermap.py --setup
 
 ip=$(hostname -I 2>/dev/null | awk '{print $1}')
 path=$(python3 -c 'import os; from urllib.parse import urlparse; print(urlparse(os.environ["ZABBIX_URL"]).path.rsplit("/", 1)[0])')
 scheme=http; python3 "$DIR/spidermap_cli.py" cert --fingerprint >/dev/null 2>&1 && scheme=https
 say "SpiderMap $(python3 spidermap.py --version 2>/dev/null | cut -d' ' -f2) is running."
+echo "Open the map:   ${scheme}://${ip}${path}/spidermap.php   (Zabbix Super admins; see Settings > Access)"
+if [ "${SPIDERMAP_ZABBIX_READONLY:-0}" = "1" ]; then
+  echo "Zabbix read-only: SpiderMap's events are in its Activity, not in Zabbix (no items, triggers or dashboard)."
+  echo "Want a dashboard widget anyway? Add a URL widget yourself (docs/COMMANDS.md, read-only mode)."
+else
 cat <<EOF2
-Open the map:   ${scheme}://${ip}${path}/spidermap.php   (Zabbix Super admins; see Settings > Access)
 Or in Zabbix:   Dashboards > "SpiderMap"
 
 One manual step in Zabbix (needed for the dashboard widget):
   Administration > General > Other > Security
   "Iframe sandboxing exceptions":  allow-scripts allow-same-origin allow-popups allow-downloads
+EOF2
+fi
+cat <<EOF2
 
 Your names, icons and pins live in devices.json ($CONF, linked here). Scans, intervals and access: the
 Settings button on the map.
@@ -350,7 +378,27 @@ menu_zabbix() {
     read -r -p "Save it anyway? [y/N] " a
     case "$a" in y|Y) ;; *) echo "  Nothing saved."; return 0 ;; esac
   fi
-  SMSET_ZABBIX_URL="$url" SMSET_ZABBIX_TOKEN="$tok" python3 "$CLIPY" _setenv
+  local cur_ro; cur_ro=$(env_get SPIDERMAP_ZABBIX_READONLY); [ "$cur_ro" = 1 ] || cur_ro=0
+  echo
+  if [ "$cur_ro" = 1 ]; then echo "  Mode now: read only (nothing is created in Zabbix)"
+  else echo "  Mode now: events also go to Zabbix ('autotopo.*' items and triggers, the SpiderMap dashboard)"; fi
+  ask_zabbix_mode
+  if [ "$cur_ro" = 0 ] && [ "$ZRO" = 1 ]; then
+    echo "  From read-only on, SpiderMap no longer updates its items in Zabbix: their last values and problems"
+    echo "  would stay there. This is what it created:"
+    SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix --dry-run 2>/dev/null || echo "  (Zabbix not reachable now)"
+    read -r -p "Remove them from Zabbix now, while the token may? [y/N] " a
+    case "$a" in
+      y|Y) SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix \
+             || echo "  Some could not be removed - remove them in Zabbix (tag source: autotopo, dashboard SpiderMap)." ;;
+      *)   echo "  Left in Zabbix. Later: SPIDERMAP_ZABBIX_READONLY=0 python3 $DIR/spidermap.py --uninstall-zabbix" ;;
+    esac
+  fi
+  SMSET_ZABBIX_URL="$url" SMSET_ZABBIX_TOKEN="$tok" SMSET_SPIDERMAP_ZABBIX_READONLY="$ZRO" python3 "$CLIPY" _setenv
+  if [ "$cur_ro" = 1 ] && [ "$ZRO" = 0 ]; then
+    echo "  Creating the Zabbix items, triggers and dashboard..."
+    SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --setup || echo "  Setup failed - see above (token rights?)"
+  fi
   restart_service
 }
 
@@ -430,12 +478,8 @@ menu_permissions() {
   python3 "$CLIPY" fix-permissions
 }
 
-menu_update() {
-  if [ -d "$DIR/.git" ]; then
-    say "git pull"
-    git -C "$DIR" pull --ff-only || { printf '\033[31m%s\033[0m\n' "git pull failed (local changes? git -C $DIR status)"; return 0; }
-  fi
-  exec bash "$DIR/install.sh" --update        # the new install.sh, if git pull brought one
+menu_update() {   # a newer version on GitHub? It asks first, backs up, and rolls back by itself if it fails
+  python3 "$CLIPY" update || true
 }
 
 menu() {
@@ -450,7 +494,7 @@ menu() {
   Nothing touches the web unnoticed.
 
    1) Install             first install, or run the setup again (repair)
-   2) Update              git pull, then refresh the page and restart the service
+   2) Update              a newer version on GitHub? asks first, then downloads and installs it
    3) Check everything    every problem, with its fix (spidermap doctor)
    4) Zabbix connection   API address and token
    5) Proxmox             optional: names of your VMs and containers

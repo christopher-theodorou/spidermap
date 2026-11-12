@@ -47,10 +47,13 @@ The version lives in **two** places, keep them equal:
    for security releases), paste the CHANGELOG section, put the upgrade command in a code block:
    ````
    ```bash
-   cd /opt/spidermap && git pull && bash install.sh --update
+   sudo spidermap update
    ```
    ````
-4. Tick **Set as the latest release** and publish.
+4. Tick **Set as the latest release** and publish. **This step matters:** `spidermap update` installs only the
+   release marked *latest* (it follows github.com/…/releases/latest). Code pushed to `main` without a release is
+   found only with `spidermap update --main`. The tag must be `vX.Y.Z` and match `__version__`, or the update refuses
+   the download.
 
 ## After the release: test on a real server
 

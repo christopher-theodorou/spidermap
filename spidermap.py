@@ -32,7 +32,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.15"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.16"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -307,6 +307,8 @@ def fix_ownership():
 
 
 def webdir():
+    if os.environ.get("SPIDERMAP_DEPLOYMENT") == "standalone":
+        return "/var/www/html"                   # its own web server - never a Zabbix frontend folder
     return next((d for d in zp.WEB_DIRS if os.path.isfile(os.path.join(d, "api_jsonrpc.php"))), None)
 
 
@@ -1581,7 +1583,8 @@ def full_scan(api, community=None, quiet=False):
         pv = ""
     data = {"generated": t, "generated_text": iso(t), "page_version": pv, "conflicts": conflicts,
             "public_ip_history": state.get("public_ip_history", []), "scan_seconds": now() - t0, "nodes": list(nodes.values()),
-            "switches": switches_out, "zabbix_url": "zabbix.php",
+            "switches": switches_out, "zabbix_url": os.environ.get("SPIDERMAP_ZABBIX_FRONTEND", "zabbix.php"),
+            "zabbix_readonly": at.readonly_mode(),
             "partial": report["partial"], "scan_warnings": report["warnings"],
             "extra_links": [{"a": "s-" + a, "b": "s-" + b, "kind": "redundant",
                              "label": f"{sw_name[a]} {plabel(a, pa)} ↔ {sw_name[b]} {plabel(b, pb) if pb else ''}".strip()
@@ -1994,7 +1997,7 @@ def live_refresh(api):
     add_events(events)
     try:
         zh = next((h for h in at.load_hosts(api) if h["_role"] == "zabbix"), None)
-        if zh:
+        if zh and not at.readonly_mode():
             ids = ensure_event_items(api, zh)
             api.call("history.push", [{"itemid": ids["autotopo.warnings"], "value": "; ".join(warn)[:480] or "none"}])
     except Exception:  # noqa: BLE001
@@ -2163,7 +2166,7 @@ def run_speedtest(api, zh, state):
         hist = load_json(SPEED_FILE, [])
         hist.append(res)
         save_json(SPEED_FILE, hist[-50:])
-        if api and zh:
+        if api and zh and not at.readonly_mode():     # read-only: the history stays in SpiderMap
             ids = {}
             for key, name, units in SPEED_ITEMS:
                 it = api.call("item.get", {"hostids": zh["hostid"], "output": ["itemid"], "filter": {"key_": key}})
@@ -3146,6 +3149,8 @@ def zabbix_host(hosts):
 
 
 def ensure_event_items(api, zh):
+    if at.readonly_mode():
+        return {}
     ids = {}
     for key, name, prio, desc in EVENT_ITEMS:
         it = api.call("item.get", {"hostids": zh["hostid"], "output": ["itemid"], "filter": {"key_": key}})
@@ -3163,6 +3168,8 @@ def ensure_event_items(api, zh):
 
 
 def push_events(api, hosts, events, down):
+    if at.readonly_mode():
+        return                                   # read-only: the events are in SpiderMap's Activity only
     zh = zabbix_host(hosts)
     if not zh:
         return
@@ -3285,6 +3292,9 @@ def install_data_page():
     if os.path.isfile(src):
         with open(src, encoding="utf-8") as f:
             text = f.read()
+        if os.environ.get("SPIDERMAP_DEPLOYMENT") == "standalone":
+            from spidermap_standalone import standalone_page
+            text = standalone_page(text)
         try:
             with open(os.path.join(DATA_DIR, PAGE), encoding="utf-8") as f:
                 if f.read() == text:
@@ -3304,7 +3314,11 @@ def install_page(webd):
         if os.path.isfile(os.path.join(HERE, "assets", f)):
             shutil.copyfile(os.path.join(HERE, "assets", f), os.path.join(adir, f))
             os.chmod(os.path.join(adir, f), 0o644)
-    code = gateway_code(load_json(DEVICES_FILE, {}).get("settings", {}), at.ZABBIX_URL)
+    if os.environ.get("SPIDERMAP_DEPLOYMENT") == "standalone":
+        from spidermap_standalone import standalone_gateway
+        code = standalone_gateway()
+    else:
+        code = gateway_code(load_json(DEVICES_FILE, {}).get("settings", {}), at.ZABBIX_URL)
     write_if_changed(os.path.join(webd, GATEWAY), code)
     # old entry points become redirects, so bookmarks and dashboard widgets keep working
     write_if_changed(os.path.join(webd, PAGE), redirect_stub(GATEWAY))
@@ -3339,7 +3353,8 @@ def install_page(webd):
 
 def migrate_old_install(api, webd):
     """Clean up after zabbix-netmap (the old name) so nothing is left behind."""
-    for d in api.call("dashboard.get", {"output": ["dashboardid"], "filter": {"name": OLD_DASHBOARDS}}):
+    for d in ([] if at.readonly_mode() else
+              api.call("dashboard.get", {"output": ["dashboardid"], "filter": {"name": OLD_DASHBOARDS}})):
         api.call("dashboard.delete", [d["dashboardid"]])
         print("  removed old dashboard (replaced by 'SpiderMap')")
     old_page = os.path.join(webd, "netmap.html")
@@ -3360,14 +3375,10 @@ def migrate_old_install(api, webd):
         shutil.copyfile(old_speed, SPEED_FILE)
 
 
-def setup(api):
-    webd = webdir()
-    if not webd:
-        raise SystemExit("Zabbix web folder not found.")
-    if not os.path.isfile(DEVICES_FILE):
-        save_json(DEVICES_FILE, DEFAULT_DEVICES)
-        print(f"Created {DEVICES_FILE} (your names, icons, pins)")
+def install_icons(webd):
+    """Device icons and app logos, downloaded once and served locally (the page falls back to the internet copy)."""
     a = os.path.join(webd, ASSETS)
+    os.makedirs(a, exist_ok=True)
     print("Downloading icons (once, stored locally)...")
     ok = download(TABLER + "tabler-icons.min.css", os.path.join(a, "tabler-icons.min.css"))
     for ext in ("woff2", "woff", "ttf"):
@@ -3381,16 +3392,34 @@ def setup(api):
         for f in files:
             os.chmod(os.path.join(root, f), 0o644)
     os.chmod(a, 0o755)
+
+
+def setup(api):
+    if os.environ.get("SPIDERMAP_DEPLOYMENT") == "standalone":
+        from spidermap_standalone import prepare   # its own web server and users; no Zabbix API call at all
+        prepare()
+        return
+    webd = webdir()
+    if not webd:
+        raise SystemExit("Zabbix web folder not found.")
+    if not os.path.isfile(DEVICES_FILE):
+        save_json(DEVICES_FILE, DEFAULT_DEVICES)
+        print(f"Created {DEVICES_FILE} (your names, icons, pins)")
+    install_icons(webd)
     install_page(webd)
-    hosts = at.load_hosts(api)
-    zh = zabbix_host(hosts)
-    if zh:
-        ensure_event_items(api, zh)
     migrate_old_install(api, webd)
-    if not api.call("dashboard.get", {"output": ["dashboardid"], "filter": {"name": DASHBOARD_NAME}}):
-        d = at.Dash(api, DASHBOARD_NAME, ["Topology"])
-        d.add("Topology", "url", "Network", 0, 0, 72, 20, [{"url": (1, GATEWAY)}])
-        print(f"Dashboard created: {DASHBOARD_NAME}")
+    if at.readonly_mode():
+        api.version()                            # the API answers (read-only: reads only)
+        print("Zabbix read-only: nothing is created in Zabbix - no items, triggers or dashboard. Events stay in\n"
+              "SpiderMap's Activity; Zabbix hosts, traffic and problems are read as before.")
+    else:
+        zh = zabbix_host(at.load_hosts(api))
+        if zh:
+            ensure_event_items(api, zh)
+        if not api.call("dashboard.get", {"output": ["dashboardid"], "filter": {"name": DASHBOARD_NAME}}):
+            d = at.Dash(api, DASHBOARD_NAME, ["Topology"])
+            d.add("Topology", "url", "Network", 0, 0, 72, 20, [{"url": (1, GATEWAY)}])
+            print(f"Dashboard created: {DASHBOARD_NAME}")
     if not os.path.isfile(OOKLA) and not shutil.which("speedtest-cli"):
         print("For speed tests: bash install.sh --update (installs a speed test program)")
     fix_ownership()
@@ -3547,6 +3576,9 @@ def main():
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--community", help="SNMP v1/v2c community override")
     args = ap.parse_args()
+    if os.environ.get("SPIDERMAP_DEPLOYMENT") == "standalone" and (args.uninstall_zabbix or args.uninstall_web
+                                                                     or args.install_web or args.install_service):
+        raise SystemExit("Standalone deployment: install and update with docker compose (see docs/STANDALONE.md).")
     if args.uninstall_web:                  # needs no token: it only removes files
         webd = webdir()
         if webd:
@@ -3555,7 +3587,12 @@ def main():
     if not at.ZABBIX_TOKEN:
         raise SystemExit(f"No Zabbix API token: check {os.path.join(CONF_DIR, 'zabbix.env')}")
     if args.uninstall_zabbix:
-        problems = uninstall_zabbix(at.Zabbix(at.ZABBIX_URL, at.ZABBIX_TOKEN, at.VERIFY_TLS), args.dry_run)
+        ro = at.readonly_mode()
+        problems = uninstall_zabbix(at.Zabbix(at.ZABBIX_URL, at.ZABBIX_TOKEN, at.VERIFY_TLS), args.dry_run or ro)
+        if ro and not args.dry_run:
+            print("  Zabbix read-only mode: SpiderMap deletes nothing in Zabbix, so these are left in place.\n"
+                  "  To remove them once, on purpose, with a token that may delete them (see docs/COMMANDS.md):\n"
+                  "    SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix")
         for p_ in problems:
             print("  !", p_)
         raise SystemExit(1 if problems else 0)

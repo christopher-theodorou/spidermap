@@ -13,7 +13,7 @@ are not). Tab completion works after the next login.
 | [`spidermap check-ports`](#check-ports) | How SpiderMap sees every switch port | no |
 | [`spidermap cert [host[:port]]`](#cert) | An https certificate: names, expiry, SHA-256 fingerprint | no |
 | [`spidermap fix-permissions`](#fix-permissions) | Puts file owners and modes right, restarts the service | yes |
-| [`spidermap update`](#update) | `git pull`, then `bash install.sh --update` | yes |
+| [`spidermap update`](#update) | a newer version on GitHub? Asks, then downloads, backs up and installs it | yes (not `--check`) |
 | [`spidermap uninstall`](#uninstall) | `bash install.sh --uninstall` (with a plan, a confirmation and a backup) | yes |
 | [`spidermap menu`](#the-installer-menu) | The installer menu | - |
 | `spidermap version` / `help` | | no |
@@ -188,11 +188,65 @@ or restoring a backup. The menu's *Fix permissions* also checks again which user
 ## update
 
 ```bash
-spidermap update
+sudo spidermap update            # a newer version? asks first
+sudo spidermap update --check    # only says whether there is one (no sudo needed, changes nothing)
+sudo spidermap update --yes      # no question - for scripts and automation
+sudo spidermap update --main     # the latest code on main, before it is a release (for testing)
+sudo spidermap update --reinstall    # re-run the installer on the files already here (nothing downloaded)
 ```
 
-`git pull` in `/opt/spidermap`, then `bash install.sh --update`. Stops if `git pull` cannot fast-forward (files
-changed by hand: `git -C /opt/spidermap status` shows them).
+```
+Installed: 0.9.16
+Available: 0.9.17   (release v0.9.17)
+Upgrade to 0.9.17? [y/N]:
+```
+
+Enter or `n` cancels and nothing changes. With `y`:
+
+1. it downloads the release's zip from GitHub (https only) into a temporary folder;
+2. checks it: one SpiderMap folder, no unsafe paths or links, every required file, the version it promised, every
+   `.py` compiles, `install.sh` parses, and **no settings** inside (`zabbix.env`, `devices.json`, `secrets.json`);
+3. backs up the code and your settings and history to `/var/backups/spidermap/` (the last five are kept);
+4. stops the service, copies the new files over the old ones (your `zabbix.env` and `devices.json` links stay),
+   runs `bash install.sh --update`;
+5. **if anything fails, it puts the previous version back** by itself and starts the service again;
+6. says *Updated A -> B* and shows what's new from the CHANGELOG.
+
+The default is the latest **GitHub Release** - only what was published as a release. Without a terminal and without
+`--yes` it asks nothing and changes nothing. A `git clone` installation keeps using git: it compares with the
+upstream branch, asks the same way, then `git pull --ff-only`. In the standalone deployment, update the container
+image instead ([STANDALONE.md](STANDALONE.md)).
+
+**From 0.9.15 or older,** the update command does not download yet: update once by hand (`git pull`, or unpack the
+new zip over the folder) and run `bash install.sh --update`. From 0.9.16 on, `spidermap update` is enough.
+
+## Zabbix read-only mode
+
+With `export SPIDERMAP_ZABBIX_READONLY="1"` in `/etc/spidermap/zabbix.env` (the installer asks; or *menu > 4)
+Zabbix connection*) SpiderMap **reads** Zabbix - hosts, interfaces, traffic, problems, the gateway's WAN items -
+and **creates, changes and deletes nothing** there: no `autotopo.*` items or triggers, no dashboard, no
+`history.push`, no `zabbix_sender`. New devices, moves, cable problems and speed tests are in SpiderMap's
+Activity and history. The API client refuses every method that is not on its read list *before* anything leaves
+the server, so a read-only token is enough - and is the second lock.
+
+A read-only token: a user role with *API methods* on **Allow list** `host.get`, `item.get`, `trigger.get`,
+`usermacro.get`, `image.get`, `problem.get`, `history.get` (`settings.get`, `dashboard.get` only for
+`spidermap doctor`), **Read** on the host groups of your network, frontend access disabled.
+
+Switching an existing install to read-only: SpiderMap stops updating the items it made earlier, so their last values
+and open problems would stay in Zabbix. The menu lists them and offers to remove them once; later:
+
+```bash
+SPIDERMAP_ZABBIX_READONLY=0 python3 /opt/spidermap/spidermap.py --uninstall-zabbix --dry-run   # what is there
+SPIDERMAP_ZABBIX_READONLY=0 python3 /opt/spidermap/spidermap.py --uninstall-zabbix             # remove it
+```
+
+(With a read-only token this fails - the token is then the lock; remove them in Zabbix by hand: tag
+`source: autotopo`, and the dashboard *SpiderMap*.) `spidermap doctor` warns while any are left.
+
+The map page itself still lives in the Zabbix web folder (`spidermap.php`) so that the Zabbix login protects it:
+that is a file, not a Zabbix object. Want a dashboard widget anyway: add a *URL* widget with `spidermap.php`
+yourself. To keep SpiderMap entirely outside Zabbix, use the [standalone deployment](STANDALONE.md).
 
 ## uninstall
 
@@ -239,7 +293,7 @@ The command-line options stay for scripts and automation:
 | Option | Does |
 |---|---|
 | `bash install.sh --install` | First install without the menu |
-| `bash install.sh --update` | After `git pull`: refresh the page, restart the service |
+| `bash install.sh --update` | Refresh the page, restart the service, on the files already there (`spidermap update` downloads first) |
 | `bash install.sh --uninstall [--keep-data] [--keep-zabbix] [--yes]` | Uninstall |
 | `bash install.sh --menu` | The menu, also without a terminal |
 

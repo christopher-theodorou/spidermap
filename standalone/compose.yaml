@@ -1,0 +1,48 @@
+# SpiderMap standalone (preview): its own web server and users, Zabbix read-only.
+# Run from this folder: docker compose up -d   - full steps in docs/STANDALONE.md
+x-app: &app
+  image: spidermap-standalone:local
+  build:
+    context: ..
+    dockerfile: standalone/Dockerfile
+  environment:
+    SPIDERMAP_DEPLOYMENT: standalone
+    SPIDERMAP_ZABBIX_READONLY: "1"
+    SPIDERMAP_ZABBIX_FRONTEND: ${SPIDERMAP_ZABBIX_FRONTEND:?Set the absolute Zabbix frontend zabbix.php URL in .env}
+    SPIDERMAP_PUBLIC_ORIGIN: ${SPIDERMAP_PUBLIC_ORIGIN:-http://localhost:8186}
+  volumes:
+    - config:/etc/spidermap
+    - runtime:/var/lib/spidermap
+    - frontend:/var/www/html
+    - ./auth:/run/spidermap-auth:ro
+services:
+  init:
+    <<: *app
+    command: init
+    restart: "no"
+  collector:
+    <<: *app
+    command: collector
+    network_mode: host            # ping / ARP on the local network (Linux)
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+  web:
+    <<: *app
+    command: web
+    # The web server gets no Zabbix token and cannot read the collector's configuration.
+    volumes:
+      - runtime:/var/lib/spidermap
+      - frontend:/var/www/html:ro
+      - ./auth:/run/spidermap-auth:ro
+    ports:
+      - "127.0.0.1:8186:80"      # behind your https reverse proxy only
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+volumes:
+  config:
+  runtime:
+  frontend:

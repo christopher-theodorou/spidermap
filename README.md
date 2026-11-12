@@ -92,13 +92,16 @@ bash install.sh
 changes the Zabbix or Proxmox connection, fixes permissions, shows the logs and the certificate, and uninstalls
 (see [docs/COMMANDS.md](docs/COMMANDS.md#the-installer-menu)). For scripts: `bash install.sh --install`.
 
-The installer sets up the packages it needs, asks for your Zabbix API address and token, creates the system user
+The installer sets up the packages it needs, asks for your Zabbix API address and token and **how SpiderMap may use
+Zabbix** - *read only* (recommended: it creates nothing in Zabbix, see
+[read-only mode](docs/COMMANDS.md#zabbix-read-only-mode)) or *also send its events to Zabbix* (items, triggers and
+the SpiderMap dashboard, for Zabbix actions) - creates the system user
 `spidermap` and starts the **`spidermap` service**, which runs the scans (no cron jobs) and the first scan right away.
 Configuration goes to `/etc/spidermap`, data to `/var/lib/spidermap`; `zabbix.env` and `devices.json` in
 `/opt/spidermap` are links there. Upgrading from the earlier
 *zabbix-netmap* version? The installer finds it and moves your devices, settings and history over.
 
-**One manual step in Zabbix**, for the dashboard widget:
+**One manual step in Zabbix**, only for the dashboard widget (not created in read-only mode):
 *Administration → General → Other → Security → Iframe sandboxing exceptions*
 
 ```
@@ -225,11 +228,19 @@ Alternatives: `PVE_CA=/path/to/pve-root-ca.pem`, or `PVE_VERIFY=1` for a certifi
 ## Update
 
 ```bash
-spidermap update
+sudo spidermap update          # Installed 0.9.16 / Available 0.9.17 / Upgrade to 0.9.17? [y/N]
+sudo spidermap update --check  # only check
 ```
 
-The same as `cd /opt/spidermap && git pull && bash install.sh --update` (use that the first time you update from a
-version before 0.9.8). Open pages reload themselves with the new version.
+It takes the latest GitHub release, checks it, backs up, installs, and rolls back by itself if anything fails
+([details](docs/COMMANDS.md#update)). From 0.9.15 or older, update once by hand: `git pull` (or unpack the new zip
+over the folder), then `bash install.sh --update`. Open pages reload themselves with the new version.
+
+### Standalone (preview)
+
+SpiderMap can also run **outside Zabbix entirely**: its own web server and users (viewer / editor / admin), in
+Docker, reading Zabbix through a read-only API token and installing nothing on the Zabbix server. See
+[docs/STANDALONE.md](docs/STANDALONE.md).
 
 ## Network load
 
@@ -266,7 +277,9 @@ through the public Zabbix API before it shows anything, so it keeps working acro
 
 ### A dedicated Zabbix account for SpiderMap
 
-The installer can use any API token, but a separate account limits what SpiderMap could ever do in Zabbix:
+The installer can use any API token, but a separate account limits what SpiderMap could ever do in Zabbix. In
+**read-only mode** a read-only account is all it needs (see
+[read-only mode](docs/COMMANDS.md#zabbix-read-only-mode)); for *events into Zabbix*:
 
 1. **User role** *SpiderMap* (*Users → User roles*): user type **Admin**, *API access* on, and *API methods* set to
    **Allow list**: `host.get`, `item.get`, `item.create`, `trigger.get`, `trigger.create`, `history.push`,
@@ -361,10 +374,13 @@ user `spidermap`, and in Zabbix the *SpiderMap* dashboard and the items whose ke
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How SpiderMap works: jobs, files, data flow, Zabbix integration, extending it |
 | [docs/COMMANDS.md](docs/COMMANDS.md) | The `spidermap` command and the installer menu, with examples |
 | [docs/RELEASING.md](docs/RELEASING.md) | Checklist for publishing a new version |
+| [docs/STANDALONE.md](docs/STANDALONE.md) | SpiderMap outside Zabbix: Docker, its own users, Zabbix read-only (preview) |
 | [tests/test_gateway.py](tests/test_gateway.py) | Security tests for `spidermap.php` (`python3 tests/test_gateway.py`, needs `php-cli`) |
 | [tests/test_core.py](tests/test_core.py) | Tests for scheduling, edits and job locking (`python3 tests/test_core.py`) |
 | [tests/test_ports.py](tests/test_ports.py) | Tests for port names and traffic counters with real switch tables (`python3 tests/test_ports.py`) |
 | [tests/test_cli.py](tests/test_cli.py) | Tests for the `spidermap` command, certificates and the menu helpers (`python3 tests/test_cli.py`) |
+| [tests/test_readonly.py](tests/test_readonly.py) | Zabbix read-only mode and the standalone web server's users and roles (`python3 tests/test_readonly.py`) |
+| [tests/test_update.py](tests/test_update.py) | `spidermap update`: checks, question, backup, rollback (`python3 tests/test_update.py`) |
 
 ## License
 
