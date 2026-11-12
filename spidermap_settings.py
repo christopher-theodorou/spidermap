@@ -103,24 +103,25 @@ SETTINGS_SCHEMA = [
             "The button in the map controls switches for you; 'Reset layout' starts again from the tree."),
     # ---- Device types (the tab shows a card with a switch per category)
     _S("device_types_off", "list", [], "Device types", "Device types", "Categories switched off"),
-    # ---- Wireless & WAN: UniFi controller (read-only user; independent of Zabbix)
-    _S("unifi_url", "str", "", "Wireless & WAN", "UniFi controller", "Controller address", maxlen=120,
-       help="e.g. https://192.168.1.5 (UniFi OS: Cloud Key Gen2, UDM) or https://192.168.1.5:8443 (older controllers). "
-            "Empty: no UniFi."),
-    _S("unifi_site", "str", "default", "Wireless & WAN", "UniFi controller", "Site", maxlen=40),
-    _S("unifi_user", "str", "", "Wireless & WAN", "UniFi controller", "User", maxlen=60,
-       help="A local user with the role View only."),
-    _S("controllers", "controllers", [], "Wireless & WAN", "Controllers", "Controller connections",
+    # ---- Controllers & wireless: network controllers, signal thresholds, the older UniFi connection
+    _S("controllers", "controllers", [], "Controllers & wireless", "Controllers", "Controller connections",
        help="TP-Link Omada, UniFi (Site Manager or a local console) and Grandstream GWN - read only. Add a connection, "
             "save, then tick the sites to import. Several connections, of different vendors, work together on one map."),
-    _S("signal_warn", "int", 70, "Wireless & WAN", "Signal", "Signal warning below", unit="-dBm", range=[40, 110],
+    _S("signal_warn", "int", 70, "Controllers & wireless", "Signal", "Signal warning below", unit="-dBm", range=[40, 110],
        help="Wi-Fi clients, wireless links between buildings and 4G / 5G: a signal weaker than this is shown in orange."),
-    _S("signal_crit", "int", 80, "Wireless & WAN", "Signal", "Signal critical below", unit="-dBm", range=[40, 120],
+    _S("signal_crit", "int", 80, "Controllers & wireless", "Signal", "Signal critical below", unit="-dBm", range=[40, 120],
        help="Weaker than this: red, and an event in Activity for a wireless link between buildings or a 4G / 5G WAN."),
-    _S("unifi_password", "secret", "", "Wireless & WAN", "UniFi controller", "Password",
+    _S("unifi_url", "str", "", "Controllers & wireless", "UniFi controller (username and password)", "Controller address", maxlen=120,
+       help="The older UniFi connection, with a user and password. A UniFi connection with an API key under Controllers "
+            "above is the better choice (read only, no password). e.g. https://192.168.1.5 (UniFi OS: Cloud Key Gen2, UDM) "
+            "or https://192.168.1.5:8443 (older controllers). Empty: not used."),
+    _S("unifi_site", "str", "default", "Controllers & wireless", "UniFi controller (username and password)", "Site", maxlen=40),
+    _S("unifi_user", "str", "", "Controllers & wireless", "UniFi controller (username and password)", "User", maxlen=60,
+       help="A local user with the role View only."),
+    _S("unifi_password", "secret", "", "Controllers & wireless", "UniFi controller (username and password)", "Password",
        help="Stored only on the server (/etc/spidermap/secrets.json); never shown again or exported."),
-    _S("unifi_fingerprint", "str", "", "Wireless & WAN", "UniFi controller", "Certificate fingerprint", maxlen=100,
-       help="SHA-256 of the controller's certificate (works with its own self-signed one). Empty: not checked."),
+    _S("unifi_fingerprint", "str", "", "Controllers & wireless", "UniFi controller (username and password)", "Certificate fingerprint", maxlen=100,
+       help="SHA-256 fingerprint of the controller's certificate, e.g. FF:0E:91:83:... Controllers on your own network usually have a self-signed certificate; with its fingerprint SpiderMap accepts that certificate and only that one, so a device pretending to be the controller is refused. Find it in the browser (padlock > Certificate > SHA-256) or with: openssl s_client -connect ADDRESS:443 </dev/null | openssl x509 -noout -fingerprint -sha256. Optional; empty: the certificate is not checked."),
     # ---- Measurements
     _S("wan_source", "choice", "router", "Measurements", "Traffic", "Throughput source",
        choices=[["router", "The router's WAN (SNMP, else UPnP)"], ["switch", "Switch port to the gateway"]],

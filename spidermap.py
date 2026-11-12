@@ -1306,7 +1306,7 @@ def full_scan(api, community=None, quiet=False):
         for c in ctl_conns:
             label = c.get("name") or CTL_KINDS[c["kind"]].split(" (")[0]
             if not c.get("sites"):
-                ctl_health.append({"name": label, "kind": CTL_KINDS[c["kind"]], "ok": False, "error": "no site chosen yet (Settings > Wireless & WAN)"})
+                ctl_health.append({"name": label, "kind": CTL_KINDS[c["kind"]], "ok": False, "error": "no site chosen yet (Settings > Controllers & wireless)"})
                 continue
             r = ctl_fetch(c, sec_.get("ctl:" + c["id"], ""), _PinnedAdapter)
             ctl_health.append({"name": label, "kind": CTL_KINDS[c["kind"]], "ok": r["ok"], "error": r["error"], "devices": len(r["devices"]),

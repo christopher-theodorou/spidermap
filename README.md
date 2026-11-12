@@ -154,7 +154,7 @@ Zabbix Super admins (by default) find a **Settings** button (the gear) on the ma
 | Security | Off-peak scan window, packet limit, address limit, who may open, edit, test and change settings |
 | Logging | Log level and retention, recent events |
 | Device types | 11 categories (firewalls, ONT/modems, UPS/PDU, cameras/NVR, IP phones/PBX, printers, NAS, hypervisors, industrial/IoT, powerline/media converters, out-of-band management), how each is recognised, on/off |
-| Wireless & WAN | UniFi controller (read-only user): access points and their wireless clients |
+| Controllers & wireless | Omada, UniFi and GWN connections (read only, several at once), signal thresholds, the older UniFi connection |
 
 Every change is checked in the browser and on the server, recorded in the audit log, and the previous version is
 kept, so a mistake is one click away from being undone.

@@ -7,7 +7,7 @@ and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap 
 ## [0.9.15] - 2026-11-12
 
 ### Added
-- **Network controllers: TP-Link Omada, UniFi and Grandstream GWN** (Settings > Wireless & WAN > Controllers) - read
+- **Network controllers: TP-Link Omada, UniFi and Grandstream GWN** (Settings > Controllers & wireless) - read
   only, several at once, of different vendors, on one map. Omada through its Open API (Client mode, role Viewer;
   hardware, software or cloud controller); UniFi through the Site Manager API (api.ui.com, an API key - also consoles
   far away) or a local UniFi OS console with an API key; GWN Cloud / GWN Manager through its API (experimental). Add
@@ -27,8 +27,15 @@ and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap 
   by name, model or their own SNMP - and two radios on one switch port become the two ends of a link: the far
   building behind the far radio, the link drawn as wireless. A radio or access point in Zabbix shows its signal;
   a radio below the critical signal is in Activity.
-- **Signal thresholds** (Settings > Wireless & WAN): warning and critical, for Wi-Fi clients, radios and 4G / 5G.
+- **Signal thresholds** (Settings > Controllers & wireless): warning and critical, for Wi-Fi clients, radios and 4G / 5G.
 - The Planned list holds only what is still planned.
+
+### Changed
+- The Settings tab *Wireless & WAN* is now **Controllers & wireless** - the WAN settings were never in it (they are
+  in Measurements). Its groups are in order: Controllers, Signal, and the older UniFi connection, now
+  named *UniFi controller (username and password)*, with a note that a UniFi connection
+  with an API key under Controllers is the better choice.
+- The certificate fingerprint is explained where it is asked for: what it is, why it matters, and how to find it.
 
 ### Fixed
 - GitHub's automatic tests now also run the command tests and the controller tests.
