@@ -193,7 +193,7 @@ do_uninstall() {
   echo "  service: spidermap (and the older spidermap-rt, cron lines, /var/log/spidermap.log if still there)"
   python3 spidermap.py --uninstall-web --dry-run || true
   if [ $KEEP_ZBX = 1 ]; then echo "  Zabbix: kept (--keep-zabbix)"
-  else python3 spidermap.py --uninstall-zabbix --dry-run 2>/dev/null || echo "  Zabbix: cannot be reached now - remove the SpiderMap dashboard and the 'autotopo.' items by hand"; fi
+  else python3 spidermap.py --uninstall-zabbix --with-dashboards --dry-run 2>/dev/null || echo "  Zabbix: cannot be reached now - remove the SpiderMap dashboard and the 'autotopo.' items by hand"; fi
   if [ $KEEP_DATA = 1 ]; then echo "  kept (--keep-data): $CONF, $LIB, the user $SVC_USER"
   else echo "  $CONF (settings, API token), $LIB (history, logs, backups), the user $SVC_USER"; fi
   [ -x /usr/local/bin/ookla-speedtest ] && echo "  /usr/local/bin/ookla-speedtest (installed by SpiderMap)"
@@ -208,7 +208,7 @@ do_uninstall() {
   ( umask 077; tar czf "$BACKUP" $(for p in "$CONF" "$LIB/state" "$LIB/audit.log" "$LIB/speedtest.json" "$LIB/backup"; do [ -e "$p" ] && echo "$p"; done) 2>/dev/null ) \
     && echo "  backup written: $BACKUP" || echo "  (nothing to back up)"
   if [ $KEEP_ZBX != 1 ]; then                       # first, while the API token still exists
-    python3 spidermap.py --uninstall-zabbix || printf '\033[33m%s\033[0m\n' "  some Zabbix objects could not be removed - see above"
+    SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix --with-dashboards || printf '\033[33m%s\033[0m\n' "  some Zabbix objects could not be removed - see above"
   fi
   for u in spidermap.service spidermap-rt.service; do
     systemctl disable --now "$u" >/dev/null 2>&1 || true
@@ -383,23 +383,39 @@ menu_zabbix() {
   if [ "$cur_ro" = 1 ]; then echo "  Mode now: read only (nothing is created in Zabbix)"
   else echo "  Mode now: events also go to Zabbix ('autotopo.*' items and triggers, the SpiderMap dashboard)"; fi
   ask_zabbix_mode
-  if [ "$cur_ro" = 0 ] && [ "$ZRO" = 1 ]; then
-    echo "  From read-only on, SpiderMap no longer updates its items in Zabbix: their last values and problems"
-    echo "  would stay there. This is what it created:"
-    SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix --dry-run 2>/dev/null || echo "  (Zabbix not reachable now)"
-    read -r -p "Remove them from Zabbix now, while the token may? [y/N] " a
-    case "$a" in
-      y|Y) SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix \
-             || echo "  Some could not be removed - remove them in Zabbix (tag source: autotopo, dashboard SpiderMap)." ;;
-      *)   echo "  Left in Zabbix. Later: SPIDERMAP_ZABBIX_READONLY=0 python3 $DIR/spidermap.py --uninstall-zabbix" ;;
-    esac
-  fi
+  # First the new mode is saved and the service restarted - only then is anything removed, so the service can
+  # never recreate items in between.
   SMSET_ZABBIX_URL="$url" SMSET_ZABBIX_TOKEN="$tok" SMSET_SPIDERMAP_ZABBIX_READONLY="$ZRO" python3 "$CLIPY" _setenv
   if [ "$cur_ro" = 1 ] && [ "$ZRO" = 0 ]; then
     echo "  Creating the Zabbix items, triggers and dashboard..."
     SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --setup || echo "  Setup failed - see above (token rights?)"
   fi
   restart_service
+  if [ "$cur_ro" = 0 ] && [ "$ZRO" = 1 ]; then
+    systemctl is-active --quiet spidermap && echo "  The service now runs read-only: it no longer writes to Zabbix."
+    echo
+    echo "  SpiderMap no longer updates what it created in Zabbix earlier: last values and open problems would stay."
+    echo "  Exactly these (only items with the tag source: autotopo; nothing else is touched):"
+    if SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix --dry-run 2>/dev/null; then
+      read -r -p "Remove these items and their triggers from Zabbix now? Their Zabbix history goes too. [y/N] " a
+      case "$a" in
+        y|Y) SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix \
+               || echo "  Some could not be removed - remove them in Zabbix (tag source: autotopo)." ;;
+        *)   echo "  Left in Zabbix. Later: SPIDERMAP_ZABBIX_READONLY=0 python3 $DIR/spidermap.py --uninstall-zabbix" ;;
+      esac
+      echo
+      SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix --with-dashboards --dry-run 2>/dev/null \
+        | grep "dashboards:" || true
+      read -r -p "Also remove the SpiderMap dashboard? Keep it if you use it to view the map. [y/N] " a
+      case "$a" in
+        y|Y) SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix --with-dashboards \
+               || echo "  Could not remove it - remove it in Zabbix (Dashboards)." ;;
+        *)   echo "  Dashboard kept." ;;
+      esac
+    else
+      echo "  (Zabbix not reachable now - later: SPIDERMAP_ZABBIX_READONLY=0 python3 $DIR/spidermap.py --uninstall-zabbix --dry-run)"
+    fi
+  fi
 }
 
 menu_proxmox() {

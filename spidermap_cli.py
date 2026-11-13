@@ -791,12 +791,13 @@ def doctor(args):
             W("ZABBIX_VERIFY_TLS=0: the API certificate is not checked", "use http://127.0.0.1 locally instead")
     if api is not None and at.readonly_mode():
         try:
-            left = api.call("item.get", {"output": ["itemid"], "search": {"key_": "autotopo."}, "startSearch": True,
-                                         "templated": False, "countOutput": True})
-            if str(left) not in ("0", ""):
+            left = len(m.spidermap_items(api)[0])
+            if left:
                 W(f"{left} earlier SpiderMap item(s) are still in Zabbix and no longer updated (their problems stay open)",
-                  "remove them once: SPIDERMAP_ZABBIX_READONLY=0 python3 " + os.path.join(HERE, "spidermap.py")
-                  + " --uninstall-zabbix   (or bash install.sh > 4) Zabbix connection)")
+                  "see them: SPIDERMAP_ZABBIX_READONLY=0 python3 " + os.path.join(HERE, "spidermap.py")
+                  + " --uninstall-zabbix --dry-run   (then without --dry-run to remove them)")
+            else:
+                ok("no earlier SpiderMap items left in Zabbix")
         except Exception:  # noqa: BLE001
             pass
     if api is not None and not at.readonly_mode():

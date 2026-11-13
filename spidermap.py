@@ -32,7 +32,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.16"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.17"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -3493,14 +3493,49 @@ ZBX_DASHBOARDS = (DASHBOARD_NAME, at.DASHBOARD_NAME)      # "SpiderMap", and the
 ZBX_MAPS = (at.MAP_NAME,)                                 # the classic tool's map
 
 
-def uninstall_zabbix(api, dry=False):
-    """Items with keys "autotopo.*" (their triggers go with them), SpiderMap's dashboards and map. Returns problems."""
-    items = api.call("item.get", {"output": ["itemid", "key_", "hostid"], "search": {"key_": "autotopo."},
-                                  "startSearch": True, "templated": False})
-    dash = api.call("dashboard.get", {"output": ["dashboardid", "name"], "filter": {"name": list(ZBX_DASHBOARDS)}})
+def spidermap_items(api):
+    """Items SpiderMap created: key autotopo.* AND the tag source: autotopo (it puts that tag on every item it
+    makes). Returns (ours, others): an item with that key but without the tag is not touched."""
+    items = api.call("item.get", {"output": ["itemid", "key_", "name", "hostid"], "search": {"key_": "autotopo."},
+                                  "startSearch": True, "templated": False, "selectTags": ["tag", "value"],
+                                  "selectHosts": ["name"], "selectTriggers": ["triggerid", "description"]})
+    ours, others = [], []
+    for i in items:
+        tagged = any(t.get("tag") == "source" and t.get("value") == "autotopo" for t in i.get("tags", []))
+        (ours if tagged and i.get("key_", "").startswith("autotopo.") else others).append(i)
+    return ours, others
+
+
+def spidermap_dashboards(api):
+    """SpiderMap's dashboards and map, by exact name. The "SpiderMap" dashboard only counts when it still shows
+    spidermap.php - a dashboard you built yourself under that name stays."""
+    dash = api.call("dashboard.get", {"output": ["dashboardid", "name"], "filter": {"name": list(ZBX_DASHBOARDS)},
+                                      "selectPages": "extend"})
+    ours = []
+    for d in dash:
+        fields = [f for p in d.get("pages", []) for w in p.get("widgets", []) for f in w.get("fields", [])]
+        if d["name"] != DASHBOARD_NAME or any("spidermap" in str(f.get("value", "")).lower() for f in fields):
+            ours.append(d)
     maps = api.call("map.get", {"output": ["sysmapid", "name"], "filter": {"name": list(ZBX_MAPS)}})
-    print(f"  Zabbix: {len(items)} items (and their triggers): {', '.join(sorted({i['key_'] for i in items})) or '-'}")
-    print(f"  Zabbix: dashboards: {', '.join(d['name'] for d in dash) or '-'}; maps: {', '.join(m['name'] for m in maps) or '-'}")
+    return ours, maps
+
+
+def uninstall_zabbix(api, dry=False, dashboards=True):
+    """SpiderMap's items (their triggers go with them) and - with dashboards=True - its dashboards and map.
+    Prints every object (host, key, ID, triggers) before anything is deleted. Returns problems."""
+    items, others = spidermap_items(api)
+    print(f"  Zabbix: {len(items)} SpiderMap item(s) (key autotopo.*, tag source: autotopo):")
+    for i in sorted(items, key=lambda i: (i.get("hosts", [{}])[0].get("name", ""), i["key_"])):
+        host = (i.get("hosts") or [{}])[0].get("name", i.get("hostid", "?"))
+        trig = "; ".join(f"trigger {t['triggerid']}: {t.get('description', '')}" for t in i.get("triggers", []))
+        print(f"    item {i['itemid']:>8}  {host}  {i['key_']}" + (f"   ({trig})" if trig else ""))
+    for i in others:
+        print(f"    left alone: item {i['itemid']} {i['key_']} - no tag source: autotopo, so not SpiderMap's")
+    dash, maps = spidermap_dashboards(api) if dashboards else ([], [])
+    if dashboards:
+        dl = ", ".join(f"{d['name']} (ID {d['dashboardid']})" for d in dash) or "-"
+        ml = ", ".join(f"{m['name']} (ID {m['sysmapid']})" for m in maps) or "-"
+        print(f"  Zabbix: dashboards: {dl}; maps: {ml}")
     if dry:
         return []
     problems = []
@@ -3509,6 +3544,7 @@ def uninstall_zabbix(api, dry=False):
         if ids:
             try:
                 api.call(method, ids)
+                print(f"  removed: {method.split('.')[0]} {', '.join(ids)}")
             except Exception as e:  # noqa: BLE001
                 problems.append(f"{method}: {e} - remove them in Zabbix by hand, or allow {method} for the API token")
     return problems
@@ -3570,6 +3606,8 @@ def main():
     ap.add_argument("--uninstall-zabbix", action="store_true", help="remove SpiderMap's items, triggers, dashboards and map from Zabbix")
     ap.add_argument("--uninstall-web", action="store_true", help="remove SpiderMap's files from the Zabbix web folder (root)")
     ap.add_argument("--dry-run", action="store_true", help="with --uninstall-*: only show what would be removed")
+    ap.add_argument("--with-dashboards", action="store_true",
+                    help="with --uninstall-zabbix: also SpiderMap's dashboards and map (otherwise only its items)")
     ap.add_argument("--version", action="version", version=f"SpiderMap {__version__}")
     ap.add_argument("--check-ports", action="store_true", help="show how SpiderMap sees every switch port (read-only)")
     ap.add_argument("--install-service", action="store_true", help="install/restart the real-time service")
@@ -3588,11 +3626,12 @@ def main():
         raise SystemExit(f"No Zabbix API token: check {os.path.join(CONF_DIR, 'zabbix.env')}")
     if args.uninstall_zabbix:
         ro = at.readonly_mode()
-        problems = uninstall_zabbix(at.Zabbix(at.ZABBIX_URL, at.ZABBIX_TOKEN, at.VERIFY_TLS), args.dry_run or ro)
+        problems = uninstall_zabbix(at.Zabbix(at.ZABBIX_URL, at.ZABBIX_TOKEN, at.VERIFY_TLS), args.dry_run or ro,
+                                    dashboards=args.with_dashboards)
         if ro and not args.dry_run:
             print("  Zabbix read-only mode: SpiderMap deletes nothing in Zabbix, so these are left in place.\n"
                   "  To remove them once, on purpose, with a token that may delete them (see docs/COMMANDS.md):\n"
-                  "    SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix")
+                  "    SPIDERMAP_ZABBIX_READONLY=0 python3 spidermap.py --uninstall-zabbix   (--with-dashboards: also them)")
         for p_ in problems:
             print("  !", p_)
         raise SystemExit(1 if problems else 0)

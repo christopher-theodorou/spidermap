@@ -40,7 +40,7 @@ Earlier `autotopo.*` objects from a Zabbix-hosted install are not removed automa
 | `editor` | also rename devices, change icons, start speed tests |
 | `admin` | also settings, scans, import, reset |
 
-Roles come from `standalone/auth/roles.json` on the server, never from anything the browser sends. A user without a
+Roles come from `/etc/spidermap-standalone/auth/roles.json` on the server, never from anything the browser sends. A user without a
 known role gets *403*. To revoke access, remove the user from `users.htpasswd`. Basic authentication has no reliable
 log-out button: close the browser.
 
@@ -53,20 +53,30 @@ read-only SNMP account on your switches. *Secret* macros are never returned by t
 
 ## Install, on a separate Linux host
 
+Your settings and users live **outside** the SpiderMap folder, in `/etc/spidermap-standalone` (another place:
+`export SPIDERMAP_SETTINGS_DIR=/path` before every `docker compose` command). So they never reach git, and the
+image only ever contains the program files, copied one by one by name.
+
 1. Install Docker Engine and the Compose plugin. Copy the SpiderMap folder to the host and `cd standalone`.
-2. `cp .env.example .env` and set:
+2. Settings:
+   ```bash
+   sudo install -d -m 750 /etc/spidermap-standalone /etc/spidermap-standalone/auth
+   sudo cp env.example /etc/spidermap-standalone/spidermap.env
+   sudo nano /etc/spidermap-standalone/spidermap.env
+   ```
    - `SPIDERMAP_PUBLIC_ORIGIN` - exactly how browsers reach SpiderMap (scheme, host, port), e.g.
      `https://spidermap.example.net`. Changes are refused from any other origin.
    - `SPIDERMAP_ZABBIX_FRONTEND` - the absolute address of your Zabbix `zabbix.php`, for the *open in Zabbix* links.
 3. `docker compose build`
 4. Your users (bcrypt):
    ```bash
-   docker run --rm -it --entrypoint htpasswd -v "$PWD/auth:/auth" spidermap-standalone:local -cB /auth/users.htpasswd nikos
-   docker run --rm -it --entrypoint htpasswd -v "$PWD/auth:/auth" spidermap-standalone:local -B /auth/users.htpasswd eva
+   A=/etc/spidermap-standalone/auth
+   sudo docker run --rm -it --entrypoint htpasswd -v "$A:/auth" spidermap-standalone:local -cB /auth/users.htpasswd nikos
+   sudo docker run --rm -it --entrypoint htpasswd -v "$A:/auth" spidermap-standalone:local -B /auth/users.htpasswd eva
    ```
    `-c` only for the first user: it creates a new file.
-5. `cp auth/roles.example.json auth/roles.json` and keep only your real users, e.g.
-   `{"nikos": "admin", "eva": "editor"}`. No passwords in compose files or git (`.gitignore` covers these files).
+5. Roles: `sudo cp roles.example.json /etc/spidermap-standalone/auth/roles.json` and keep only your real users,
+   e.g. `{"nikos": "admin", "eva": "editor"}`.
 6. The Zabbix token, **before** the collector starts - it stays in the `config` volume only:
    ```bash
    docker compose run --rm --no-deps --entrypoint sh init

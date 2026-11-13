@@ -4,6 +4,34 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.17] - 2026-11-13
+
+From Nikolaos Karanikolas's review of 0.9.16 - thank you.
+
+### Changed
+- **Removing SpiderMap's objects from Zabbix is stricter.** Only items with a key `autotopo.*` *and* the tag
+  `source: autotopo` count as SpiderMap's; an `autotopo.` item without that tag is left alone. Every item is listed
+  with its host, key, item ID and triggers before anything is deleted. The *SpiderMap* dashboard counts only while it
+  still shows `spidermap.php`, and dashboards and the map are removed only when asked for
+  (`--uninstall-zabbix --with-dashboards`; a full uninstall asks for them).
+- **Switching to read-only saves first, cleans up after.** *Menu > 4) Zabbix connection* now saves the mode and
+  restarts the service before it offers to remove anything - so the service can no longer recreate items in
+  between. Items and the dashboard are separate questions; keep the dashboard if you view the map through it.
+- **Standalone: no settings can reach the image.** The image is built from the program files only, copied by name
+  (no more `COPY .`), and the build stops if a `zabbix.env`, `devices.json` or `secrets.json` turns up. Your
+  standalone settings and users now live outside the SpiderMap folder, in `/etc/spidermap-standalone`
+  (`spidermap.env`, `auth/users.htpasswd`, `auth/roles.json`), so they can never be committed either.
+- **No hidden files needed** (they get lost when uploading with drag and drop): `standalone/.env.example` is now
+  `standalone/env.example`, the roles example is `standalone/roles.example.json`, and the Docker ignore file is gone
+  (the image copies files by name instead). Only the GitHub workflow keeps its required name,
+  `.github/workflows/standalone.yml`.
+- `spidermap doctor` counts only SpiderMap's tagged items, and says so when none are left.
+
+### Upgrade
+- From 0.9.16: `sudo spidermap update`. From 0.9.15 or older: once by hand (see 0.9.16).
+- Standalone test installs from 0.9.16: move `standalone/.env` to `/etc/spidermap-standalone/spidermap.env` and
+  `standalone/auth/` to `/etc/spidermap-standalone/auth/`, then `docker compose build` and `up -d` again.
+
 ## [0.9.16] - 2026-11-12
 
 From Nikolaos Karanikolas's proposal and prototype (read-only Zabbix, standalone, confirmation on update) -

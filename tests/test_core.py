@@ -734,16 +734,33 @@ def test_uninstall():
     class Api:
         def call(self, m, p=None):
             calls.append((m, p))
-            return {"item.get": [{"itemid": "1", "key_": "autotopo.new", "hostid": "1"}, {"itemid": "2", "key_": "autotopo.down", "hostid": "1"}],
-                    "dashboard.get": [{"dashboardid": "7", "name": "SpiderMap"}], "map.get": []}.get(m, {})
+            tag = [{"tag": "source", "value": "autotopo"}]
+            widget = [{"widgets": [{"fields": [{"name": "url", "value": "spidermap.php"}]}]}]
+            return {"item.get": [{"itemid": "1", "key_": "autotopo.new", "hostid": "1", "tags": tag},
+                                 {"itemid": "2", "key_": "autotopo.down", "hostid": "1", "tags": tag},
+                                 {"itemid": "3", "key_": "autotopo.mine", "hostid": "1", "tags": []}],   # not ours
+                    "dashboard.get": [{"dashboardid": "7", "name": "SpiderMap", "pages": widget}], "map.get": []}.get(m, {})
     sm.uninstall_zabbix(Api(), dry=True)
     check("uninstall: a dry run sends nothing to delete to Zabbix", not any(m.endswith(".delete") for m, _ in calls))
     calls.clear()
+    sm.uninstall_zabbix(Api(), dashboards=False)
+    check("uninstall: without dashboards only the tagged items go (untagged autotopo.mine stays)",
+          [(m, p) for m, p in calls if m.endswith(".delete")] == [("item.delete", ["1", "2"])], calls)
+    calls.clear()
     sm.uninstall_zabbix(Api())
     get = next(p for m, p in calls if m == "item.get")
-    check("uninstall: only 'autotopo.' items (their triggers go with them) and SpiderMap's dashboard",
+    check("uninstall: only tagged 'autotopo.' items (their triggers go with them) and SpiderMap's dashboard",
           get["search"] == {"key_": "autotopo."} and get["startSearch"] is True
           and [(m, p) for m, p in calls if m.endswith(".delete")] == [("item.delete", ["1", "2"]), ("dashboard.delete", ["7"])], calls)
+
+    class OwnDash(Api):
+        def call(self, m, p=None):
+            r = super().call(m, p)
+            return [{"dashboardid": "8", "name": "SpiderMap", "pages": []}] if m == "dashboard.get" else r
+    calls.clear()
+    sm.uninstall_zabbix(OwnDash())
+    check("uninstall: a dashboard named SpiderMap without spidermap.php is someone's own - it stays",
+          ("dashboard.delete", ["8"]) not in calls, calls)
 
 
 def test_approve():

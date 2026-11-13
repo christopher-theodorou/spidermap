@@ -152,6 +152,35 @@ class Standalone(unittest.TestCase):
             self.assertEqual(sm.webdir(), "/var/www/html")
 
 
+class Packaging(unittest.TestCase):
+    def test_image_gets_program_files_only(self):
+        df = (ROOT / "standalone" / "Dockerfile").read_text()
+        copies = [l for l in df.splitlines() if l.startswith("COPY")]
+        self.assertFalse(any(l.split()[1] == "." for l in copies), "COPY . would take settings into the image")
+        for line in copies:
+            for name in ("zabbix.env", "devices.json", "secrets.json", "auth", ".env"):
+                self.assertNotIn(name, line.split()[1:-1])
+
+    def test_settings_outside_the_folder(self):
+        compose = (ROOT / "standalone" / "compose.yaml").read_text()
+        self.assertIn("/etc/spidermap-standalone", compose)
+        self.assertNotIn("./auth", compose)
+
+    def test_no_dot_files_needed(self):
+        # uploaded with drag and drop, hidden files get lost: nothing outside .github may need one
+        dots = [p for p in ROOT.rglob(".*") if ".git" not in p.parts and ".github" not in p.parts
+                and p.name not in (".gitignore", ".spidermap.lock")
+                and "__pycache__" not in p.parts]
+        self.assertEqual(dots, [])
+
+    def test_menu_saves_and_restarts_before_cleanup(self):
+        sh = (ROOT / "install.sh").read_text()
+        body = sh[sh.index("menu_zabbix() {"):sh.index("\nmenu_proxmox()")]
+        first_delete = body.index("--uninstall-zabbix \\")
+        self.assertLess(body.index("_setenv"), first_delete)
+        self.assertLess(body.index("restart_service"), first_delete)
+
+
 @unittest.skipUnless(shutil.which("php"), "php-cli not installed")
 class StandaloneWeb(unittest.TestCase):
     """spidermap.php as the standalone web server runs it. Apache's password check is simulated:

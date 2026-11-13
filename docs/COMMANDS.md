@@ -233,16 +233,23 @@ A read-only token: a user role with *API methods* on **Allow list** `host.get`, 
 `usermacro.get`, `image.get`, `problem.get`, `history.get` (`settings.get`, `dashboard.get` only for
 `spidermap doctor`), **Read** on the host groups of your network, frontend access disabled.
 
-Switching an existing install to read-only: SpiderMap stops updating the items it made earlier, so their last values
-and open problems would stay in Zabbix. The menu lists them and offers to remove them once; later:
+Switching an existing install to read-only (*menu > 4) Zabbix connection*): the new mode is **saved and the
+service restarted first** - from then on nothing writes to Zabbix - and only then does the menu show what SpiderMap
+created earlier and offer to remove it. SpiderMap no longer updates those items, so their last values and open
+problems would otherwise stay. Only items with a key `autotopo.*` **and** the tag `source: autotopo` (SpiderMap
+puts it on everything it makes) count as SpiderMap's; each is listed with its host, key, item ID and triggers
+before anything is deleted. The dashboard is a separate question - keep it if you view the map through it. Later:
 
 ```bash
-SPIDERMAP_ZABBIX_READONLY=0 python3 /opt/spidermap/spidermap.py --uninstall-zabbix --dry-run   # what is there
-SPIDERMAP_ZABBIX_READONLY=0 python3 /opt/spidermap/spidermap.py --uninstall-zabbix             # remove it
+SPIDERMAP_ZABBIX_READONLY=0 python3 /opt/spidermap/spidermap.py --uninstall-zabbix --dry-run   # the list
+SPIDERMAP_ZABBIX_READONLY=0 python3 /opt/spidermap/spidermap.py --uninstall-zabbix             # items + triggers
+SPIDERMAP_ZABBIX_READONLY=0 python3 /opt/spidermap/spidermap.py --uninstall-zabbix --with-dashboards   # + dashboard, map
 ```
 
-(With a read-only token this fails - the token is then the lock; remove them in Zabbix by hand: tag
-`source: autotopo`, and the dashboard *SpiderMap*.) `spidermap doctor` warns while any are left.
+Deleting an item deletes its history in Zabbix too (SpiderMap's own Activity and speed-test history stay). With a
+read-only token the delete fails - the token is then the lock; remove them in Zabbix by hand (*Data collection >
+Items*, key `autotopo`, tag `source: autotopo`, on **all hosts**: the classic map's `autotopo.mbps.*` items sit on
+the switches). `spidermap doctor` warns while any are left.
 
 The map page itself still lives in the Zabbix web folder (`spidermap.php`) so that the Zabbix login protects it:
 that is a file, not a Zabbix object. Want a dashboard widget anyway: add a *URL* widget with `spidermap.php`
