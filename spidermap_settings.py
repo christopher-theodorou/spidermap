@@ -152,6 +152,23 @@ SETTINGS_SCHEMA = [
             "nPerf cannot be used: it has no public interface."),
     _S("speedtest_server", "digits", "", "Measurements", "Speed test", "Ookla server", help="Empty = the nearest server. Ookla only."),
     # ---- Security
+    # ---- Weather & seasons
+    _S("decorations", "choice", "off", "Weather & seasons", "Decorations", "Seasonal decorations",
+       choices=[["off", "Off"], ["seasons", "Seasons only (winter snow, summer sand)"],
+                ["holidays", "Seasons + Christmas and New Year"],
+                ["holidays_gr", "Seasons + Christmas, New Year and Greek holidays"]],
+       help="Small decorations in the header, for everyone. They never cover devices or change alarm colours, and they "
+            "stay still for anyone whose system asks for reduced motion. Greek holidays: 28 October, 25 March, Easter."),
+    _S("weather_location", "str", "", "Weather & seasons", "Weather", "Location",
+       maxlen=80, help="A city (Athens, or Athens, GR) or coordinates (37.98, 23.73). Empty: no weather. SpiderMap's "
+                       "server asks Open-Meteo every 30 minutes - the browsers contact nobody. The location is sent there."),
+    _S("weather_rain_mm", "int", 8, "Weather & seasons", "Weather", "Storm warning: heavy rain from",
+       range=[2, 50], unit="mm/h", help="Thunderstorms always count. The warning looks 2 hours ahead and marks outdoor devices."),
+    _S("weather_gust_kmh", "int", 60, "Weather & seasons", "Weather", "Storm warning: wind gusts from",
+       range=[30, 150], unit="km/h"),
+    _S("weather_heat_c", "int", 38, "Weather & seasons", "Weather", "Heat warning from",
+       range=[25, 55], unit="°C", help="Outdoor access points, radio links and cabinets in the sun can overheat, slow down "
+                                       "or drop. The warning marks outdoor devices on the map."),
     _S("snmp_readonly", "bool", True, "Security", "Security", "Read-only SNMP", locked=True,
        help="SpiderMap never sends SET, even if the community may write. Always on."),
     _S("offpeak", "bool", False, "Security", "Security", "Scan only off-peak",
@@ -351,6 +368,12 @@ def validate_settings(new, current=None):
         n = scan_target_count(merged["scan_subnets"], merged["scan_exclude"])
         if n > merged["max_targets"]:
             errors.append(f"Allowed networks: {n} addresses, more than the limit of {merged['max_targets']} (Security).")
+        if merged.get("weather_location"):
+            from spidermap_weather import parse_location
+            try:
+                parse_location(merged["weather_location"])
+            except ValueError as e:
+                errors.append(f"Weather location: {e} - a city (Athens, GR) or coordinates (37.98, 23.73).")
         if merged["load_crit"] <= merged["load_warn"]:
             errors.append("Load critical must be higher than Load warning.")
         if merged["offpeak"] and merged["offpeak_start"] == merged["offpeak_end"]:

@@ -257,6 +257,7 @@ foreach (['name', 'type', 'url', 'pin'] as $k)
 if (isset($e['url']) && $e['url'] !== '' && !preg_match('#^https?://#i', $e['url'])) deny(400, 'Web UI address must start with http:// or https://');
 if (array_key_exists('important', $in)) $e['important'] = (bool)$in['important'];
 if (array_key_exists('approved', $in)) $e['approved'] = (bool)$in['approved'];
+if (array_key_exists('outdoor', $in)) $e['outdoor'] = $in['outdoor'] === null ? null : (bool)$in['outdoor'];   // null: guess from the name
 if (array_key_exists('behind', $in)) {                // "connected through": another device's MAC, or empty
   $b = strtolower(trim((string)$in['behind']));
   if ($b !== '' && !preg_match('/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/', $b)) deny(400, 'Connected through: not a MAC address');

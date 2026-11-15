@@ -16,7 +16,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--
 header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--border);background:var(--card)}
 header h1{font-size:17px;font-weight:800;margin:0 6px 0 0;display:flex;align-items:center;gap:8px;letter-spacing:-.3px}
 header h1 b{font-weight:800}header h1 span{color:var(--accent)}
-header h1 img{width:30px;height:30px}
+header h1 img{width:30px;height:30px;display:block}
 .lg-d{display:none}
 @media (prefers-color-scheme:dark){:root:not([data-theme=light]) .lg-l{display:none}:root:not([data-theme=light]) .lg-d{display:inline}}
 :root[data-theme=dark] .lg-l{display:none}:root[data-theme=dark] .lg-d{display:inline}
@@ -374,11 +374,27 @@ table{width:100%;border-collapse:collapse}
 #toast.on{opacity:.92}
 .tile small{display:block;font-size:10px;color:var(--faint)}
 @media (max-width:700px){#gw{display:none}aside{top:auto;height:60%;width:100%;border-left:0;border-top:1px solid var(--border);transform:translateY(100%)}.search{width:130px}.legend{display:none}}
+/* ---------- weather card, outdoor badges ---------- */
+.wx-now{display:flex;align-items:center;gap:12px}.wx-now>i{font-size:40px;color:var(--accent)}
+.wx-hours{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin-top:10px;text-align:center;font-size:11.5px}
+.wx-hours div{background:var(--bg);border-radius:7px;padding:5px 2px}.wx-hours i{display:block;font-size:17px;margin:2px 0;color:var(--muted)}
+.wx-hours b{display:block;font-size:12.5px}.wx-hours span{color:var(--muted)}
+.wx-warn{margin-top:10px;padding:8px 10px;border-radius:8px;background:var(--warn-bg);color:var(--warn);font-size:13px;font-weight:600}
+.wx-warn .db-row{border-color:color-mix(in srgb,var(--warn) 25%,transparent);font-weight:400}
+.tn .wx{position:absolute;bottom:-5px;left:-6px;width:19px;height:19px;border-radius:50%;background:var(--warn-bg);color:var(--warn);border:1.5px solid var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;z-index:2}
+/* ---------- seasons and holidays: only in the header, never over the map ---------- */
+body.decor header{position:relative;overflow:hidden}body.decor header>*:not(#decor-sky){position:relative;z-index:1}
+#decor-sky{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+header h1 .dlogo{position:relative;display:inline-flex}
+#decor-logo{position:absolute;left:-8px;top:-12px;width:46px;height:52px;pointer-events:none}
+#decor-pill{font-size:12.5px;font-weight:700;padding:3px 10px;border-radius:999px;background:var(--accent-bg);color:var(--accent);white-space:nowrap}
+body.decor-gr header{border-bottom:0;box-shadow:inset 0 -4px 0 #fff,inset 0 -8px 0 #0d5eaf}
+#decor-fw{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:900}
 </style>
 </head>
 <body>
 <header>
-  <h1 title="SpiderMap · Nothing touches the web unnoticed."><img src="spidermap-assets/spidermap-favicon.svg" alt=""><b>Spider<span>Map</span></b><span id="map-name" style="font-weight:500;color:var(--muted);margin-left:6px;font-size:.8em"></span></h1>
+  <h1 title="SpiderMap · Nothing touches the web unnoticed."><span class="dlogo"><img src="spidermap-assets/spidermap-favicon.svg" alt=""></span><b>Spider<span>Map</span></b><span id="map-name" style="font-weight:500;color:var(--muted);margin-left:6px;font-size:.8em"></span></h1>
   <span class="stat" id="s-on"></span><span class="stat" id="s-off"></span><span class="stat" id="s-new"></span>
   <span class="stat legend">
     <span><i class="dot" style="background:var(--ok)"></i> online</span>
@@ -431,7 +447,7 @@ table{width:100%;border-collapse:collapse}
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.17";
+const PAGE_VERSION = "0.9.18";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -1282,12 +1298,14 @@ function editForm(n) {
     <div style="font-size:11px;color:var(--muted);margin-top:3px">{ip} is replaced by the device's current IP.</div>
     <label for="e-pin">Pin to port (optional)</label><input type="text" id="e-pin" placeholder="SW-Office:3">
     <label class="ck"><input type="checkbox" id="e-imp" ${(n.flags || []).includes("important") ? "checked" : ""}> Important (red and alert when down)</label>
+    <label class="ck"><input type="checkbox" id="e-out" ${isOutdoor(n) ? "checked" : ""}> Outdoor (storm and heat warnings)</label>
     <div class="acts"><button class="btn" id="e-save"><i class="ti ti-device-floppy"></i>Save</button><button class="btn" id="e-cancel">Cancel</button></div>
     <div class="msg" id="e-msg"></div></div>`;
 }
 async function saveEdit(n) {
   const body = { mac: n.mac, name: $("#e-name").value.trim(), type: $("#e-type").value, url: $("#e-url").value.trim(), important: $("#e-imp").checked,
-                 behind: $("#e-behind").value };
+                 behind: $("#e-behind").value, outdoor: null };
+  body.outdoor = $("#e-out").checked === outdoorGuess({ ...n, name: body.name, type: body.type }) ? null : $("#e-out").checked;
   if ($("#e-pin").value.trim()) body.pin = $("#e-pin").value.trim();
   const msg = $("#e-msg");
   if (!body.name) { msg.style.color = "var(--bad)"; msg.textContent = "Enter a name."; return; }
@@ -1296,7 +1314,7 @@ async function saveEdit(n) {
     const r = await postApi(body);
     const j = await r.json().catch(() => ({ ok: false, error: "Unexpected answer (" + r.status + ")" }));
     if (!j.ok) { msg.style.color = "var(--bad)"; msg.textContent = j.error || "Couldn't save."; return; }
-    n.name = body.name; n.type = body.type; n.icon = TYPES[body.type] || n.icon;
+    n.name = body.name; n.type = body.type; n.icon = TYPES[body.type] || n.icon; n.outdoor = body.outdoor;
     n.url = body.url ? body.url.split("{ip}").join(n.ip || "") : (n.ip ? "http://" + n.ip : "");
     n.flags = (n.flags || []).filter(f => f !== "important" && f !== "unknown").concat(body.important ? ["important"] : []);
     render(); panel(n.id);
@@ -1458,7 +1476,7 @@ function render() {
       + (n.inferred ? " inferred" : "") + (pb ? " prob" : "");
     e.style.setProperty("--pc", pb ? SEV[pb.sev][1] : "transparent");
     const subTxt = DISP.ip_labels || !/^\.?\d{1,3}(\.\d{1,3}){0,3}$/.test(n.sub || "") ? n.sub : "";
-    const inner = `<div class="ic">${iconHtml(n)}<span class="st" style="background:${dotColor(n)}"></span></div><div class="nm" title="${esc(n.name)}">${esc(n.name)}</div><div class="sb">${esc(subTxt)}</div>${tags(n)}`;
+    const inner = `<div class="ic">${iconHtml(n)}<span class="st" style="background:${dotColor(n)}"></span>${wxBadge(n)}</div><div class="nm" title="${esc(n.name)}">${esc(n.name)}</div><div class="sb">${esc(subTxt)}</div>${tags(n)}`;
     if (e._h !== inner) { e.innerHTML = inner; e._h = inner; }
     e.style.left = ex + "px"; e.style.top = ey + "px"; e.style.opacity = 1;
     const c = shownKids(id);
@@ -1677,6 +1695,19 @@ document.addEventListener("keydown", e => {
 
 /* ---------- Greek (Ελληνικά): a dictionary applied to the page's own texts; names and addresses are never translated ---------- */
 const EL = {
+  "Weather": "Καιρός", "rain mm/h": "βροχή mm/h", "gusts km/h": "ριπές km/h", "humidity": "υγρασία",
+  "Outdoor (storm and heat warnings)": "Σε εξωτερικό χώρο (προειδοποιήσεις καταιγίδας και καύσωνα)",
+  "No device is marked outdoor (Edit device > Outdoor).": "Καμία συσκευή δεν είναι σημειωμένη ως εξωτερική (Επεξεργασία συσκευής > Σε εξωτερικό χώρο).",
+  "Clear": "Αίθριος", "Mainly clear": "Κυρίως αίθριος", "Partly cloudy": "Λίγα σύννεφα", "Overcast": "Συννεφιά", "Fog": "Ομίχλη",
+  "Drizzle": "Ψιχάλα", "Rain": "Βροχή", "Heavy rain": "Δυνατή βροχή", "Snow": "Χιόνι", "Rain showers": "Μπόρες",
+  "Violent showers": "Ισχυρές μπόρες", "Snow showers": "Χιονοπτώσεις", "Thunderstorm": "Καταιγίδα", "Thunderstorm with hail": "Καταιγίδα με χαλάζι",
+  "Merry Christmas!": "Καλά Χριστούγεννα!", "Happy Easter!": "Χριστός Ανέστη!", "28 October": "28η Οκτωβρίου", "25 March": "25η Μαρτίου",
+  "Weather & seasons": "Καιρός & εποχές", "Decorations": "Διακοσμήσεις", "Seasonal decorations": "Εποχικές διακοσμήσεις",
+  "Seasons only (winter snow, summer sand)": "Μόνο εποχές (χιόνι τον χειμώνα, άμμος το καλοκαίρι)",
+  "Seasons + Christmas and New Year": "Εποχές + Χριστούγεννα και Πρωτοχρονιά",
+  "Seasons + Christmas, New Year and Greek holidays": "Εποχές + Χριστούγεννα, Πρωτοχρονιά και ελληνικές γιορτές",
+  "Location": "Τοποθεσία", "Storm warning: heavy rain from": "Προειδοποίηση καταιγίδας: δυνατή βροχή από",
+  "Storm warning: wind gusts from": "Προειδοποίηση καταιγίδας: ριπές ανέμου από", "Heat warning from": "Προειδοποίηση καύσωνα από",
   // header, legend, toolbar, map controls
   "online": "σε σύνδεση", "off / asleep": "εκτός / σε αναμονή", "new / unknown": "νέα / άγνωστη", "changed": "άλλαξε", "down": "εκτός λειτουργίας",
   "guessed link": "εκτιμώμενη σύνδεση", "Name, IP or MAC": "Όνομα, IP ή MAC", "Activity": "Δραστηριότητα", "Who's online": "Ποιος είναι συνδεδεμένος",
@@ -1768,6 +1799,11 @@ const EL = {
   "Wi-Fi": "Wi-Fi", "Wireless clients": "Ασύρματες συσκευές", "Planned": "Σχεδιάζεται", "not active yet": "δεν λειτουργεί ακόμη", "planned": "σχεδιάζεται", "Controllers": "Controllers", "Categories switched off": "Απενεργοποιημένες κατηγορίες",
 };
 const EL_RX = [
+  [/^Happy New Year (\d{4})!$/, "Καλή Χρονιά $1!"], [/^(\d{4}) in (\d\d:\d\d:\d\d)$/, "$1 σε $2"],
+  [/^Storm expected (\S+)–(\S+) \((.*)\): outdoor links may drop$/, (m, a, b, why) => `Καταιγίδα αναμένεται ${a}–${b} (${why.replace("thunderstorm", "καταιγίδα").replace("rain", "βροχή").replace("gusts", "ριπές")}): οι εξωτερικές ζεύξεις μπορεί να πέσουν`],
+  [/^Heat up to (\d+) °C: outdoor devices may overheat or drop$/, "Καύσωνας έως $1 °C: οι εξωτερικές συσκευές μπορεί να υπερθερμανθούν ή να πέσουν"],
+  [/^Storm expected (\S+)–(\S+): outdoor device$/, "Καταιγίδα αναμένεται $1–$2: εξωτερική συσκευή"], [/^Heat up to (\d+) °C: outdoor device$/, "Καύσωνας έως $1 °C: εξωτερική συσκευή"],
+  [/^Open-Meteo · updated (.*)$/, (m, a) => "Open-Meteo · ενημέρωση " + (trText(a) || a)], [/^\+ (\d+) more$/, "+ $1 ακόμη"],
   [/^(\d+) online$/, "$1 σε σύνδεση"], [/^(\d+) offline$/, "$1 εκτός σύνδεσης"], [/^(\d+) new \/ unknown$/, "$1 νέες / άγνωστες"],
   [/^(\d+) devices?( now)?$/, (m, n, now) => n + (n === "1" ? " συσκευή" : " συσκευές") + (now ? " τώρα" : "")],
   [/^(\d+) unsaved changes?$/, "$1 μη αποθηκευμένες αλλαγές"], [/^(\d+) on your network$/, "$1 στο δίκτυό σας"], [/^none found$/, "δεν βρέθηκε καμία"],
@@ -1867,6 +1903,7 @@ function renderDash() {
   h += dbCard("world", "Internet", `<div class="db-big" style="color:${I.down_since ? "var(--bad)" : "var(--ok)"}">${I.down_since ? "Down" : upm != null ? upm.toFixed(upm >= 99.995 ? 2 : 3) + " %" : "-"}</div>`
     + `<div class="db-sub">${I.down_since ? "since " + ago(I.down_since) : "uptime this month" + (I.monitored != null && I.monitored < 99.5 ? ` · monitored ${I.monitored} %` : "")} · ${outs} outage${outs === 1 ? "" : "s"}</div>`
     + Object.entries(T).map(([k, v]) => `<div class="db-row"><span>${esc(k)}</span><span class="r">${v.ms != null ? v.ms.toFixed(v.ms < 10 ? 1 : 0) + " ms" : "no answer"}</span></div>`).join(""));
+  h += wxCard();
   // throughput
   const W = live ? RT.wan : null, WS = live ? RT.wan_state : null, wrows = live && RT.hist ? RT.hist.wan || [] : [];
   const mu = live && RT.usage && RT.usage.wan && RT.usage.wan.m;
@@ -2477,6 +2514,182 @@ $("#q").addEventListener("keydown", e => { if (e.key === "Enter") { const m = ma
 function headerHeight() { document.documentElement.style.setProperty("--hh", $("header").offsetHeight + "px"); }
 headerHeight();
 if (window.ResizeObserver) new ResizeObserver(headerHeight).observe($("header"));
+/* ---------- weather (Settings > Weather & seasons; fetched by the server, never by the browser) ---------- */
+const OUT_RX = /outdoor|(^|[^a-z])out([^a-z]|$)|εξωτερ/i;
+const outdoorGuess = n => n.type === "ptp" || OUT_RX.test(n.name || "");
+const isOutdoor = n => n.outdoor === true || (n.outdoor !== false && outdoorGuess(n));
+const wxWarn = () => (RT && RT.weather && RT.weather.warn) || {};
+function wxBadge(n) {
+  const w = wxWarn(); if (!(w.storm || w.heat) || !isOutdoor(n)) return "";
+  const t = w.storm ? `Storm expected ${w.storm.from}–${w.storm.to}: outdoor device` : `Heat up to ${w.heat.max} °C: outdoor device`;
+  return `<span class="wx" title="${esc(t)}"><i class="ti ti-${w.storm ? "cloud-storm" : "temperature"}"></i></span>`;
+}
+function wxCard() {
+  const W = RT && RT.weather; if (!W) return "";
+  const n1 = v => v == null ? "-" : Math.round(v);
+  if (W.temp == null) return dbCard("cloud", "Weather", `<div class="db-sub">${esc(W.place || "")}: ${esc(W.error || "no data yet")}</div>`);
+  const w = W.warn || {}, out = DATA.nodes.filter(n => (n.kind === "device" || n.kind === "switch") && isOutdoor(n));
+  const risk = out.length ? out.slice(0, 8).map(n => `<div class="db-row"><a data-go="${esc(n.id)}">${esc(n.name)}</a><span class="r">${esc(status(n))}</span></div>`).join("")
+    + (out.length > 8 ? `<div class="db-sub">+ ${out.length - 8} more</div>` : "")
+    : `<div class="db-sub">No device is marked outdoor (Edit device > Outdoor).</div>`;
+  let warn = "";
+  if (w.storm) warn += `<div class="wx-warn"><i class="ti ti-cloud-storm"></i> Storm expected ${esc(w.storm.from)}–${esc(w.storm.to)} (${esc(w.storm.why)}): outdoor links may drop${risk}</div>`;
+  if (w.heat) warn += `<div class="wx-warn"><i class="ti ti-temperature"></i> Heat up to ${esc(w.heat.max)} °C: outdoor devices may overheat or drop${w.storm ? "" : risk}</div>`;
+  return dbCard(W.icon || "cloud", "Weather", `<div class="wx-now"><i class="ti ti-${esc(W.icon || "cloud")}"></i><div><div class="db-big">${n1(W.temp)} °C</div>`
+    + `<div class="db-sub"><span>${esc(W.text || "")}</span> · <span>${esc(W.place || "")}</span></div></div></div>`
+    + `<div class="db-kpis"><div class="db-kpi"><b>${W.rain == null ? "-" : (+W.rain).toFixed(1)}</b><span>rain mm/h</span></div>`
+    + `<div class="db-kpi"><b>${n1(W.gust)}</b><span>gusts km/h</span></div><div class="db-kpi"><b>${n1(W.humidity)} %</b><span>humidity</span></div></div>`
+    + `<div class="wx-hours">${(W.hours || []).map(x => `<div><span>${esc(x.t)}</span><i class="ti ti-${esc(x.icon)}" title="${esc(x.text)}"></i><b>${n1(x.temp)}°</b><span>${x.rain ? (+x.rain).toFixed(1) + " mm" : x.prob ? x.prob + " %" : ""}</span></div>`).join("")}</div>`
+    + warn + (W.error ? `<div class="db-sub" style="margin-top:6px">${esc(W.error)}</div>` : "")
+    + `<div class="db-sub" style="margin-top:6px">Open-Meteo · updated ${esc(ago(W.fetched))}</div>`, true);
+}
+
+/* ---------- seasons and holidays (Settings > Weather & seasons; off by default) ----------
+   Only in the header and on the logo, never over the map, never instead of an alarm. Still for "reduce motion".
+   Preview any of them on this page only: spidermap.php?decor=winter|summer|xmas|nye|fireworks|newyear|gr|easter */
+function orthodoxEaster(y) {               // Meeus (Julian calendar) + 13 days: right for 1900-2099
+  const a = y % 4, b = y % 7, c = y % 19, d = (19 * c + 15) % 30, e = (2 * a + 4 * b - d + 34) % 7, s = d + e + 114;
+  const j = new Date(y, Math.floor(s / 31) - 1, (s % 31) + 1); j.setDate(j.getDate() + 13); return j;
+}
+function decorFor(now, mode) {
+  if (!mode || mode === "off") return null;
+  const m = now.getMonth(), d = now.getDate(), y = now.getFullYear(), hr = now.getHours();
+  const r = { season: m === 11 || m <= 1 ? "winter" : (m === 5 && d >= 21) || m === 6 || m === 7 || (m === 8 && d <= 22) ? "summer" : "" };
+  if (mode === "holidays" || mode === "holidays_gr") {
+    if (m === 11 && d === 31 && hr >= 18) { r.holiday = "nye"; r.target = new Date(y + 1, 0, 1); }
+    else if (m === 0 && d === 1 && now - new Date(y, 0, 1) < 90e3) { r.holiday = "fireworks"; r.year = y; }
+    else if (m === 0 && d === 1 && hr < 2) { r.holiday = "newyear"; r.year = y; }
+    else if ((m === 11 && d >= 15) || (m === 0 && d <= 6)) r.holiday = "xmas";
+  }
+  if (mode === "holidays_gr" && !r.holiday) {
+    const e = orthodoxEaster(y), day = Math.round((new Date(y, m, d) - e) / 864e5);
+    if ((m === 9 && d === 28) || (m === 2 && d === 25)) r.holiday = "gr";
+    else if (day === 0 || day === 1) r.holiday = "easter";
+  }
+  return r.season || r.holiday ? r : null;
+}
+const DECOR_PREVIEW = { winter: { season: "winter" }, summer: { season: "summer" }, xmas: { season: "winter", holiday: "xmas" },
+  nye: { season: "winter", holiday: "nye" }, fireworks: { season: "winter", holiday: "fireworks" }, newyear: { season: "winter", holiday: "newyear" },
+  gr: { season: "", holiday: "gr" }, easter: { season: "", holiday: "easter" } };
+const STILL = matchMedia("(prefers-reduced-motion: reduce)");
+let DECOR = null, decorKey = "", decorRaf = 0, fwRaf = 0, fwEnd = 0;
+function decorNow() {
+  const pv = new URLSearchParams(location.search).get("decor");
+  if (pv && DECOR_PREVIEW[pv]) {
+    const r = { ...DECOR_PREVIEW[pv] };
+    if (r.holiday === "nye") { r.target = new Date(Date.now() + 75e3); r.year = new Date().getFullYear() + 1; }   // a short countdown, then fireworks
+    if (r.holiday === "fireworks" || r.holiday === "newyear") r.year = new Date().getFullYear() + 1;
+    return r;
+  }
+  return decorFor(new Date(), RT && RT.decor);
+}
+const LOGO = {   // small original drawings that sit on the spider logo
+  winter: `<svg viewBox="0 0 46 52"><ellipse cx="23" cy="47" rx="21" ry="5" fill="#f4f8ff" stroke="#c9d8ee"/><circle cx="8" cy="44" r="1.4" fill="#c9d8ee"/><circle cx="38" cy="45" r="1.2" fill="#c9d8ee"/></svg>`,
+  summer: `<svg viewBox="0 0 46 52"><ellipse cx="23" cy="47" rx="21" ry="5" fill="#f3d58a" stroke="#d9b45a"/><circle cx="41" cy="9" r="5" fill="#ffc83d"/><g stroke="#ffc83d" stroke-width="1.6" stroke-linecap="round"><path d="M41 1v2M41 15v2M33 9h2M47 9h-2"/></g></svg>`,
+  xmas: `<svg viewBox="0 0 46 52"><ellipse cx="23" cy="47" rx="21" ry="5" fill="#f4f8ff" stroke="#c9d8ee"/><path d="M12 15 Q22 0 34 9 L36 16 Q24 11 12 15Z" fill="#d7262e"/><path d="M11 14 Q23 10 37 15 L37 19 Q23 14 11 18Z" fill="#fff" stroke="#ddd"/><circle cx="34" cy="8" r="3" fill="#fff" stroke="#ddd"/></svg>`,
+  easter: `<svg viewBox="0 0 46 52"><ellipse cx="40" cy="44" rx="5" ry="6.5" fill="#d7262e"/><path d="M36 42 Q40 40 44 42" stroke="#ff8a8a" stroke-width="1" fill="none"/></svg>`,
+  gr: `<svg viewBox="0 0 46 52"><g transform="translate(31 13)"><rect width="15" height="10" fill="#0d5eaf"/><g fill="#fff"><rect y="2.2" width="15" height="1.1"/><rect y="4.4" width="15" height="1.1"/><rect y="6.6" width="15" height="1.1"/></g><rect width="6.7" height="5.5" fill="#0d5eaf"/><rect x="2.8" width="1.1" height="5.5" fill="#fff"/><rect y="2.2" width="6.7" height="1.1" fill="#fff"/></g></svg>`,
+};
+LOGO.nye = LOGO.fireworks = LOGO.newyear = LOGO.xmas;
+function decorPill(r) {
+  if (r.holiday === "nye") {
+    const s = Math.max(0, Math.round((r.target - Date.now()) / 1000));
+    const yr = r.year || r.target.getFullYear();
+    if (!s) return `Happy New Year ${yr}!`;
+    return `${yr} in ${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+  }
+  if (r.holiday === "fireworks" || r.holiday === "newyear") return `Happy New Year ${r.year}!`;
+  if (r.holiday === "xmas") { const d = new Date(); return d.getMonth() === 11 && (d.getDate() === 24 || d.getDate() === 25) ? "Merry Christmas!" : ""; }
+  if (r.holiday === "easter") return "Happy Easter!";
+  return "";
+}
+function decorApply() {
+  const r = decorNow(), key = r ? (r.season || "") + "/" + (r.holiday || "") : "";
+  if (key !== decorKey) {
+    decorKey = key; DECOR = r;
+    cancelAnimationFrame(decorRaf); decorRaf = 0;
+    ["#decor-sky", "#decor-logo", "#decor-pill"].forEach(q => { const e = $(q); if (e) e.remove(); });
+    const lg0 = $("header h1 .dlogo"); if (lg0) lg0.removeAttribute("title");
+    document.body.classList.toggle("decor", !!r); document.body.classList.toggle("decor-gr", !!r && r.holiday === "gr");
+    if (r) {
+      const hd = $("header"), lg = $("header h1 .dlogo");
+      const art = LOGO[r.holiday] || LOGO[r.season];
+      if (art && lg) lg.insertAdjacentHTML("beforeend", `<span id="decor-logo" aria-hidden="true">${art}</span>`);
+      if (r.holiday === "gr" && lg) lg.title = new Date().getMonth() === 9 ? "28 October" : "25 March";
+      if ((r.season === "winter" || r.holiday === "xmas" || r.holiday === "nye") && hd) {
+        hd.insertAdjacentHTML("afterbegin", '<canvas id="decor-sky" aria-hidden="true"></canvas>'); skyStart(r);
+      }
+      const h1 = $("header h1"); if (h1) h1.insertAdjacentHTML("afterend", '<span id="decor-pill" style="display:none"></span>');
+    }
+    headerHeight();
+  }
+  const pill = $("#decor-pill");
+  if (r && pill) { const t = decorPill(r); pill.style.display = t ? "" : "none"; if (pill.textContent !== t) pill.textContent = t; }
+  if (r && r.holiday === "nye" && r.target - Date.now() <= 0 && !fwEnd) fireworks(r.target.getTime() + 75e3);
+  if (r && r.holiday === "fireworks" && !fwEnd) fireworks(new Date(r.year, 0, 1).getTime() + 90e3);
+}
+function skyStart(r) {
+  const c = $("#decor-sky"); if (!c) return;
+  const ctx = c.getContext("2d"), lights = r.holiday === "xmas" || r.holiday === "nye", dpr = devicePixelRatio || 1;
+  let W = 0, H = 0, flakes = [], last = 0;
+  const size = () => { W = c.clientWidth; H = c.clientHeight; c.width = W * dpr; c.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    flakes = Array.from({ length: Math.min(70, Math.round(W / 22)) }, () => ({ x: Math.random() * W, y: Math.random() * H, r: .8 + Math.random() * 1.6, v: 6 + Math.random() * 10, s: Math.random() * 6 })); };
+  const draw = t => {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "rgba(170,190,220,.75)";
+    flakes.forEach(f => { ctx.beginPath(); ctx.arc(f.x + Math.sin(t / 1500 + f.s) * 3, f.y, f.r, 0, 7); ctx.fill(); });
+    if (lights) {
+      const cols = ["#e5484d", "#f5b83d", "#30a46c", "#3e63dd"];
+      for (let x = 8, i = 0; x < W; x += 26, i++) {
+        const on = STILL.matches || Math.sin(t / 600 + i * 1.7) > -0.4;
+        ctx.globalAlpha = on ? .95 : .3; ctx.fillStyle = cols[i % 4];
+        ctx.beginPath(); ctx.ellipse(x, H - 4 - Math.sin(i * 1.3) * 1.5, 2.6, 3.4, 0, 0, 7); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+  };
+  const step = t => {
+    decorRaf = 0;
+    if (!document.hidden && t - last > 50) {           // about 20 frames a second is plenty for snow
+      const dt = last ? Math.min(.2, (t - last) / 1000) : 0; last = t;
+      flakes.forEach(f => { f.y += f.v * dt; if (f.y > H + 3) { f.y = -3; f.x = Math.random() * W; } });
+      draw(t);
+    }
+    decorRaf = requestAnimationFrame(step);
+  };
+  size(); addEventListener("resize", size);
+  if (STILL.matches) draw(0); else decorRaf = requestAnimationFrame(step);
+}
+function fireworks(until) {
+  fwEnd = until;
+  const alarm = DATA && DATA.nodes.some(n => status(n) === "down" && n.kind !== "inet");
+  if (STILL.matches || alarm || Date.now() > until) return;     // an alarm always beats a decoration
+  document.body.insertAdjacentHTML("beforeend", '<canvas id="decor-fw" aria-hidden="true"></canvas>');
+  const c = $("#decor-fw"), ctx = c.getContext("2d"), parts = [];
+  const size = () => { c.width = innerWidth; c.height = innerHeight; }; size();
+  const cols = ["#ff5d5d", "#ffd23f", "#5dd39e", "#5d9bff", "#ff7ad9", "#ffffff"];
+  let next = 0;
+  const step = t => {
+    if (Date.now() > until) { c.remove(); return; }
+    if (!document.hidden) {
+      if (t > next) {
+        next = t + 380 + Math.random() * 520;
+        const x = c.width * (.15 + Math.random() * .7), y = c.height * (.12 + Math.random() * .35), col = cols[Math.floor(Math.random() * cols.length)];
+        for (let i = 0; i < 46; i++) { const a = Math.PI * 2 * i / 46, v = 1.6 + Math.random() * 2.4; parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, col }); }
+      }
+      ctx.clearRect(0, 0, c.width, c.height);
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i]; p.x += p.vx; p.y += p.vy; p.vy += .035; p.life -= .012;
+        if (p.life <= 0) { parts.splice(i, 1); continue; }
+        ctx.globalAlpha = Math.min(.85, p.life); ctx.fillStyle = p.col; ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, 7); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+setInterval(() => { if (!document.hidden) decorApply(); }, 1000);
 window.addEventListener("resize", () => { headerHeight(); fit(false); });
 load(); loadLive(); loadRT(); loadEvents(); loadPresence(); loadMe(); loadStatus();
 const every = (fn, ms) => setInterval(() => { if (!document.hidden) fn(); }, ms);   // nothing while the tab is hidden

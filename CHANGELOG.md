@@ -4,6 +4,32 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.18] - 2026-11-14
+
+### Added
+- **Weather card in the overview** - temperature, conditions, rain, gusts and humidity now, and the next 8 hours.
+  SpiderMap's server fetches it from Open-Meteo (free, no account) every 30 minutes, in the background; browsers
+  contact nobody. Off until you set a location (a city, or coordinates) in *Settings > Weather & seasons*.
+- **Storm and heat warnings** - two hours ahead: a thunderstorm, heavy rain (from 8 mm/h) or strong gusts (from
+  60 km/h), and heat (from 38 °C) - all three limits in Settings. The weather card lists your outdoor devices, Activity
+  gets one entry when a warning starts and one when it is over, and outdoor devices get a small storm or thermometer
+  badge on the map. Never sent to Zabbix.
+- **Outdoor devices** - guessed from the name ("Outdoor", "_OUT", "-OUT") and for radio links; *Edit device* has an
+  **Outdoor** checkbox to correct the guess either way.
+- **Seasonal decorations** (off by default; a fresh install asks) - in the header only: winter snow and the spider on
+  snow, summer sand and sun, Christmas (15 December - 6 January: a Santa hat and lights), New Year's Eve (a countdown,
+  about a minute of fireworks at midnight, "Happy New Year"), and with *Greek holidays* 28 October and 25 March (the
+  flag, a blue-white stripe, no animation) and Easter (a red egg; the Orthodox date is calculated each year). They never
+  cover the map or change alarm colours, fireworks are skipped while a device is down, nothing moves for "reduce
+  motion" or in a background tab. Preview one in your own browser: add `?decor=xmas` (or `nye`, `fireworks`, `gr`,
+  `easter`, `summer`, `winter`) to the map's address.
+- `spidermap.py --set-setting KEY=VALUE` - change one setting from the command line, checked like the Settings dialog.
+- Tests: `tests/test_weather.py` (warnings, the outdoor flag, the holiday calendar and the Easter dates).
+
+### Upgrade
+- `sudo spidermap update`. Nothing changes until you set a location or turn the decorations on.
+- The server needs to reach `api.open-meteo.com` and `geocoding-api.open-meteo.com` (https) for the weather.
+
 ## [0.9.17] - 2026-11-13
 
 From Nikolaos Karanikolas's review of 0.9.16 - thank you.

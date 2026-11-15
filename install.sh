@@ -159,6 +159,19 @@ ask_zabbix_mode() {   # sets ZRO: 1 = read-only (nothing created in Zabbix), 0 =
   case "${m:-1}" in 2) ZRO=0 ;; *) ZRO=1 ;; esac
 }
 
+ask_decorations() {   # sets DECOR (empty: leave the setting as it is, which is off)
+  echo
+  local a
+  read -r -p "Seasonal decorations in the header (winter snow, summer sand, Christmas, New Year)? [y/N] " a || a=""
+  case "$a" in
+    y|Y) read -r -p "Greek holidays too (28 October, 25 March, Easter)? [Y/n] " a || a=""
+         case "${a:-Y}" in n|N) DECOR=holidays ;; *) DECOR=holidays_gr ;; esac ;;
+    *)   DECOR="" ;;
+  esac
+  [ -n "$DECOR" ] && echo "  On. Change it any time: the map's Settings > Weather & seasons." \
+                  || echo "  Off. Turn them on any time: the map's Settings > Weather & seasons."
+}
+
 api_check() {   # $1 API URL, $2 token. Prints what it finds; the token never appears in the process list.
   local out rc=0 n
   out=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json-rpc' \
@@ -292,6 +305,7 @@ if [ ! -f "$CONF/zabbix.env" ]; then
   printf 'export ZABBIX_URL="%s"\nexport ZABBIX_TOKEN="%s"\nexport SPIDERMAP_ZABBIX_READONLY="%s"\n' \
     "$url" "$tok" "$ZRO" > "$CONF/zabbix.env"
   ln -sfn "$CONF/zabbix.env" "$DIR/zabbix.env"
+  ask_decorations
 fi
 chmod 640 "$CONF/zabbix.env"
 . "$CONF/zabbix.env"
@@ -307,6 +321,7 @@ if [ "${SPIDERMAP_ZABBIX_READONLY:-0}" = "1" ]; then
 else
   say "5/5  Setup: page, icons, Zabbix items, dashboard, service (it runs the scans: no cron needed)"
 fi
+if [ -n "${DECOR:-}" ]; then python3 spidermap.py --set-setting "decorations=$DECOR" || true; fi
 python3 spidermap.py --setup
 
 ip=$(hostname -I 2>/dev/null | awk '{print $1}')

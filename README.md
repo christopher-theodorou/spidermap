@@ -39,6 +39,13 @@ An activity feed and Zabbix alerts for new and **unknown devices** (especially o
 **move**, IP changes and conflicts, **cable problems** (errors, flapping, a drop to a lower speed, duplex
 mismatches), **unusual traffic**, internet outages and important devices going offline.
 
+### 🌦️ Weather and seasons
+A **weather card** in the overview (your location, from Open-Meteo, fetched by the server) with **storm and heat
+warnings** two hours ahead: outdoor access points, radio links and cameras are marked on the map, so a link that
+drops in a thunderstorm or a heatwave has an obvious reason. And, if you want them, **seasonal decorations** in the
+header - winter snow, summer sand, Christmas, New Year's Eve fireworks, and the Greek holidays (28 October,
+25 March, Easter). Off by default; they never cover the map or an alarm.
+
 ### 🗂️ Views
 The map (tree or free layout, vertical or horizontal, physical or by subnet, with a VLAN filter), an **overview**
 of cards, and an **inventory** of models, serial numbers and firmware - with devices of one model running different
@@ -158,6 +165,7 @@ Zabbix Super admins (by default) find a **Settings** button (the gear) on the ma
 | Logging | Log level and retention, recent events |
 | Device types | 11 categories (firewalls, ONT/modems, UPS/PDU, cameras/NVR, IP phones/PBX, printers, NAS, hypervisors, industrial/IoT, powerline/media converters, out-of-band management), how each is recognised, on/off |
 | Controllers & wireless | Omada, UniFi and GWN connections (read only, several at once), signal thresholds, the older UniFi connection |
+| Weather & seasons | Seasonal decorations (off, seasons, + Christmas and New Year, + Greek holidays); weather location; storm (rain, gusts) and heat warning limits |
 
 Every change is checked in the browser and on the server, recorded in the audit log, and the previous version is
 kept, so a mistake is one click away from being undone.
@@ -333,6 +341,9 @@ tail -n 5 /var/lib/spidermap/audit.log             # recent changes from the map
 | `spidermap_infer.py` | Device types, link-state and traffic correlation, suggested links |
 | `spidermap_wan.py` | The router's WAN (SNMP, UPnP), UniFi, outages and uptime |
 | `spidermap_speed.py` | Speed tests: Ookla, Cloudflare, Fast.com |
+| `spidermap_weather.py` | Weather from Open-Meteo, storm and heat warnings |
+| `spidermap_update.py` | `spidermap update`: check, download, back up, install, roll back |
+| `spidermap_standalone.py` | The standalone deployment (its own web server and users) |
 | `spidermap_gateway.py` | The template of `spidermap.php` |
 | `spidermap.html` | The map page (installed in the protected folder, served by `spidermap.php`) |
 | `spidermap_ports.py` | Switch port scanner (also usable alone: port report and HTML table) |

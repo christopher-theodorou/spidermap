@@ -32,7 +32,7 @@ sys.modules.setdefault("spidermap", sys.modules[__name__])   # the modules below
 import spidermap_zabbix as at  # noqa: E402
 import spidermap_ports as zp
 
-__version__ = "0.9.17"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
+__version__ = "0.9.18"   # keep in sync with PAGE_VERSION in spidermap.html and CHANGELOG.md
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # the code
 CONF_DIR, STATE_DIR = at.CONF_DIR, at.STATE_DIR              # see spidermap_zabbix.py: /etc/spidermap, /var/lib/spidermap/state
@@ -951,6 +951,7 @@ def full_scan(api, community=None, quiet=False):
                                                               ("last seen " + iso(d.get("last_seen")) if d.get("last_seen") else "never seen"))
         n = add("d-" + mac.replace(":", ""), parent, name=name, sub=sub, icon=TYPE_ICON.get(typ, "help-circle"),
                 logo=c.get("logo") or logo_for(name, webd), kind="device", type=typ, status=st, flags=flags,
+                outdoor=c.get("outdoor"),
                 details=det, ip=ip, mac=mac, url=web_url(name, ip, c.get("url", "")), zbx=h["hostid"] if h else "",
                 port=port_lbl, port_ref=port_ref, vendor=vendor, conn=conn or "-", vlan=mac_vlan.get(mac), via=via,
                 link="fiber" if port_ref and (next((p for p in sw[port_ref[0]]["ports"] if p["pid"] == port_ref[1]), None)
@@ -1650,7 +1651,7 @@ def apply_edits():
     return merged
 
 
-AUDIT_FIELDS = ("name", "type", "url", "pin", "important", "approved", "behind")
+AUDIT_FIELDS = ("name", "type", "url", "pin", "important", "approved", "behind", "outdoor")
 
 
 def _merge_edits(edits):
@@ -1663,18 +1664,21 @@ def _merge_edits(edits):
         for k, v in e.items():
             if k in ("by", "at"):
                 continue
-            if v in ("", None, False) and k not in ("important", "approved"):
+            if v in ("", None, False) and k not in ("important", "approved", "outdoor") or (k == "outdoor" and v is None):
                 d.pop(k, None)
             else:
                 d[k] = v
         for k_ in ("important", "approved"):
             if d.get(k_) is False:
                 d.pop(k_)
-        changes = {k: [before[k], d.get(k)] for k in AUDIT_FIELDS if (before[k] or None) != (d.get(k) or None)}
+        changes = {k: [before[k], d.get(k)] for k in AUDIT_FIELDS
+                   if (before[k] if k == "outdoor" else before[k] or None) != (d.get(k) if k == "outdoor" else d.get(k) or None)}
         if changes:
             by = e.get("by") or "?"
             audit("edit", by, {"mac": mac.lower(), "changes": changes})
-            what = ", ".join(f"{k} “{old or '-'}” → “{new or '-'}”" if k not in ("important", "approved") else
+            what = ", ".join(f"{k} “{old or '-'}” → “{new or '-'}”" if k not in ("important", "approved", "outdoor") else
+                             ("marked outdoor" if new else "marked indoor" if new is False else "outdoor: guessed from the name")
+                             if k == "outdoor" else
                              ("marked important" if new else "no longer important") if k == "important" else
                              ("approved" if new else "approval removed") for k, (old, new) in changes.items())
             evs.append(ev("audit", "info", f"{by} changed {d.get('name') or before['name'] or mac}: {what}",
@@ -1819,6 +1823,7 @@ def live_refresh(api):
             n["url"] = web_url(n["name"], n.get("ip", ""), c.get("url", ""))
             n["flags"] = [f for f in n["flags"] if f not in ("important", "unknown")] + \
                          (["important"] if c.get("important") else [])
+            n["outdoor"] = c.get("outdoor")
         save_json(os.path.join(DATA_DIR, DATA), data)
 
     # switch ports from Zabbix (status, traffic, errors), matched by the ifIndex in the item key
@@ -2221,7 +2226,8 @@ SETTINGS_OUT = "spidermap_settings.json"  # in DATA_DIR, for users with the sett
 ACCESS = "access.json"                    # in DATA_DIR, read by spidermap.php at every request
 SCAN_REQ, CANCEL_REQ, SETTINGS_REQ = (os.path.join(INBOX, f) for f in ("scan.request", "scan.cancel", "settings.request"))
 JOB_TIMEOUT = {"scan": 900, "live": 180}
-DEVICE_FIELDS = {"name": str, "type": str, "url": str, "pin": str, "important": bool, "approved": bool, "behind": str}
+DEVICE_FIELDS = {"name": str, "type": str, "url": str, "pin": str, "important": bool, "approved": bool, "behind": str,
+                 "outdoor": bool}
 ADVANCED_SETTINGS = {"port_media": dict, "aliases": dict, "manual_links": list, "core_switch": str, "speedtest_server": str}
 
 
@@ -2750,6 +2756,14 @@ def rt_loop(api):
     inet_start(inet, now())
     save_json(INET_FILE, inet)
     fails, gw_fails, loss_win = 0, 0, deque(maxlen=8)
+    import spidermap_weather as smwx
+    weather, wx_busy = smwx.Weather(lambda: requests.Session(), ev, add_events), {"on": False}
+
+    def wx_refresh(loc, limits):                  # in a thread: a slow weather server never delays the 5-second loop
+        try:
+            weather.refresh(loc, limits)
+        finally:
+            wx_busy["on"] = False
     usage = load_json(USAGE_FILE, {})
     if usage.get("schema") != 2:
         # before 0.3.0 two ports could share one counter baseline and add impossible amounts to the totals.
@@ -3045,6 +3059,11 @@ def rt_loop(api):
             zh = next((h for h in hosts if h["_role"] == "zabbix"), None)
             threading.Thread(target=run_speedtest, args=(api, zh, speed), daemon=True).start()
         add_events(evs)
+        if not wx_busy["on"]:
+            wx_busy["on"] = True
+            threading.Thread(target=wx_refresh, daemon=True, args=(S.get("weather_location", ""), {
+                "rain": S.get("weather_rain_mm", 8), "gust": S.get("weather_gust_kmh", 60),
+                "heat": S.get("weather_heat_c", 38)})).start()
         if t0 - last_save > 60:
             save_json(USAGE_FILE, usage)
             last_save = t0
@@ -3071,6 +3090,7 @@ def rt_loop(api):
                       "wan": usage.get("wan"), "wan_since": usage.get("wan_since"),
                       "since": usage.get("since")},
             "quality": quality,
+            "weather": weather.state, "decor": S.get("decorations", "off"),
             "hist": hist, "speedtest": {"running": speed["running"], "started": speed.get("started"),
                                         "error": speed.get("error", ""), "last": sh[-1] if sh else None,
                                         "history": sh[-12:]}})
@@ -3606,6 +3626,7 @@ def main():
     ap.add_argument("--uninstall-zabbix", action="store_true", help="remove SpiderMap's items, triggers, dashboards and map from Zabbix")
     ap.add_argument("--uninstall-web", action="store_true", help="remove SpiderMap's files from the Zabbix web folder (root)")
     ap.add_argument("--dry-run", action="store_true", help="with --uninstall-*: only show what would be removed")
+    ap.add_argument("--set-setting", metavar="KEY=VALUE", help="change one setting, checked like the Settings dialog does")
     ap.add_argument("--with-dashboards", action="store_true",
                     help="with --uninstall-zabbix: also SpiderMap's dashboards and map (otherwise only its items)")
     ap.add_argument("--version", action="version", version=f"SpiderMap {__version__}")
@@ -3617,6 +3638,17 @@ def main():
     if os.environ.get("SPIDERMAP_DEPLOYMENT") == "standalone" and (args.uninstall_zabbix or args.uninstall_web
                                                                      or args.install_web or args.install_service):
         raise SystemExit("Standalone deployment: install and update with docker compose (see docs/STANDALONE.md).")
+    if args.set_setting:
+        key, _, raw = args.set_setting.partition("=")
+        val = True if raw == "true" else False if raw == "false" else int(raw) if re.fullmatch(r"\d{1,6}", raw) else raw
+        cfg = load_json(DEVICES_FILE, None) or json.loads(json.dumps(DEFAULT_DEVICES))
+        clean, errors = validate_settings({key.strip(): val}, cfg.get("settings", {}))
+        if errors:
+            raise SystemExit("; ".join(errors))
+        cfg.setdefault("settings", {}).update(clean)
+        save_json(DEVICES_FILE, cfg)
+        print(f"  {key.strip()}: {clean.get(key.strip())}")
+        return
     if args.uninstall_web:                  # needs no token: it only removes files
         webd = webdir()
         if webd:

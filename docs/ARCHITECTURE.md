@@ -70,7 +70,8 @@ Both are optional: a switch without them is scanned as before.
 `live_refresh`), requests from the page, installation and the command line. Self-contained parts live in their own
 modules: `spidermap_settings.py` (the settings schema, validation, secrets, permissions), `spidermap_infer.py`
 (device types, link-state and traffic correlation, suggested links), `spidermap_wan.py` (router over SNMP / UPnP,
-UniFi, outages), `spidermap_speed.py` (speed tests) and `spidermap_gateway.py` (the `spidermap.php` template), next to
+UniFi, outages), `spidermap_speed.py` (speed tests), `spidermap_weather.py` (weather and storm / heat warnings,
+fetched in a thread of `rt_loop` every 30 minutes and published in `spidermap_rt.json` with the decorations setting) and `spidermap_gateway.py` (the `spidermap.php` template), next to
 `spidermap_ports.py` (SNMP port reading) and `spidermap_zabbix.py` (Zabbix API, SNMP access). The modules take a few
 helpers (`load_json`, `save_json`, `now`, `ping_stats`, ...) from `spidermap.py`, which imports them at its end, after
 those helpers exist; `sys.modules["spidermap"]` points at the running program, so this also works when it runs as a
