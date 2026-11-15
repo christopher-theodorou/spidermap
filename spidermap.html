@@ -447,7 +447,7 @@ body.decor-gr header{border-bottom:0;box-shadow:inset 0 -4px 0 #fff,inset 0 -8px
 <div id="toast" role="status"></div>
 <script>
 "use strict";
-const PAGE_VERSION = "0.9.18";
+const PAGE_VERSION = "0.9.19";
 const COL = 108, ROW = 150;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -841,7 +841,7 @@ async function sendToService(body, done) {
 /* ---------- settings dialog (design: the "SpiderMap v0.5.0 - Settings" artifact) ---------- */
 const SM = { open: false, tab: "Scans", draft: {}, errors: {}, saved: false };
 const SM_TABS = [["General", "settings"], ["Scans", "search"], ["SNMP", "stack-2"], ["Topology", "topology-star-3"],
-  ["Controllers & wireless", "wifi", "0.7"], ["Device types", "cpu"], ["Measurements", "chart-bar"], ["Security", "shield"], ["Logging", "file-text"]];
+  ["Controllers & wireless", "wifi", "0.7"], ["Device types", "cpu"], ["Measurements", "chart-bar"], ["Weather & seasons", "cloud"], ["Security", "shield"], ["Logging", "file-text"]];
 const smF = k => SETTINGS.schema.find(f => f.key === k);
 const smSame = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const smDirtyKeys = () => SETTINGS && SETTINGS.values ? Object.keys(SM.draft).filter(k => !smSame(SM.draft[k], SETTINGS.values[k])) : [];
@@ -1703,9 +1703,8 @@ const EL = {
   "Violent showers": "Ισχυρές μπόρες", "Snow showers": "Χιονοπτώσεις", "Thunderstorm": "Καταιγίδα", "Thunderstorm with hail": "Καταιγίδα με χαλάζι",
   "Merry Christmas!": "Καλά Χριστούγεννα!", "Happy Easter!": "Χριστός Ανέστη!", "28 October": "28η Οκτωβρίου", "25 March": "25η Μαρτίου",
   "Weather & seasons": "Καιρός & εποχές", "Decorations": "Διακοσμήσεις", "Seasonal decorations": "Εποχικές διακοσμήσεις",
-  "Seasons only (winter snow, summer sand)": "Μόνο εποχές (χιόνι τον χειμώνα, άμμος το καλοκαίρι)",
-  "Seasons + Christmas and New Year": "Εποχές + Χριστούγεννα και Πρωτοχρονιά",
-  "Seasons + Christmas, New Year and Greek holidays": "Εποχές + Χριστούγεννα, Πρωτοχρονιά και ελληνικές γιορτές",
+  "Seasons only": "Μόνο εποχές", "Seasons + Christmas, New Year": "Εποχές + Χριστούγεννα, Πρωτοχρονιά",
+  "All + Greek holidays": "Όλα + ελληνικές γιορτές",
   "Location": "Τοποθεσία", "Storm warning: heavy rain from": "Προειδοποίηση καταιγίδας: δυνατή βροχή από",
   "Storm warning: wind gusts from": "Προειδοποίηση καταιγίδας: ριπές ανέμου από", "Heat warning from": "Προειδοποίηση καύσωνα από",
   // header, legend, toolbar, map controls

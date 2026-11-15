@@ -4,6 +4,13 @@ All notable changes to SpiderMap. The format follows [Keep a Changelog](https://
 and versions follow [Semantic Versioning](https://semver.org/): while SpiderMap is `0.x`, a new **minor** version
 (0.3.0) adds features, a **patch** version (0.2.3) only fixes things.
 
+## [0.9.19] - 2026-11-15
+
+### Fixed
+- **The *Weather & seasons* tab was missing from Settings**, so the weather location and the decorations could not
+  be set. It is now between *Measurements* and *Security*. A new test checks that every group of settings has its tab.
+- The decorations' choices are shorter, so they fit the field.
+
 ## [0.9.18] - 2026-11-14
 
 ### Added

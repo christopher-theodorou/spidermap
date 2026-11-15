@@ -154,11 +154,10 @@ SETTINGS_SCHEMA = [
     # ---- Security
     # ---- Weather & seasons
     _S("decorations", "choice", "off", "Weather & seasons", "Decorations", "Seasonal decorations",
-       choices=[["off", "Off"], ["seasons", "Seasons only (winter snow, summer sand)"],
-                ["holidays", "Seasons + Christmas and New Year"],
-                ["holidays_gr", "Seasons + Christmas, New Year and Greek holidays"]],
-       help="Small decorations in the header, for everyone. They never cover devices or change alarm colours, and they "
-            "stay still for anyone whose system asks for reduced motion. Greek holidays: 28 October, 25 March, Easter."),
+       choices=[["off", "Off"], ["seasons", "Seasons only"], ["holidays", "Seasons + Christmas, New Year"],
+                ["holidays_gr", "All + Greek holidays"]],
+       help="Small decorations in the header, for everyone: winter snow, summer sand; Christmas and New Year's Eve; Greek holidays (28 October, 25 March, Easter). They never cover devices or change alarm colours, and they "
+            "stay still for anyone whose system asks for reduced motion."),
     _S("weather_location", "str", "", "Weather & seasons", "Weather", "Location",
        maxlen=80, help="A city (Athens, or Athens, GR) or coordinates (37.98, 23.73). Empty: no weather. SpiderMap's "
                        "server asks Open-Meteo every 30 minutes - the browsers contact nobody. The location is sent there."),

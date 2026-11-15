@@ -59,6 +59,16 @@ class Location(unittest.TestCase):
         self.assertEqual(st.validate_settings({"decorations": "holidays_gr", "weather_heat_c": 40})[1], [])
 
 
+class SettingsTabs(unittest.TestCase):
+    def test_every_schema_tab_is_in_the_dialog(self):
+        # 0.9.18 added the "Weather & seasons" settings but not its tab, so nobody could reach them
+        html = (ROOT / "spidermap.html").read_text(encoding="utf-8")
+        tabs_js = html[html.index("const SM_TABS = "):html.index("];", html.index("const SM_TABS = "))]
+        shown = set(re.findall(r'\["([^"]+)", "[^"]+"', tabs_js))
+        needed = {f["tab"] for f in st.SETTINGS_SCHEMA if f.get("tab")}
+        self.assertEqual(needed - shown, set())
+
+
 class Warnings(unittest.TestCase):
     def test_calm(self):
         self.assertEqual(wx.evaluate(forecast(), LIM, NOW), {})
